@@ -120,6 +120,46 @@ export const members = pgTable(
   ],
 );
 
+/**
+ * Sessions.
+ *
+ * Kept in the database rather than signed into a stateless cookie, for one
+ * reason that outweighs every argument the other way: **revocation has to be
+ * immediate**. When somebody is offboarded, or their role is cut, or a laptop
+ * is lost, "their token expires in an hour" is not an answer. A stateless
+ * token cannot be taken back; a row can be.
+ *
+ * The token itself is never stored. Only its hash is, exactly as with a
+ * password, so a leaked database backup does not hand the reader live
+ * sessions for every customer.
+ */
+export const sessions = pgTable(
+  "sessions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    memberId: uuid("member_id").notNull().references(() => members.id, { onDelete: "cascade" }),
+    workspaceId: uuid("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+    /** SHA-256 of the cookie value. The value itself exists only in the browser. */
+    tokenHash: text("token_hash").notNull(),
+    // Two clocks, because they answer different questions. Idle expiry ends
+    // an abandoned session on a shared machine; absolute expiry means no
+    // session lives forever no matter how often it is used.
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true }).notNull().defaultNow(),
+    absoluteExpiresAt: timestamp("absolute_expires_at", { withTimezone: true }).notNull(),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    /** Why it ended, for the "where you are signed in" screen. */
+    revokedReason: text("revoked_reason"),
+    ip: text("ip"),
+    userAgent: text("user_agent"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("sessions_token_hash_key").on(t.tokenHash),
+    index("sessions_member_idx").on(t.memberId),
+    index("sessions_sweep_idx").on(t.absoluteExpiresAt),
+  ],
+);
+
 /* ============================================================
    Brand, voices, masking
    ============================================================ */

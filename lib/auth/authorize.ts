@@ -19,6 +19,11 @@ export interface Actor {
   deactivatedAt?: Date | null;
 }
 
+/** "An admin", not "a admin". A message a customer reads should read. */
+function article(role: string): string {
+  return /^[aeiou]/i.test(role) ? "An" : "A";
+}
+
 export class ForbiddenError extends Error {
   readonly status = 403;
 
@@ -36,7 +41,7 @@ export class ForbiddenError extends Error {
         ? "This account has been deactivated."
         : detail.reason === "wrong-workspace"
           ? "This account does not belong to that workspace."
-          : `A ${detail.role} may not ${detail.permission}.`,
+          : `${article(detail.role)} ${detail.role} may not ${detail.permission}.`,
     );
     this.name = "ForbiddenError";
   }

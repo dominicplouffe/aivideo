@@ -3,21 +3,24 @@ import { getDb, isDatabaseConfigured } from "@/lib/db/client";
 import * as s from "@/lib/db/schema";
 import type { Actor } from "./authorize";
 import type { Role } from "./roles";
+import { readSessionCookie } from "./cookies";
+import { verify } from "./sessions";
 
 /**
  * Resolving who is making a request.
  *
- * Identity itself — SAML, SCIM, session cookies — is the next piece of work
- * and belongs behind WorkOS. What exists here is the *seam*: one function
- * that every route calls to get an `Actor`, so that when real sessions
- * arrive there is a single place to change and no route handler that
- * quietly trusts a header.
+ * One function that every route calls to get an `Actor`. It tries the
+ * session cookie first — the real path — and falls back to a development
+ * header that is refused outright in production.
  *
- * Until then it resolves a member from the database by email. The header it
- * reads is accepted **only** outside production, and the check is a hard
- * throw rather than a silent fallback, because a development convenience
- * that survives into production is how an impersonation header becomes an
- * authentication bypass.
+ * That header is refused with a throw rather than ignored, because a
+ * development convenience which survives into production is how an
+ * impersonation header becomes an authentication bypass, and a bypass that
+ * fails loudly is one somebody notices.
+ *
+ * Single sign-on is the piece still missing: WorkOS issues the identity, and
+ * `signIn` below is where it lands. Everything downstream of that — the
+ * session row, the cookie, revocation — already works.
  */
 
 export class UnauthenticatedError extends Error {
@@ -29,6 +32,14 @@ export class UnauthenticatedError extends Error {
 }
 
 const DEV_ACTOR_HEADER = "x-demoriff-actor";
+
+const REASONS: Record<string, string> = {
+  revoked: "This session was signed out. Sign in again.",
+  expired: "This session has expired. Sign in again.",
+  idle: "You were signed out after a period of inactivity.",
+  deactivated: "This account has been deactivated. Contact your workspace administrator.",
+  "member-gone": "This account no longer exists.",
+};
 
 export interface ResolveOptions {
   /** Restricts the lookup, so a member of another workspace is not found. */
@@ -47,14 +58,28 @@ export async function resolveActor(
   request: Request,
   options: ResolveOptions = {},
 ): Promise<Actor> {
-  const email = actorEmail(request);
-  if (!email) throw new UnauthenticatedError();
-
   if (!isDatabaseConfigured()) {
     throw new UnauthenticatedError(
       "Authentication requires a database; this deployment is running on fixtures.",
     );
   }
+
+  const verdict = await verify(readSessionCookie(request));
+  if (verdict.ok) {
+    if (options.workspaceId && verdict.actor.workspaceId !== options.workspaceId) {
+      throw new UnauthenticatedError("That session does not belong to this workspace.");
+    }
+    return verdict.actor;
+  }
+  if (verdict.reason !== "unknown") {
+    // A session that existed and no longer works deserves a reason. "Signed
+    // out because your account was deactivated" sends someone to their
+    // administrator; a bare 401 sends them to support.
+    throw new UnauthenticatedError(REASONS[verdict.reason]);
+  }
+
+  const email = actorEmail(request);
+  if (!email) throw new UnauthenticatedError();
 
   const conditions = [eq(s.members.email, email)];
   if (options.workspaceId) conditions.push(eq(s.members.workspaceId, options.workspaceId));

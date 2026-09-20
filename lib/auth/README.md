@@ -29,11 +29,68 @@ workspace check lives inside it, not in the route handlers, because "a member
 of workspace A acting on workspace B's project by passing its id" is a
 mistake made by omission — so it belongs where omitting it is impossible.
 
-Identity itself is the next piece of work and belongs behind WorkOS.
-`lib/auth/session.ts` is the seam it will slot into. Until then it resolves a
-member from a header, and refuses that header in production *loudly* rather
-than ignoring it: a development convenience that survives into production is
-how an impersonation header becomes an authentication bypass.
+`resolveActor` tries the session cookie first and falls back to a development
+header that is refused in production **loudly** rather than ignored — a
+convenience that survives into production is how an impersonation header
+becomes an authentication bypass, and one that fails noisily is one somebody
+notices. Single sign-on is the piece still missing: WorkOS issues the
+identity and `POST /api/auth` is where it lands. Everything downstream of
+that already works.
+
+## Sessions are rows
+
+Database-backed, not a stateless signed token, for one reason that outweighs
+every argument the other way: **revocation has to be immediate**. When
+somebody is offboarded, or their role is cut, or a laptop is lost, "their
+token expires within the hour" is not an answer. A stateless token cannot be
+taken back; a row can.
+
+The token is returned once and never stored — only its SHA-256 is kept,
+exactly as with a password, so a leaked backup gives the reader a list of
+hashes rather than a live session for every customer.
+
+Two clocks, because they answer different questions: idle expiry ends an
+abandoned session on a shared machine, and an absolute ceiling means no
+session lives forever however often it is used. `lastSeenAt` is only written
+when it is stale, so an active tab polling every few seconds is not a
+database write per request.
+
+Rotation on sign-in closes session fixation — a token planted in a victim's
+browser is dead the moment they authenticate — and rotation on privilege
+change stops a token captured before a promotion from being useful after it.
+
+### What offboarding actually does
+
+`lib/db/repositories/members.ts` exists so three things cannot be done apart:
+check the actor may do it, make the change, and **end the affected person's
+live sessions**. The last is the one that gets forgotten and the one that
+matters. Removing somebody while their browser keeps a valid session for
+twelve hours is not removing them; demoting an admin who still holds an admin
+session is not demoting them.
+
+Members are deactivated, never deleted: the audit trail references the row,
+and a departed colleague's name vanishing from every entry they ever wrote is
+not a feature. And a workspace can never be left without an active owner —
+that state has nobody who can change billing, revoke a voice or delete it, so
+it must not be reachable by a button.
+
+## The cookie, and the guard around it
+
+`__Host-` prefix (a subdomain cannot then set the parent's session cookie),
+HttpOnly (an XSS becomes a bad day rather than an account takeover),
+`SameSite=Lax` (Strict would mean a link from email arrives signed out, and
+Lax still withholds the cookie from cross-site writes), and **no Max-Age** —
+the lifetime lives in the database where it can be shortened. A cookie that
+outlives its row merely fails; one that outlives a revocation would be a
+security bug.
+
+`proxy.ts` refuses cross-origin writes for every API route. The first version
+of that check lived inside the sign-in route, and a cross-origin `PATCH` to
+the billing route went straight through, because that route had not been told
+to call it. A guard each handler must remember is a guard that will be
+forgotten — the same lesson the workspace check in `authorize` already
+learned. It is the second line: `SameSite=Lax` is the first, and it depends
+entirely on the browser getting it right.
 
 ## The audit log
 

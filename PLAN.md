@@ -136,7 +136,12 @@ actually evaluate instead of returning an empty region list that reads like
 
 ## Phase 8 — Auth, billing, governance
 
-1. WorkOS for SAML SSO and SCIM; enforced domain capture.
+1. **WorkOS for SAML SSO and SCIM.** The session layer beneath it is ~~done~~:
+   database-backed sessions with hashed tokens, idle and absolute expiry,
+   rotation on sign-in and privilege change, and offboarding that ends live
+   sessions at once. Cross-origin writes are refused in `proxy.ts` for every
+   API route. What remains is the identity provider itself — the assertion
+   lands in `POST /api/auth`, which already does everything after it.
 2. **Stripe.** The metering engine is ~~done~~: a usage ledger in seconds,
    idempotent against queue retries, top-ups that carry across periods,
    proration by the day, the 80% notice fired once, and a hard stop that is
