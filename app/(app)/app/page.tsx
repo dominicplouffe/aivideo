@@ -4,9 +4,10 @@ import { PageHeader, Panel, StatTile, StatusPill, Avatar, Sparkline } from "@/co
 import { Button } from "@/components/ui/Button";
 import { Icon, type IconName } from "@/components/ui/Icon";
 import {
-  projects, activity, workspace, currentUser, members,
+  activity, workspace, currentUser, members,
   viewsSeries, localeMatrix,
 } from "@/lib/app-data";
+import { getProjects } from "@/lib/data";
 import { relativeTime, formatDuration, formatNumber, cn } from "@/lib/utils";
 
 export const metadata: Metadata = { title: "Home" };
@@ -18,7 +19,11 @@ const quickActions: { label: string; hint: string; href: string; icon: IconName 
   { label: "Translate a project", hint: "34 languages, no extra minutes", href: "/app/localization", icon: "globe" },
 ];
 
-export default function DashboardPage() {
+export default async function DashboardPage() {
+  // From the data access layer, so every card on this page links to a page
+  // that can find what it names.
+  const projects = await getProjects();
+
   const recent = [...projects].sort(
     (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
   );

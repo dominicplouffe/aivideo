@@ -59,7 +59,12 @@ export function Reveal({
     <As
       ref={ref}
       data-reveal=""
-      className={className}
+      // `min-w-0` is not decoration. A Reveal is almost always a grid or
+      // flex item wrapping a card, and those default to `min-width: auto` —
+      // which means one long unbreakable string inside the card pushes the
+      // whole track wider than the viewport and the page scrolls sideways
+      // on a phone. Every caller would otherwise have to remember.
+      className={cn("min-w-0", className)}
       style={delay ? ({ "--reveal-delay": `${delay}ms` } as React.CSSProperties) : undefined}
     >
       {children}

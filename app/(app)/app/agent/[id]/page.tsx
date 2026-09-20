@@ -37,7 +37,10 @@ export default async function AgentRunPage({ params }: { params: Promise<{ id: s
       />
 
       <div className="grid gap-5 px-4 py-6 md:px-8 lg:grid-cols-[minmax(0,1fr)_340px]">
-        <div className="space-y-5">
+        {/* `min-w-0` on both columns: a grid item defaults to
+            `min-width: auto`, so the long URLs in the trail below widen the
+            whole track instead of truncating inside it. */}
+        <div className="min-w-0 space-y-5">
           {run.status === "awaiting_approval" ? (
             <ApprovalPanel
               runId={run.id}
@@ -106,7 +109,7 @@ export default async function AgentRunPage({ params }: { params: Promise<{ id: s
           </Panel>
         </div>
 
-        <div className="space-y-5">
+        <div className="min-w-0 space-y-5">
           <Panel title="Boundary">
             <div className="space-y-4 px-5 py-5">
               <div>

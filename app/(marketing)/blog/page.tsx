@@ -105,13 +105,15 @@ export default function BlogIndexPage() {
               No product announcements, no drip sequence. Research, craft notes and the occasional
               uncomfortable finding from the data.
             </p>
-            <form className="mt-2 flex w-full max-w-sm gap-2" action="/blog">
+            {/* Wraps below 360px of available width: a submit button pushed
+                off the edge is a form nobody can send. */}
+            <form className="mt-2 flex w-full max-w-sm flex-wrap gap-2" action="/blog">
               <input
                 type="email"
                 required
                 placeholder="you@company.com"
                 aria-label="Email address"
-                className="h-11 flex-1 rounded-xl border border-[var(--line)] bg-ink-900 px-4 text-[0.875rem] text-fg placeholder:text-fg-faint focus:border-iris-500/50 focus:outline-none"
+                className="h-11 min-w-0 flex-1 basis-40 rounded-xl border border-[var(--line)] bg-ink-900 px-4 text-[0.875rem] text-fg placeholder:text-fg-faint focus:border-iris-500/50 focus:outline-none"
               />
               <Button type="submit" size="md">Subscribe</Button>
             </form>

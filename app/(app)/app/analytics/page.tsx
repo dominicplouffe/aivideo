@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
-import { getRetentionCurve } from "@/lib/data";
-import { projects } from "@/lib/app-data";
+import { getRetentionCurve, getProjects } from "@/lib/data";
 import { PageHeader } from "@/components/app/Shared";
 import { AnalyticsView } from "@/components/app/AnalyticsView";
 import { Button } from "@/components/ui/Button";
@@ -9,6 +8,10 @@ import { Icon } from "@/components/ui/Icon";
 export const metadata: Metadata = { title: "Analytics" };
 
 export default async function AnalyticsPage() {
+  // From the data access layer, so the ids here are the ids the pages this
+  // links to will look up.
+  const projects = await getProjects();
+
   // Measured curves where there are any, fixtures otherwise. Fetched here
   // rather than in the view because reading the database is a server's job
   // and the view is a client component — the alternative is an endpoint

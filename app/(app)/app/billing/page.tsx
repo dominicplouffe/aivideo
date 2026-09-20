@@ -1,8 +1,9 @@
 import type { Metadata } from "next";
+import { getProjects } from "@/lib/data";
 import { PageHeader, Panel, StatTile } from "@/components/app/Shared";
 import { Button } from "@/components/ui/Button";
 import { Icon } from "@/components/ui/Icon";
-import { workspace, projects } from "@/lib/app-data";
+import { workspace } from "@/lib/app-data";
 import { plans } from "@/lib/pricing";
 import { cn } from "@/lib/utils";
 
@@ -23,7 +24,13 @@ const usageBreakdown = [
   { label: "Social clips", value: 214, unit: "clips", billed: false },
 ];
 
-export default function BillingPage() {
+export default async function BillingPage() {
+  // From the data access layer, so the ids on this page are the ids the
+  // pages it links to will look up. When the list read fixtures and the
+  // detail pages read Postgres — or the other way round — every link on the
+  // screen was a 404 waiting for somebody to click it.
+  const projects = await getProjects();
+
   const pct = (workspace.minutes.used / workspace.minutes.total) * 100;
   const current = plans.find((p) => p.name === workspace.plan)!;
 
