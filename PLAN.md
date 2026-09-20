@@ -199,14 +199,31 @@ actually evaluate instead of returning an empty region list that reads like
    decision on the vendor's side. See `lib/connectors/README.md` for what
    each vendor gets wrong, because each one is wrong in its own way.
 
-## Phase 10 — Riff Agent
+## Phase 10 — Riff Agent ✅
 
-1. Environment allowlist, scoped rotatable credentials, isolated browser
-   sessions.
-2. Outline-first flow — nothing records until a human approves the outline.
-3. Full run audit: brief, every action, output, approver, timestamp.
-4. **The approval gate stays non-optional.** Nothing the agent produces reaches
-   a customer-facing surface without a person saying yes.
+1. ~~Environment allowlist, scoped rotatable credentials, isolated browser
+   sessions.~~ **Done.** Origins not domains, no http downgrade, no implied
+   subdomains, and a wildcard that cannot be walked past with
+   `acme.com.evil.example`. Enforced on *every* request rather than only on
+   navigations — a page that can `fetch` anywhere can exfiltrate what it
+   just saw — plus a resolved-address check per navigation, because a name
+   resolves to whatever its owner says. Verified in a real Chromium against
+   an unapproved origin that was up and answering. Credentials are sealed,
+   bound to one exact origin, checked against where the browser actually is
+   rather than where the plan said it would be, and rotate in place.
+2. ~~Outline-first flow — nothing records until a human approves the
+   outline.~~ **Done**, and the gate is the state machine rather than a
+   check: `recording` has exactly one legal predecessor, and there is no
+   edge from `awaiting_approval` to it. The approver cannot be the
+   requester, an approval needs a person's member id, and the outline is
+   hashed at approval so a plan edited afterwards fails closed.
+3. ~~Full run audit: brief, every action, output, approver, timestamp.~~
+   **Done**, refusals included — "what did it try to do" is the question a
+   reviewer asks, and an agent that silently drops a refused navigation
+   looks identical to one that never attempted it.
+4. **The approval gate stays non-optional.** Nothing the agent produces
+   reaches a customer-facing surface without a person saying yes. See
+   `lib/agent/README.md`.
 
 ---
 

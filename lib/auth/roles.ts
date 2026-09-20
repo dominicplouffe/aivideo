@@ -31,6 +31,10 @@ export const PERMISSIONS = [
   "project.comment",
   "project.view",
   "render.submit",
+  // The agent
+  "agent.run",
+  "agent.approve",
+  "agent.credentials.manage",
   // Brand and voice
   "brand.edit",
   "voice.clone",
@@ -69,6 +73,7 @@ const MATRIX: Record<Role, readonly Permission[]> = {
     "recording.create", "recording.delete",
     "project.create", "project.edit", "project.delete", "project.publish",
     "project.comment", "project.view", "render.submit",
+    "agent.run", "agent.approve", "agent.credentials.manage",
     "brand.edit", "voice.clone",
     "share.create", "share.revoke", "analytics.view",
     "member.invite", "member.remove", "member.role.change",
@@ -84,16 +89,23 @@ const MATRIX: Record<Role, readonly Permission[]> = {
     "recording.create", "recording.delete",
     "project.create", "project.edit", "project.delete",
     "project.comment", "project.view", "render.submit",
+    "agent.run",
     "brand.edit",
     "share.create", "analytics.view",
     // Not project.publish: making and approving are different jobs, and a
     // draft holding production data must not reach a public link on one
     // person's say-so.
     // Not share.revoke: revoking someone else's link is a workspace action.
+    // Not agent.approve, for the same reason as project.publish — and more
+    // sharply: an agent run drives a browser with real credentials, and the
+    // person who asked for it is the last person who should be the only one
+    // to check it. Not agent.credentials.manage: storing a password the
+    // agent will type is a workspace decision.
   ],
 
   reviewer: [
     "project.view", "project.comment", "project.publish",
+    "agent.approve",
     "share.create", "analytics.view",
     // A reviewer approves and cannot edit. That is the whole point of the
     // role: the approval means something because the approver did not also

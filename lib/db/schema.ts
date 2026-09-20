@@ -29,6 +29,14 @@ export const connectorVendorEnum = pgEnum("connector_vendor", [
 export const connectorLinkStateEnum = pgEnum("connector_link_state", [
   "in_sync", "local_ahead", "remote_ahead", "diverged", "unlinked",
 ]);
+export const agentRunStatusEnum = pgEnum("agent_run_status", [
+  "drafted", "outlining", "awaiting_approval", "approved", "recording",
+  "recorded", "failed", "cancelled",
+]);
+export const agentActionKindEnum = pgEnum("agent_action_kind", [
+  "navigate", "click", "type", "select", "wait", "scroll", "assert",
+  "screenshot", "refused",
+]);
 
 /* ============================================================
    Workspaces and people
@@ -277,6 +285,118 @@ export const siemDestinations = pgTable(
   (t) => [
     uniqueIndex("siem_destinations_workspace_name_key").on(t.workspaceId, t.name),
     index("siem_destinations_workspace_idx").on(t.workspaceId),
+  ],
+);
+
+/* ============================================================
+   The Riff Agent
+   ============================================================ */
+
+/**
+ * One agent run.
+ *
+ * The status column is the approval gate. It is not a flag the UI reads and
+ * respects — it is the state machine, and `recording` is unreachable except
+ * from `approved`, which is unreachable except by a named person writing
+ * their id into `approvedBy`. An agent that can put itself into `recording`
+ * is an agent that records whatever it decided to.
+ *
+ * `allowedOrigins` is a property of the run, frozen when the outline is
+ * approved. Reading it from workspace settings at action time would mean an
+ * approval granted against one set of origins could be executed against
+ * another.
+ */
+export const agentRuns = pgTable(
+  "agent_runs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workspaceId: uuid("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+    projectId: uuid("project_id").references(() => projects.id, { onDelete: "set null" }),
+    /** What somebody asked for, verbatim. */
+    brief: text("brief").notNull(),
+    status: agentRunStatusEnum("status").notNull().default("drafted"),
+    /** The plan, as steps. Nothing records until this is approved. */
+    outline: jsonb("outline").$type<{ ordinal: number; intent: string; url?: string }[]>(),
+    /** Frozen at approval. The agent may reach these origins and no others. */
+    allowedOrigins: jsonb("allowed_origins").$type<string[]>().notNull().default(sql`'[]'::jsonb`),
+    requestedBy: uuid("requested_by").references(() => members.id, { onDelete: "set null" }),
+    requestedByEmail: text("requested_by_email"),
+    /** Null until a person approves. Nothing records while it is null. */
+    approvedBy: uuid("approved_by").references(() => members.id, { onDelete: "set null" }),
+    approvedByEmail: text("approved_by_email"),
+    approvedAt: timestamp("approved_at", { withTimezone: true }),
+    /** The outline as approved, so a later edit cannot rewrite what was agreed. */
+    approvedOutlineHash: text("approved_outline_hash"),
+    recordingId: uuid("recording_id").references(() => recordings.id, { onDelete: "set null" }),
+    error: text("error"),
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("agent_runs_workspace_idx").on(t.workspaceId, t.createdAt),
+    index("agent_runs_status_idx").on(t.status),
+  ],
+);
+
+/**
+ * Every action the agent took, in order.
+ *
+ * Including the ones it was refused. A run audit that records only what
+ * happened cannot answer the question a security reviewer actually asks —
+ * "what did it *try* to do?" — and an agent that quietly drops a refused
+ * navigation looks identical to one that never attempted it.
+ */
+export const agentActions = pgTable(
+  "agent_actions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    runId: uuid("run_id").notNull().references(() => agentRuns.id, { onDelete: "cascade" }),
+    ordinal: integer("ordinal").notNull(),
+    kind: agentActionKindEnum("kind").notNull(),
+    /** The step from the approved outline this action belongs to. */
+    outlineOrdinal: integer("outline_ordinal"),
+    url: text("url"),
+    target: text("target"),
+    /** Never the value typed into a field. See lib/agent/README.md. */
+    detail: jsonb("detail").$type<Record<string, unknown>>(),
+    /** Set when the action was refused, with why. */
+    refusedReason: text("refused_reason"),
+    atMs: integer("at_ms").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("agent_actions_run_ordinal_key").on(t.runId, t.ordinal),
+    index("agent_actions_run_idx").on(t.runId),
+  ],
+);
+
+/**
+ * A credential the agent may use, scoped to one environment.
+ *
+ * Sealed, never returned, and rotatable without touching anything else.
+ * `lastUsedAt` exists so an unused credential is visible as one — the most
+ * common way these leak is that nobody notices the demo account for a
+ * product nobody demos any more still works.
+ */
+export const agentCredentials = pgTable(
+  "agent_credentials",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workspaceId: uuid("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+    label: text("label").notNull(),
+    /** The exact origin this may be presented to, and no other. */
+    origin: text("origin").notNull(),
+    username: text("username"),
+    secretSealed: text("secret_sealed").notNull(),
+    rotatedAt: timestamp("rotated_at", { withTimezone: true }),
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  },
+  (t) => [
+    uniqueIndex("agent_credentials_workspace_label_key").on(t.workspaceId, t.label),
+    index("agent_credentials_workspace_idx").on(t.workspaceId),
   ],
 );
 

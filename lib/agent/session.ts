@@ -1,0 +1,132 @@
+import type { Browser, BrowserContext, Page, Route } from "playwright";
+import {
+  describeAllowRefusal, resolvesPublicly, withinAllowlist, type AllowRefusal,
+} from "./allowlist";
+
+/**
+ * The agent's browser session.
+ *
+ * Isolated means three specific things, and each one is a decision somebody
+ * would otherwise make the other way for convenience:
+ *
+ *  1. **A fresh context per run, never a persistent profile.** No cookie,
+ *     no `localStorage` entry and no service worker survives a run. Two runs
+ *     for two customers cannot see each other's session, and a run cannot
+ *     inherit one from a previous run that ended badly.
+ *  2. **Every request passes the allowlist, not just navigations.** A page
+ *     on an approved origin can `fetch` anywhere, and a page that can fetch
+ *     anywhere is a page that can exfiltrate whatever it just saw. The
+ *     interception is at `context.route("**")`, which is the only level
+ *     where subresources, XHR, and fetch all arrive.
+ *  3. **Downloads are refused and storage is not persisted.** The agent is
+ *     here to record a screen, not to collect files.
+ *
+ * Refusals are aborted *and* reported. The caller writes them to the run's
+ * trail, because "what did it try to do" is the question a reviewer asks and
+ * a silently aborted request cannot answer it.
+ */
+
+export interface SessionOptions {
+  allowedOrigins: string[];
+  viewport?: { width: number; height: number };
+  /** Called for every refused request, so the run audit can hold it. */
+  onRefusal?: (event: { url: string; reason: AllowRefusal; resourceType: string }) => void;
+  /** Injectable so allowlist tests need no DNS. */
+  resolve?: (hostname: string) => Promise<string[]>;
+}
+
+export interface AgentSession {
+  context: BrowserContext;
+  page: Page;
+  /** Navigates, with the address check that a string match cannot do. */
+  goto(url: string): Promise<{ ok: true } | { ok: false; reason: AllowRefusal; message: string }>;
+  close(): Promise<void>;
+}
+
+/** Schemes the browser serves itself. Nothing leaves the machine for these. */
+const INTERNAL = /^(about|data|blob|chrome-extension):/;
+
+export async function openSession(browser: Browser, options: SessionOptions): Promise<AgentSession> {
+  const context = await browser.newContext({
+    viewport: options.viewport ?? { width: 1440, height: 900 },
+    // No storage state is loaded and none is saved. A run starts signed out
+    // of everything and leaves nothing behind.
+    storageState: undefined,
+    acceptDownloads: false,
+    // A recording of a customer's product is a recording of their
+    // customers; a browser that volunteers a location or a camera during one
+    // is a browser doing something nobody asked for.
+    permissions: [],
+    serviceWorkers: "block",
+  });
+
+  await context.route("**/*", async (route: Route) => {
+    const url = route.request().url();
+
+    if (INTERNAL.test(url)) {
+      await route.continue();
+      return;
+    }
+
+    const verdict = withinAllowlist(url, options.allowedOrigins);
+    if (verdict.ok) {
+      await route.continue();
+      return;
+    }
+
+    options.onRefusal?.({
+      url,
+      reason: verdict.reason,
+      resourceType: route.request().resourceType(),
+    });
+    // Aborted rather than failed with a status: a 403 would be rendered by
+    // the page and could be mistaken for the site's own answer.
+    await route.abort("blockedbyclient");
+  });
+
+  const page = await context.newPage();
+
+  return {
+    context,
+    page,
+
+    async goto(url: string) {
+      const shape = withinAllowlist(url, options.allowedOrigins);
+      if (!shape.ok) {
+        options.onRefusal?.({ url, reason: shape.reason, resourceType: "document" });
+        return { ok: false, reason: shape.reason, message: describeAllowRefusal(shape.reason) };
+      }
+
+      // The second check, and the one a string match cannot make: an
+      // approved name that resolves to 127.0.0.1 is an approved entry
+      // pointing at our own network.
+      const address = await resolvesPublicly(url, { resolve: options.resolve });
+      if (!address.ok) {
+        options.onRefusal?.({ url, reason: address.reason, resourceType: "document" });
+        return { ok: false, reason: address.reason, message: describeAllowRefusal(address.reason) };
+      }
+
+      await page.goto(url, { waitUntil: "domcontentloaded" });
+
+      // Where it *ended up*. A redirect chain can leave the allowlist, and
+      // the interceptor blocks the subresources but the document itself
+      // arrives before anything can be asked about it.
+      const landed = withinAllowlist(page.url(), options.allowedOrigins);
+      if (!landed.ok) {
+        options.onRefusal?.({ url: page.url(), reason: landed.reason, resourceType: "redirect" });
+        await page.goto("about:blank");
+        return {
+          ok: false,
+          reason: landed.reason,
+          message: `That address redirected to ${new URL(page.url()).origin}, which is not on this run's allowlist.`,
+        };
+      }
+
+      return { ok: true };
+    },
+
+    async close() {
+      await context.close();
+    },
+  };
+}

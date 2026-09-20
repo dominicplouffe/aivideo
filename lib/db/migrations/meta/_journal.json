@@ -71,6 +71,13 @@
       "when": 1789939836544,
       "tag": "0009_connectors",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1789940448893,
+      "tag": "0010_agent",
+      "breakpoints": true
     }
   ]
 }
