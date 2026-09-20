@@ -1,5 +1,5 @@
 import { claim, complete, fail } from "@/lib/jobs/queue";
-import { deliverWebhookJob } from "./outbound";
+import { deliverWebhookJob, type DeliveryOptions } from "./outbound";
 
 /**
  * The webhook delivery worker.
@@ -10,10 +10,8 @@ import { deliverWebhookJob } from "./outbound";
  * comfortably inside the queue's lease.
  */
 
-export interface WebhookWorkerOptions {
+export interface WebhookWorkerOptions extends DeliveryOptions {
   workerId: string;
-  secret?: string;
-  fetchImpl?: typeof fetch;
 }
 
 export interface WebhookOutcome {
@@ -30,10 +28,8 @@ export async function processWebhookOne(
   if (!job) return null;
 
   try {
-    const outcome = await deliverWebhookJob(job, {
-      secret: options.secret,
-      fetchImpl: options.fetchImpl,
-    });
+    const { workerId: _workerId, ...delivery } = options;
+    const outcome = await deliverWebhookJob(job, delivery);
     await complete(job.id, options.workerId, {
       httpStatus: outcome.status,
       deliveredAt: new Date().toISOString(),

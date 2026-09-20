@@ -161,6 +161,30 @@ export async function getProjectBySlug(
  * that fails silently by returning the wrong customer's data rather than an
  * error anyone notices.
  */
+/** Every project in a workspace, by id rather than slug. */
+export async function listProjectsForWorkspace(workspaceId: string): Promise<Project[]> {
+  const rows = await getDb()
+    .select()
+    .from(s.projects)
+    .where(and(eq(s.projects.workspaceId, workspaceId), isNull(s.projects.deletedAt)))
+    .orderBy(desc(s.projects.updatedAt));
+  return hydrate(rows);
+}
+
+/** A project by slug, within a workspace identified by id. */
+export async function getProjectBySlugForWorkspace(
+  workspaceId: string,
+  slug: string,
+): Promise<Project | null> {
+  const rows = await getDb()
+    .select()
+    .from(s.projects)
+    .where(and(eq(s.projects.workspaceId, workspaceId), eq(s.projects.slug, slug)))
+    .limit(1);
+  const [project] = await hydrate(rows);
+  return project ?? null;
+}
+
 export async function getProjectById(workspaceId: string, id: string): Promise<Project | null> {
   const rows = await getDb()
     .select()

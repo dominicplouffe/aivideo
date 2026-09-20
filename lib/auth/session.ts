@@ -106,7 +106,11 @@ function actorEmail(request: Request): string | null {
   const header = request.headers.get(DEV_ACTOR_HEADER);
   if (!header) return null;
 
-  if (process.env.NODE_ENV === "production" && process.env.DEMORIFF_ALLOW_ACTOR_HEADER !== "yes") {
+  // Unconditional, with no flag to switch it off. An escape hatch here buys
+  // nothing — the header already works in every non-production environment —
+  // so its only possible effect is to weaken production, and it left the
+  // README describing a guard the code did not have.
+  if (process.env.NODE_ENV === "production") {
     // A development convenience that survives into production is how an
     // impersonation header becomes an authentication bypass. Refusing is
     // louder than ignoring, and this is a bug worth being loud about.

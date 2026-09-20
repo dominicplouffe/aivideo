@@ -13,6 +13,9 @@ import {
  * environments — a signature bug here would otherwise only surface in
  * production.
  */
+/** Upload ids are minted with `randomUUID()`; nothing else is one. */
+const UPLOAD_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 export class LocalStorage implements StorageAdapter {
   readonly name = "local";
 
@@ -35,7 +38,20 @@ export class LocalStorage implements StorageAdapter {
     return full;
   }
 
+  /**
+   * The directory holding an in-flight upload's parts.
+   *
+   * `uploadId` and the part numbers become path segments, so both are checked
+   * rather than trusted. Today every caller is internal and passes back a
+   * `randomUUID()` this class minted — but "the only caller is trusted" is a
+   * property of the code as it stands, not of the method, and the first HTTP
+   * handler that resumes an upload will hand these straight through from a
+   * request body. Checking here means that handler cannot get it wrong.
+   */
   private partsDir(key: StorageKey, uploadId: string): string {
+    if (!UPLOAD_ID.test(uploadId)) {
+      throw new Error(`Invalid upload id: ${uploadId}`);
+    }
     return path.join(this.root, ".uploads", uploadId, encodeURIComponent(resolveKey(key)));
   }
 
@@ -66,6 +82,11 @@ export class LocalStorage implements StorageAdapter {
 
     const chunks: Buffer[] = [];
     for (const part of ordered) {
+      // A part number is a filename. `../../etc/passwd` is a perfectly good
+      // JSON number field until it is a path segment.
+      if (!Number.isInteger(part.partNumber) || part.partNumber < 1) {
+        throw new Error(`Invalid part number: ${part.partNumber}`);
+      }
       const buf = await fs.readFile(path.join(dir, String(part.partNumber)));
       chunks.push(buf);
     }
@@ -74,7 +95,7 @@ export class LocalStorage implements StorageAdapter {
     const target = this.abs(key);
     await fs.mkdir(path.dirname(target), { recursive: true });
     await fs.writeFile(target, body);
-    await fs.rm(path.join(this.root, ".uploads", uploadId), { recursive: true, force: true });
+    await fs.rm(this.uploadDir(uploadId), { recursive: true, force: true });
 
     return {
       key: resolveKey(key),
@@ -85,7 +106,16 @@ export class LocalStorage implements StorageAdapter {
   }
 
   async abortUpload(_key: StorageKey, uploadId: string): Promise<void> {
-    await fs.rm(path.join(this.root, ".uploads", uploadId), { recursive: true, force: true });
+    // Recursive and forced: the id is checked first, because this is the one
+    // method here that deletes a whole tree.
+    await fs.rm(this.uploadDir(uploadId), { recursive: true, force: true });
+  }
+
+  private uploadDir(uploadId: string): string {
+    if (!UPLOAD_ID.test(uploadId)) {
+      throw new Error(`Invalid upload id: ${uploadId}`);
+    }
+    return path.join(this.root, ".uploads", uploadId);
   }
 
   async put(key: StorageKey, body: Uint8Array, _contentType: string): Promise<StoredObject> {

@@ -47,6 +47,42 @@ Redirects are never followed. A receiver that answers a webhook with a `302`
 is misconfigured, and following it would hand the signature and the payload
 to another origin.
 
+## The destination is a security boundary
+
+A customer types this URL, and a worker on our private network dials it. That
+is server-side request forgery by construction, and the worker is the process
+worth aiming at: it sits next to the database, the storage credentials and
+whatever else answers on the internal network. `169.254.169.254` is one hop
+from a set of cloud credentials.
+
+`destinations.ts` decides what may be dialled, and `deliver()` asks it on
+every attempt rather than trusting a check made when the URL was first
+accepted — a URL reaches the queue by more than one path, and a check at one
+door is a check the other door does not have. Four rules:
+
+1. **https only**, unless `DEMORIFF_ALLOW_INSECURE_WEBHOOKS=yes` for local
+   development. `file:`, `gopher:` and friends are not transports a customer
+   needs, and each one is a different library's parser to be surprised by.
+2. **Every resolved address is checked, not the first.** A hostname with one
+   public and one private `A` record is the oldest way past a filter that
+   stops reading at the first answer.
+3. **Literal addresses skip DNS, so they are checked directly** — including
+   IPv4-mapped IPv6 in both spellings, because `URL` rewrites
+   `::ffff:169.254.169.254` as `::ffff:a9fe:a9fe` and a check written only
+   against the dotted form waves the hex one straight through.
+4. **The connection is pinned to an address that was checked.** This is why
+   delivery uses `node:https` rather than `fetch`: `fetch` resolves the
+   hostname again, inside undici, after our check has finished, and that gap
+   is the whole of DNS rebinding. Overriding the resolver rather than putting
+   the address in the URL keeps the hostname intact, so SNI is sent and the
+   certificate is still validated against the name the customer gave us.
+
+A refused destination is never retried. It will be refused every time, and
+retrying would turn one bad URL into a port scanner.
+
+None of this replaces egress filtering at the network layer. It is the layer
+that is ours to get right.
+
 ## Failure does not cascade
 
 A render that succeeded is never marked failed because its announcement could

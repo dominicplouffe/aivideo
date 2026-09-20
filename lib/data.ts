@@ -32,7 +32,17 @@ import type { Permission } from "@/lib/auth/roles";
  *     could ever see it.
  */
 
-const WORKSPACE = process.env.DEMORIFF_WORKSPACE_SLUG ?? "meridian";
+/**
+ * The workspace served when nobody is signed in.
+ *
+ * Fixture mode only. Every authenticated read resolves the workspace from
+ * the actor — the first version of this module used this constant on two of
+ * three read paths, which meant a member of one workspace would have been
+ * served another's projects the day real sign-in landed. The module's own
+ * comment claimed otherwise, which is exactly how that kind of bug survives
+ * a review.
+ */
+const FIXTURE_WORKSPACE = process.env.DEMORIFF_WORKSPACE_SLUG ?? "meridian";
 
 /**
  * The actor, and whether they hold a permission.
@@ -48,6 +58,12 @@ async function guard(
   const actor = await getCurrentActor();
   if (!actor) return { allowed: false, actor: null };
 
+  // Note what this does *not* do: `authorize` also compares the actor's
+  // workspace against a scope, and passing the actor's own workspace here
+  // would compare it with itself — a check that reads like tenancy
+  // enforcement while asserting nothing. Tenancy is enforced by scoping
+  // every query to `actor.workspaceId` below, which is the only place it
+  // can be enforced honestly.
   return {
     allowed: allowed(actor, permission, { workspaceId: actor.workspaceId }),
     actor,
@@ -60,15 +76,17 @@ export function dataSource(): "postgres" | "fixtures" {
 }
 
 export async function getProjects(): Promise<Project[]> {
-  const { allowed: may } = await guard("project.view");
+  const { allowed: may, actor } = await guard("project.view");
   // An empty list, not an error: a nav item that renders zero projects is a
   // better answer to "you are signed out" than a stack trace in a layout.
   if (!may) return [];
 
   if (!isDatabaseConfigured()) return fixtures.projects;
   try {
-    const { listProjects } = await import("@/lib/db/repositories/projects");
-    const rows = await listProjects(WORKSPACE);
+    const { listProjects, listProjectsForWorkspace } = await import("@/lib/db/repositories/projects");
+    const rows = actor
+      ? await listProjectsForWorkspace(actor.workspaceId)
+      : await listProjects(FIXTURE_WORKSPACE);
     // An empty database means it has not been seeded. Falling back beats
     // rendering an empty product and leaving the reader to guess why.
     return rows.length > 0 ? rows : fixtures.projects;
@@ -88,7 +106,9 @@ export async function getProject(idOrSlug: string): Promise<Project | null> {
   if (!isDatabaseConfigured()) return fixtures.getProject(idOrSlug) ?? null;
   try {
     const repo = await import("@/lib/db/repositories/projects");
-    const bySlug = await repo.getProjectBySlug(WORKSPACE, idOrSlug);
+    const bySlug = actor
+      ? await repo.getProjectBySlugForWorkspace(actor.workspaceId, idOrSlug)
+      : await repo.getProjectBySlug(FIXTURE_WORKSPACE, idOrSlug);
     if (bySlug) return bySlug;
     // Ids are UUIDs in the database; anything else cannot be one.
     const looksLikeUuid = /^[0-9a-f-]{36}$/i.test(idOrSlug);
@@ -105,13 +125,13 @@ export async function getProject(idOrSlug: string): Promise<Project | null> {
 }
 
 export async function getWorkspace() {
-  const { allowed: may } = await guard("project.view");
+  const { allowed: may, actor } = await guard("project.view");
   if (!may) return null;
 
   if (!isDatabaseConfigured()) return fixtures.workspace;
   try {
-    const { getWorkspace: read } = await import("@/lib/db/repositories/workspace");
-    const ws = await read(WORKSPACE);
+    const { getWorkspace: read, getWorkspaceById } = await import("@/lib/db/repositories/workspace");
+    const ws = actor ? await getWorkspaceById(actor.workspaceId) : await read(FIXTURE_WORKSPACE);
     return ws ?? fixtures.workspace;
   } catch (error) {
     console.error("[data] workspace read failed, serving fixtures:", error);
@@ -132,14 +152,16 @@ export async function getWorkspace() {
  * because a rewatched span is the signal and averaging flattens it.
  */
 export async function getRetentionCurve(projectId: string, points = 48): Promise<number[]> {
-  const { allowed: may } = await guard("analytics.view");
+  const { allowed: may, actor } = await guard("analytics.view");
   if (!may) return [];
 
   if (!isDatabaseConfigured()) return fixtures.retentionCurve(projectId, points);
 
   try {
     const { retentionCurve } = await import("@/lib/analytics/ingest");
-    const curve = await retentionCurve(projectId);
+    // Scoped to the actor's workspace: a project id is not a secret, and
+    // without this anybody signed in anywhere could read anybody's curve.
+    const curve = await retentionCurve(projectId, { workspaceId: actor?.workspaceId });
     if (curve.length === 0) return fixtures.retentionCurve(projectId, points);
 
     const bucket = curve.length / points;

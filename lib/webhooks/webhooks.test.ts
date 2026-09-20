@@ -1,14 +1,18 @@
 import assert from "node:assert/strict";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import test from "node:test";
 import { buildEvent, deliver, deliverWebhookJob } from "./outbound";
+import type { Wire } from "./transport";
 import {
   DEFAULT_TOLERANCE_SEC, SIGNATURE_HEADER, signPayload, verifySignature,
 } from "./signing";
 import type { Job } from "@/lib/jobs/queue";
 
 /**
- * Two things are under test: that a captured delivery cannot be replayed,
- * and that the retry decision matches what each failure actually means.
+ * Three things are under test: that a captured delivery cannot be replayed,
+ * that the retry decision matches what each failure actually means, and that
+ * a customer-supplied destination cannot aim the worker at our own network.
  */
 
 const SECRET = "whsec_test";
@@ -62,47 +66,89 @@ test("a malformed or missing header is refused, not crashed on", () => {
 
 // --- delivery --------------------------------------------------------------
 
+/** A stub resolver, so no test in this file touches real DNS. */
+const PUBLIC_DNS = async () => ["93.184.216.34"];
+
+/** A stub wire that records the request and answers with a fixed status. */
+function wireReturning(status: number, body = "") {
+  const seen: { url: string; headers: Record<string, string>; body: string; address: string }[] = [];
+  const wire: Wire = async (url, req) => {
+    seen.push({ url: url.toString(), headers: req.headers, body: req.body, address: req.address });
+    return { status, text: async () => body };
+  };
+  return { wire, seen };
+}
+
 test("a delivery is signed and labelled with its event", async () => {
-  let seen: { url: string; headers: Record<string, string>; body: string } | null = null;
   const event = buildEvent("render.completed", { renderId: "ren_1" });
+  const { wire, seen } = wireReturning(204);
 
   await deliver("https://hooks.example/demoriff", event, {
     secret: SECRET,
-    fetchImpl: async (url, init) => {
-      seen = {
-        url: String(url),
-        headers: init?.headers as Record<string, string>,
-        body: String(init?.body),
-      };
-      return new Response("", { status: 204 });
-    },
+    resolve: PUBLIC_DNS,
+    wire,
   });
 
-  const request = seen!;
+  const request = seen[0];
   assert.equal(request.headers["DemoRiff-Event-Type"], "render.completed");
   assert.equal(request.headers["DemoRiff-Event-Id"], event.id);
   const verified = verifySignature(SECRET, request.body, request.headers[SIGNATURE_HEADER]);
   assert.equal(verified.ok, true);
 });
 
-test("a delivery is never followed through a redirect", async () => {
-  let redirect: RequestRedirect | undefined;
+test("a delivery connects to the address the check approved", async () => {
+  const { wire, seen } = wireReturning(200);
   await deliver("https://hooks.example/x", buildEvent("project.ready", {}), {
-    fetchImpl: async (_url, init) => {
-      redirect = init?.redirect;
-      return new Response("", { status: 200 });
+    // Public first, private second. A filter that stops at the first answer
+    // would let this through; the address handed to the wire must come from
+    // the set that was checked, not from a second lookup.
+    resolve: async () => ["93.184.216.34"],
+    wire,
+  });
+  assert.equal(seen[0].address, "93.184.216.34");
+});
+
+test("a destination on the private network is refused, and never retried", async () => {
+  const cases = [
+    // The literal forms, which skip DNS entirely.
+    "http://127.0.0.1/x",
+    "https://[::1]/x",
+    "https://169.254.169.254/latest/meta-data/",
+    // The scheme escapes.
+    "file:///etc/passwd",
+    "gopher://internal/x",
+  ];
+
+  for (const url of cases) {
+    const result = await deliver(url, buildEvent("project.ready", {}), { resolve: PUBLIC_DNS });
+    assert.equal(result.ok, false, url);
+    // Retrying a refused destination would turn one bad URL into a scanner.
+    assert.equal(result.retryable, false, url);
+    assert.equal(result.status, null, url);
+  }
+});
+
+test("a hostname that resolves to any private address is refused", async () => {
+  let dialled = false;
+  const result = await deliver("https://rebind.example/x", buildEvent("project.ready", {}), {
+    // One public record and one private one: the oldest way past a check
+    // that inspects only the first answer.
+    resolve: async () => ["93.184.216.34", "10.0.0.7"],
+    wire: async () => {
+      dialled = true;
+      return { status: 200, text: async () => "" };
     },
   });
-  // Following one would hand the signature, and the payload, to another origin.
-  assert.equal(redirect, "manual");
+  assert.equal(result.ok, false);
+  assert.equal(dialled, false);
 });
 
 test("the retry decision matches what each failure means", async () => {
   const outcomes = await Promise.all(
     [200, 204, 400, 404, 410, 408, 429, 500, 503].map(async (status) => {
       const result = await deliver("https://hooks.example/x", buildEvent("project.ready", {}), {
-        // 204 is a null-body status; constructing one with a body throws.
-        fetchImpl: async () => new Response(status === 204 ? null : "no", { status }),
+        resolve: PUBLIC_DNS,
+        wire: wireReturning(status, "no").wire,
       });
       return [status, result.ok, result.retryable] as const;
     }),
@@ -125,11 +171,51 @@ test("the retry decision matches what each failure means", async () => {
 
 test("a refused connection is retryable rather than fatal", async () => {
   const result = await deliver("https://hooks.example/x", buildEvent("project.ready", {}), {
-    fetchImpl: async () => {
+    resolve: PUBLIC_DNS,
+    wire: async () => {
       throw new Error("ECONNREFUSED");
     },
   });
   assert.deepEqual([result.ok, result.retryable, result.status], [false, true, null]);
+});
+
+test("the real transport reaches the receiver and is not followed anywhere else", async () => {
+  const received: { host?: string; body: string; path: string }[] = [];
+  const server = createServer((req, res) => {
+    let body = "";
+    req.on("data", (chunk) => (body += chunk));
+    req.on("end", () => {
+      received.push({ host: req.headers.host, body, path: req.url ?? "" });
+      // A receiver answering a webhook with a redirect is misconfigured.
+      // Chasing it would hand the signature to another origin, so the
+      // transport treats the 302 as the final answer.
+      res.writeHead(302, { Location: "http://169.254.169.254/latest/meta-data/" });
+      res.end("moved");
+    });
+  });
+  await new Promise<void>((done) => server.listen(0, "127.0.0.1", done));
+  const port = (server.address() as AddressInfo).port;
+
+  try {
+    const event = buildEvent("render.completed", { renderId: "ren_2" });
+    const result = await deliver(`http://localhost:${port}/hook`, event, {
+      secret: SECRET,
+      // Loopback is the point of the test, so the guard stands down here and
+      // only here.
+      allowInsecure: true,
+    });
+
+    assert.equal(result.status, 302);
+    assert.equal(result.ok, false);
+    assert.equal(received.length, 1);
+    // The Host header carries the name, not the pinned address: that is what
+    // keeps TLS SNI and certificate validation honest in production.
+    assert.equal(received[0].host, `localhost:${port}`);
+    assert.equal(received[0].path, "/hook");
+    assert.equal(JSON.parse(received[0].body).id, event.id);
+  } finally {
+    server.close();
+  }
 });
 
 // --- the job wrapper -------------------------------------------------------
@@ -154,7 +240,8 @@ function webhookJob(payload: Record<string, unknown>): Job {
 test("a permanent delivery failure is labelled so the queue stops retrying", async () => {
   const job = webhookJob({ url: "https://hooks.example/x", event: buildEvent("project.ready", {}) });
   await assert.rejects(
-    () => deliverWebhookJob(job, { fetchImpl: async () => new Response("gone", { status: 410 }) }),
+    () =>
+      deliverWebhookJob(job, { resolve: PUBLIC_DNS, wire: wireReturning(410, "gone").wire }),
     (error: unknown) => error instanceof Error && error.message.startsWith("permanent:"),
   );
 });
@@ -162,7 +249,8 @@ test("a permanent delivery failure is labelled so the queue stops retrying", asy
 test("a transient delivery failure is not labelled permanent", async () => {
   const job = webhookJob({ url: "https://hooks.example/x", event: buildEvent("project.ready", {}) });
   await assert.rejects(
-    () => deliverWebhookJob(job, { fetchImpl: async () => new Response("busy", { status: 503 }) }),
+    () =>
+      deliverWebhookJob(job, { resolve: PUBLIC_DNS, wire: wireReturning(503, "busy").wire }),
     (error: unknown) => error instanceof Error && !error.message.startsWith("permanent:"),
   );
 });

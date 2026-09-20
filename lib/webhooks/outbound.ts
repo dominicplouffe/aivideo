@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { enqueue, type Job } from "@/lib/jobs/queue";
+import { checkDestination, describeRefusal } from "./destinations";
+import { dial, type Wire } from "./transport";
 import { SIGNATURE_HEADER, signPayload } from "./signing";
 
 /**
@@ -64,6 +66,17 @@ export async function emitEvent(options: EmitOptions): Promise<{ event: WebhookE
   return { event, job };
 }
 
+export interface DeliveryOptions {
+  secret?: string;
+  timeoutMs?: number;
+  /** Injectable transport. Defaults to the address-pinned dialler. */
+  wire?: Wire;
+  /** Injectable so destination checks are testable without DNS. */
+  resolve?: (hostname: string) => Promise<string[]>;
+  /** Permits plain http and private addresses. Development and tests only. */
+  allowInsecure?: boolean;
+}
+
 export interface DeliveryOutcome {
   status: number | null;
   ok: boolean;
@@ -83,11 +96,32 @@ export interface DeliveryOutcome {
 export async function deliver(
   url: string,
   event: WebhookEvent,
-  options: { secret?: string; timeoutMs?: number; fetchImpl?: typeof fetch } = {},
+  options: DeliveryOptions = {},
 ): Promise<DeliveryOutcome> {
+  // Checked here, not only where the URL was accepted. A customer chooses
+  // this destination and a worker on our private network dials it — that is
+  // server-side request forgery by construction, and the worker sits next to
+  // the database and the storage credentials. A URL can reach the queue by
+  // more than one path, so the check belongs at the one place they all
+  // converge.
+  const destination = await checkDestination(url, {
+    resolve: options.resolve,
+    allowInsecure: options.allowInsecure,
+  });
+  if (!destination.ok) {
+    return {
+      status: null,
+      ok: false,
+      // Never retried: a destination that is refused now is refused every
+      // time, and retrying would turn one bad URL into a scanner.
+      retryable: false,
+      body: describeRefusal(destination.reason),
+    };
+  }
+
   const body = JSON.stringify(event);
   const secret = options.secret ?? process.env.DEMORIFF_WEBHOOK_SECRET;
-  const fetchImpl = options.fetchImpl ?? fetch;
+  const wire = options.wire ?? dial;
 
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
@@ -101,14 +135,16 @@ export async function deliver(
   const timeout = setTimeout(() => controller.abort(), options.timeoutMs ?? 10_000);
 
   try {
-    const response = await fetchImpl(url, {
+    // Pinned to an address the check approved, rather than resolved a second
+    // time by whatever is underneath `fetch`. See `transport.ts`: a name that
+    // was verified and then handed to a different resolver has not been
+    // verified at all.
+    const response = await wire(destination.url, {
       method: "POST",
       headers,
       body,
+      address: destination.addresses[0],
       signal: controller.signal,
-      // A receiver that answers a webhook with a redirect is misconfigured,
-      // and following one can leak the signature to another origin.
-      redirect: "manual",
     });
 
     const status = response.status;
@@ -128,7 +164,7 @@ export async function deliver(
 /** Runs a claimed `webhook` job. Throws to let the queue apply its backoff. */
 export async function deliverWebhookJob(
   job: Job,
-  options: { secret?: string; fetchImpl?: typeof fetch } = {},
+  options: DeliveryOptions = {},
 ): Promise<DeliveryOutcome> {
   const payload = job.payload as { url?: string; event?: WebhookEvent };
   if (!payload.url || !payload.event) {

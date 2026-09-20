@@ -61,6 +61,9 @@ const DEFAULTS = {
 /** Elements that either execute, phone home, or cannot be replayed. */
 const STRIP_TAGS = new Set(["script", "noscript", "object", "embed", "applet"]);
 
+/** Attributes that can carry a `javascript:` URL, not only the obvious two. */
+const URL_ATTRIBUTES = ["href", "src", "action", "formaction", "xlink:href", "data", "ping"];
+
 /** Attributes that run code the moment the snapshot is parsed. */
 function stripEventHandlers(element: Element) {
   for (const attribute of Array.from(element.attributes)) {
@@ -68,11 +71,75 @@ function stripEventHandlers(element: Element) {
     // `onclick`, `onerror`, and the two hundred others. An `onerror` on an
     // image is the classic way a "static" snapshot executes.
     if (name.startsWith("on")) element.removeAttribute(attribute.name);
-    // `javascript:` in an href survives a naive tag filter untouched.
-    if ((name === "href" || name === "src" || name === "action") &&
-        /^\s*javascript:/i.test(attribute.value)) {
+    // `javascript:` survives a naive tag filter untouched — and it is not
+    // only `href` and `src`. An SVG `<a xlink:href>` and a `<button
+    // formaction>` are the two that get missed, because the obvious list
+    // does not contain them.
+    if (URL_ATTRIBUTES.includes(name) && /^[\s\u0000-\u001f]*javascript:/i.test(attribute.value)) {
       element.removeAttribute(attribute.name);
     }
+  }
+}
+
+/**
+ * Sanitizes a subtree in place.
+ *
+ * Extracted so it can be run again over declarative shadow content, which
+ * the document-level walk cannot reach: `querySelectorAll("*")` does not
+ * cross a shadow boundary, and the shadow markup is not even in the clone
+ * when the first pass runs. The first version of this file inlined shadow
+ * roots *after* sanitizing, so a `<script>` inside a web component survived
+ * untouched — in a file whose own header promises "No scripts survive".
+ */
+function sanitizeSubtree(root: ParentNode, base: string, skipped: Snapshot["skipped"]) {
+  for (const element of Array.from(root.querySelectorAll("*"))) {
+    const tag = element.tagName.toLowerCase();
+
+    if (STRIP_TAGS.has(tag)) {
+      element.remove();
+      continue;
+    }
+
+    stripEventHandlers(element);
+
+    // `<meta http-equiv="refresh">` navigates the frame on its own, with no
+    // script and no click.
+    if (tag === "meta" && (element.getAttribute("http-equiv") ?? "").toLowerCase() === "refresh") {
+      element.remove();
+      continue;
+    }
+
+    // An iframe's content is either same-origin (and a snapshot of its own)
+    // or unreachable. `srcdoc` matters as much as `src`: it is inline markup
+    // this walk can never inspect, because it is a string attribute.
+    if (tag === "iframe" || tag === "frame") {
+      const src = element.getAttribute("src");
+      if (src) skipped.push({ url: absolutise(src, base), reason: "cross-origin" });
+      element.removeAttribute("src");
+      element.removeAttribute("srcdoc");
+      element.setAttribute("data-demoriff-frame", "removed");
+      continue;
+    }
+
+    for (const attribute of ["src", "href", "poster", "data-src"]) {
+      const value = element.getAttribute(attribute);
+      if (value && !/^(data:|blob:|#|about:)/i.test(value)) {
+        element.setAttribute(attribute, absolutise(value, base));
+      }
+    }
+    const srcset = element.getAttribute("srcset");
+    if (srcset) element.setAttribute("srcset", absolutiseSrcset(srcset, base));
+
+    // Form values: the DOM property holds what the person typed, and the
+    // attribute holds what the page shipped. Neither is recorded.
+    if (tag === "input" || tag === "textarea") {
+      element.removeAttribute("value");
+      if (isSensitiveField(element)) {
+        element.setAttribute("placeholder", "");
+        element.setAttribute("data-demoriff-masked", "true");
+      }
+    }
+    if (tag === "option") element.removeAttribute("selected");
   }
 }
 
@@ -201,51 +268,21 @@ export function captureSnapshot(
   const clone = doc.implementation.createHTMLDocument(doc.title);
   clone.documentElement.replaceWith(doc.documentElement.cloneNode(true) as HTMLElement);
 
-  for (const element of Array.from(clone.querySelectorAll("*"))) {
-    const tag = element.tagName.toLowerCase();
+  // Shadow roots are inlined *first*, so their markup is present when the
+  // sanitizer runs. Doing it the other way round — which is what this file
+  // did originally — copies a web component's contents in verbatim after
+  // every check has already happened.
+  inlineShadowRoots(doc.documentElement, clone.documentElement, clone);
 
-    if (STRIP_TAGS.has(tag)) {
-      element.remove();
-      continue;
-    }
-
-    stripEventHandlers(element);
-
-    // An iframe's content is either same-origin (and a snapshot of its own)
-    // or unreachable. Either way the frame must not be left pointing at a
-    // live URL, which would load the real application inside the demo.
-    if (tag === "iframe" || tag === "frame") {
-      const src = element.getAttribute("src");
-      if (src) skipped.push({ url: absolutise(src, base), reason: "cross-origin" });
-      element.removeAttribute("src");
-      element.setAttribute("data-demoriff-frame", "removed");
-      continue;
-    }
-
-    for (const attribute of ["src", "href", "poster", "data-src"]) {
-      const value = element.getAttribute(attribute);
-      if (value && !/^(data:|blob:|#|about:)/i.test(value)) {
-        element.setAttribute(attribute, absolutise(value, base));
-      }
-    }
-    const srcset = element.getAttribute("srcset");
-    if (srcset) element.setAttribute("srcset", absolutiseSrcset(srcset, base));
-
-    // Form values: the DOM property holds what the person typed, and the
-    // attribute holds what the page shipped. Neither is recorded — see the
-    // note at the top of this file.
-    if (tag === "input" || tag === "textarea") {
-      element.removeAttribute("value");
-      if (isSensitiveField(element)) {
-        element.setAttribute("placeholder", "");
-        element.setAttribute("data-demoriff-masked", "true");
-      }
-    }
-    if (tag === "option") element.removeAttribute("selected");
+  sanitizeSubtree(clone, base, skipped);
+  // ...and again inside each declarative shadow template, whose content is
+  // a separate document fragment that `querySelectorAll` on the document
+  // does not descend into.
+  for (const template of Array.from(clone.querySelectorAll("template[shadowrootmode]"))) {
+    sanitizeSubtree((template as HTMLTemplateElement).content, base, skipped);
   }
 
   inlineStyles(doc, clone, skipped);
-  inlineShadowRoots(doc.documentElement, clone.documentElement, clone);
 
   const head = clone.head ?? clone.documentElement;
 

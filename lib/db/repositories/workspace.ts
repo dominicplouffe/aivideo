@@ -4,7 +4,16 @@ import * as s from "../schema";
 
 export async function getWorkspace(slug: string) {
   const ws = await getDb().query.workspaces.findFirst({ where: eq(s.workspaces.slug, slug) });
-  if (!ws) return null;
+  return ws ? shape(ws) : null;
+}
+
+/** The same, by id — which is what a session actually carries. */
+export async function getWorkspaceById(id: string) {
+  const ws = await getDb().query.workspaces.findFirst({ where: eq(s.workspaces.id, id) });
+  return ws ? shape(ws) : null;
+}
+
+function shape(ws: typeof s.workspaces.$inferSelect) {
   return {
     id: ws.id,
     name: ws.name,

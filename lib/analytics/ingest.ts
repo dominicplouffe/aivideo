@@ -180,9 +180,16 @@ export interface RetentionPoint {
  */
 export async function retentionCurve(
   projectId: string,
-  options: { since?: Date } = {},
+  options: { since?: Date; workspaceId?: string } = {},
 ): Promise<RetentionPoint[]> {
   const db = getDb();
+
+  // A project id is not a secret — it appears in every embed snippet — so
+  // without the workspace predicate anybody signed in anywhere could read
+  // anybody else's retention curve by guessing or reading one.
+  const scope = [eq(s.analyticsSessions.projectId, projectId)];
+  if (options.since) scope.push(gte(s.analyticsSessions.startedAt, options.since));
+  if (options.workspaceId) scope.push(eq(s.analyticsSessions.workspaceId, options.workspaceId));
 
   const [summary] = await db
     .select({
@@ -190,11 +197,7 @@ export async function retentionCurve(
       seconds: sql<number>`coalesce(max(${s.analyticsSessions.assetSeconds}), 0)::int`,
     })
     .from(s.analyticsSessions)
-    .where(
-      options.since
-        ? and(eq(s.analyticsSessions.projectId, projectId), gte(s.analyticsSessions.startedAt, options.since))
-        : eq(s.analyticsSessions.projectId, projectId),
-    );
+    .where(and(...scope));
 
   if (!summary || summary.sessions === 0 || summary.seconds === 0) return [];
 
@@ -215,6 +218,8 @@ export async function retentionCurve(
        -- strings and buffers — and the resulting error names neither dates
        -- nor this query.
        AND started_at >= ${since.toISOString()}::timestamptz
+       AND (${options.workspaceId ?? null}::uuid IS NULL
+            OR workspace_id = ${options.workspaceId ?? null}::uuid)
        AND watched IS NOT NULL
      GROUP BY tick.n
      ORDER BY tick.n;
