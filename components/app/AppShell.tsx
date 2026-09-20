@@ -167,7 +167,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <button
             type="button"
             onClick={() => setPaletteOpen(true)}
-            className="group flex h-9 flex-1 items-center gap-2.5 rounded-xl border border-[var(--line)] bg-ink-900 px-3 text-left transition-colors hover:border-[var(--line-strong)] md:max-w-sm"
+            className="group flex h-9 min-w-0 flex-1 items-center gap-2.5 rounded-xl border border-[var(--line)] bg-ink-900 px-3 text-left transition-colors hover:border-[var(--line-strong)] md:max-w-sm"
           >
             <Icon name="search" className="size-4 text-fg-faint" strokeWidth={1.9} />
             <span className="flex-1 truncate text-[0.8125rem] text-fg-faint">
@@ -178,7 +178,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             </kbd>
           </button>
 
-          <div className="ml-auto flex items-center gap-1.5">
+          <div className="ml-auto flex shrink-0 items-center gap-1.5">
             <Link
               href="/docs"
               className="hidden size-9 items-center justify-center rounded-lg text-fg-subtle transition-colors hover:bg-ink-850 hover:text-fg sm:inline-flex"
