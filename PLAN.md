@@ -1,7 +1,10 @@
 # DemoRiff — build plan
 
-This document is the running plan. Phases 1–5 are complete and in this
-repository. Phases 6–10 are the sequenced work to take it to production.
+This document is the running plan. Phases 1–10 are complete and in this
+repository. What is *not* built is named at the bottom, under "What is real,
+and what is not" — that section is the one to read first, and it is kept
+current deliberately, because a plan that only records wins stops being
+useful the week somebody relies on it.
 
 ---
 
@@ -281,7 +284,7 @@ infrastructure — or dismissed as a mock when it is not.
 
 **Real, and proven by tests that would fail if it broke:**
 
-- **Persistence.** Postgres with twelve tables, migrations, and the
+- **Persistence.** Postgres with twenty-seven tables, fourteen migrations, and the
   constraints that matter enforced in the schema. The app falls back to
   seeded fixtures when `DATABASE_URL` is unset, which is what keeps a fresh
   clone explorable.
@@ -294,33 +297,55 @@ infrastructure — or dismissed as a mock when it is not.
 - **Capture.** An MV3 extension that records a tab and its interaction log,
   tested by loading the built extension into a real Chromium. Sensitive
   fields are masked in the page before any frame is encoded.
+- **Masking, both lines.** Selectors are enforced before the compositor
+  paints; detectors and patterns are found in the frames, expanded into
+  timeline regions, and **verified in the pixels** — 95% of the detail
+  inside the box is gone while the mask is on, and unchanged after it ends.
 - **Interactive demos.** Real DOM snapshots, scripts stripped, replayed in a
   sandboxed frame with no network access.
 - **Governance.** RBAC, an append-only hash-chained audit log, sessions that
-  revoke immediately, metering in seconds with an idempotent ledger.
+  revoke immediately, metering in seconds with an idempotent ledger, and the
+  audit log streamed to a SIEM without holes.
+- **Identity.** Connection-scoped single sign-on with a signed, nonce-bound
+  state, and SCIM 2.0 Users and Groups where a directory decides roles and
+  an offboarding ends live sessions. Verified end to end against a running
+  server: the full round trip, a login-CSRF replay from a second browser,
+  three open-redirect attempts, and a SCIM deactivation that killed a
+  session which had worked a second earlier.
 - **Distribution.** A 3.5 KB embed runtime with measured zero layout shift,
-  and cookieless per-second analytics — both exercised end to end against a
-  running server.
+  cookieless per-second analytics, and two-way sync with five help centres
+  that never silently overwrites a human's edit.
+- **The Riff Agent.** An approval gate that is the state machine rather than
+  a check, an allowlist enforced on every request and verified in a real
+  Chromium against an unapproved origin that was up and answering, and
+  credentials bound to one exact origin.
+- **The surface.** 109 pages — 84 marketing, 25 in the app — audited in
+  Chromium at 1440px and 390px for overflow, console errors, heading
+  structure, titles and alt text. All clean.
 
 **Written but not exercised against the vendor:**
 
 - **Inference adapters.** Deepgram, ElevenLabs and Anthropic adapters exist
   and are tested against stubbed transports — the request we build, the
   fields we map, which failures retry. Nothing has run against a live key.
+- **The vendor side of identity, billing and distribution.** WorkOS, Stripe,
+  the five help centres, HubSpot and the vision locator are all built
+  against their documented contracts and tested with stubbed transports.
+  Every subtle part that can be checked without an account is — Stripe's
+  webhook signature over raw bytes with rotation and a tolerance window,
+  Confluence's version locking, Notion's block limits, Zendesk's
+  translation-not-article body — but none has spoken to a live account.
 - **S3 storage.** Same contract as the local adapter, unexercised without a
   bucket.
 
 **Not built:**
 
-- **Single sign-on and directory sync.** The session layer beneath WorkOS is
-  done; the identity provider is not.
-- **Stripe.** The metering engine is done; subscriptions, payment methods and
-  invoice sync are not.
-- **Frame-level masking.** Detector and pattern rules need OCR and a
-  classifier. `lib/providers/masking.ts` throws on them rather than returning
-  an empty region list that reads like "nothing to hide".
-- **Desktop capture**, help-centre connectors, CRM identity resolution and
-  the Riff Agent.
+- **Firefox and Safari extensions.** The Chromium extension is real. A
+  Firefox port needs a different capture path — `chrome.offscreen` and
+  `tabCapture` are Chromium-only — and Safari needs Xcode. Neither can be
+  written honestly without the browser to test in.
+- **Desktop apps** for macOS and Windows: full-desktop capture, system audio
+  and hardware encoding.
 
 **Fictional by design:**
 
