@@ -116,12 +116,18 @@ actually evaluate instead of returning an empty region list that reads like
 
 ## Phase 7 — Real capture
 
-1. **Browser extension** (MV3) capturing tab video plus the interaction log:
-   element selector, role, accessible name, bounds, route changes, mutations.
+1. ~~**Browser extension** (MV3)~~ **Done.** Tab video plus the interaction
+   log — selector, role, accessible name, bounds, route changes, mutations —
+   with sensitive fields masked in the page before any frame is encoded. The
+   route hook runs in the page's own JavaScript world because a content
+   script's isolated world shares the DOM but not `history`; see
+   `extension/README.md`. Tested by loading the built extension into a real
+   Chromium. Firefox and Safari ports are still open.
 2. **Desktop apps** (macOS, Windows) for full-desktop capture, system audio and
    hardware encoding.
-3. **Masking at capture time** — detectors, selectors, regions, patterns —
-   applied before frames are encoded, never after.
+3. **Masking at capture time** — ~~selectors~~ done and enforced in the
+   extension; detectors, regions and patterns still need the frame-level
+   service that `lib/providers/masking.ts` currently refuses to fake.
 4. **DOM snapshotting** per step, with assets inlined, to drive interactive
    demos.
 
