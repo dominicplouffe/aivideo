@@ -157,8 +157,14 @@ actually evaluate instead of returning an empty region list that reads like
    only as a hash, and deactivation ends every live session rather than only
    marking the row. Verified end to end against a live server: the flow,
    login CSRF from a second browser, three open-redirect attempts, and an
-   offboarding that killed a live session mid-request. SCIM Groups is still
-   open. See `lib/auth/README.md`.
+   offboarding that killed a live session mid-request. **SCIM Groups is now
+   done too**: group membership decides roles, recomputed from every group a
+   member is in rather than from the delta, because removing somebody from
+   one admin group while they remain in another must not demote them. A
+   group deletion recomputes before it removes the rows, and Entra's
+   removal-in-the-path shape is handled — a handler that only reads `value`
+   silently ignores every offboarding that vendor sends. See
+   `lib/auth/README.md`.
 2. **Stripe.** The metering engine is ~~done~~: a usage ledger in seconds,
    idempotent against queue retries, top-ups that carry across periods,
    proration by the day, the 80% notice fired once, and a hard stop that is

@@ -325,6 +325,49 @@ export const billingEvents = pgTable(
   (t) => [index("billing_events_handled_idx").on(t.handledAt)],
 );
 
+/**
+ * A directory group, as SCIM sends it.
+ *
+ * Groups exist here for one reason: they decide roles. A directory that
+ * moves somebody from `demo-viewers` to `demo-admins` is making a decision
+ * about what that person may do, and the point of syncing groups at all is
+ * that the decision takes effect here without anybody re-typing it.
+ *
+ * The mapping from a group to a role lives on the connection
+ * (`sso_connections.roleMappings`) rather than on the group, so one place
+ * answers "what does this group grant" for both the SSO assertion path and
+ * the SCIM path. Two copies of that answer would drift.
+ */
+export const scimGroups = pgTable(
+  "scim_groups",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    connectionId: uuid("connection_id").notNull().references(() => ssoConnections.id, { onDelete: "cascade" }),
+    workspaceId: uuid("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+    /** The directory's own id for the group. */
+    externalId: text("external_id"),
+    displayName: text("display_name").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("scim_groups_connection_name_key").on(t.connectionId, t.displayName),
+    index("scim_groups_workspace_idx").on(t.workspaceId),
+  ],
+);
+
+export const scimGroupMembers = pgTable(
+  "scim_group_members",
+  {
+    groupId: uuid("group_id").notNull().references(() => scimGroups.id, { onDelete: "cascade" }),
+    memberId: uuid("member_id").notNull().references(() => members.id, { onDelete: "cascade" }),
+    addedAt: timestamp("added_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.groupId, t.memberId] }),
+    index("scim_group_members_member_idx").on(t.memberId),
+  ],
+);
+
 /* ============================================================
    Known viewers
    ============================================================ */

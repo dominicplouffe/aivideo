@@ -34,5 +34,8 @@ export async function GET() {
       },
     ],
     meta: { resourceType: "ServiceProviderConfig", location: "/api/scim/v2/ServiceProviderConfig" },
+    // Both resources are served. Declaring one a directory then tries to use
+    // for the other is how a sync half-works.
+    resourceTypes: ["User", "Group"],
   });
 }

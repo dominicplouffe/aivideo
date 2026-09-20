@@ -297,6 +297,34 @@ person. `ServiceProviderConfig` declares the gaps honestly — no bulk, no
 sort, no password change — because a directory told that bulk exists will
 use it, and then every offboarding fails.
 
-**Still open:** SCIM Groups. Role assignment works today through the group
-claims on an assertion; syncing group *membership* as its own resource is
-the remaining piece.
+### Groups
+
+Served at `/api/scim/v2/Groups`, and worth syncing for exactly one reason:
+they decide roles. A directory that moves somebody from `demo-viewers` to
+`demo-admins` is deciding what that person may do, and the point is that the
+decision takes effect here without anybody re-typing it.
+
+**Every membership change recomputes the member's role from all of their
+groups, never from the delta.** Applying the delta is the bug everybody
+writes: removing somebody from `demo-admins` would drop them to the
+connection default even though they are still in `support-leads`, which maps
+to admin too.
+
+The mapping itself lives on the connection, shared with the SSO assertion
+path, so one place answers "what does this group grant". Two copies of that
+answer drift.
+
+Three consequences that are easy to get wrong, each with a test:
+
+- **A group deletion recomputes before it removes the rows.** Afterwards
+  there is nothing left to recompute from, and a deletion that leaves ten
+  people holding an admin role it granted is the worst possible outcome of
+  tidying up a directory.
+- **A replace recomputes the people who left as well as the people who
+  joined.** A replace both grants and removes.
+- **A removal encoded in the path is handled.** Entra sends
+  `path: 'members[value eq "..."]'` with no value at all, and a handler that
+  only reads `value` silently ignores every offboarding that vendor sends.
+
+A role change ends every session that predates it, as everywhere else here.
+An owner's role is never changed by a directory.
