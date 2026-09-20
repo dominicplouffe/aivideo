@@ -76,13 +76,15 @@ export function readSessionCookie(request: Request): string | null {
  * API calls, which authenticate with a key rather than a cookie and are not
  * what CSRF is about.
  */
-export function originAllowed(request: Request, allowed: string[] = trustedOrigins()): boolean {
+export function originAllowed(request: Request, allowed?: string[]): boolean {
   const origin = request.headers.get("origin");
   if (!origin) return true;
 
+  const candidates = allowed ?? trustedOrigins(request);
+
   try {
     const url = new URL(origin);
-    return allowed.some((candidate) => {
+    return candidates.some((candidate) => {
       try {
         return new URL(candidate).origin === url.origin;
       } catch {
@@ -94,17 +96,44 @@ export function originAllowed(request: Request, allowed: string[] = trustedOrigi
   }
 }
 
-function trustedOrigins(): string[] {
-  const configured = process.env.NEXT_PUBLIC_SITE_URL;
-  const extra = (process.env.DEMORIFF_TRUSTED_ORIGINS ?? "")
-    .split(",")
-    .map((value) => value.trim())
-    .filter(Boolean);
+/**
+ * The origins a state-changing request may come from.
+ *
+ * Configuration first, and in production *only* configuration. A deployment
+ * that sets `NEXT_PUBLIC_SITE_URL` is pinned to it, and no header a caller
+ * sends can widen that — which matters because `Host` is attacker-controlled
+ * behind a permissive proxy, and an allowlist built from it would allow
+ * whatever the attacker wrote in it.
+ *
+ * Outside production the host the browser actually connected to is added,
+ * and this is not a nicety. The previous version pushed
+ * `request.nextUrl.origin`, meaning to say "the deployment's own address" —
+ * but in Next 16 that reports the configured origin rather than the one
+ * serving the request, so it always read `http://localhost:3000`. The effect
+ * was that signing in worked on port 3000 and nowhere else: every other
+ * port, every preview URL and every fresh clone told you "Cross-origin
+ * request refused" with nothing to suggest what to change.
+ *
+ * `Host` is the right source here because it is what the browser connected
+ * to, and a development machine is not the threat model. Both schemes are
+ * offered because a local server is http and a tunnelled one is https.
+ */
+function trustedOrigins(request?: Request): string[] {
+  const origins: string[] = [];
 
-  const origins = [...extra];
+  for (const value of (process.env.DEMORIFF_TRUSTED_ORIGINS ?? "").split(",")) {
+    const trimmed = value.trim();
+    if (trimmed) origins.push(trimmed);
+  }
+
+  const configured = process.env.NEXT_PUBLIC_SITE_URL;
   if (configured) origins.push(configured);
+
   if (process.env.NODE_ENV !== "production") {
+    const host = request?.headers.get("host");
+    if (host) origins.push(`http://${host}`, `https://${host}`);
     origins.push("http://localhost:3000", "http://127.0.0.1:3000");
   }
+
   return origins;
 }

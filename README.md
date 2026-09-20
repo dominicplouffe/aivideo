@@ -13,21 +13,69 @@ application, built as a single Next.js project.
 
 ## Running it
 
+### The quick way — no configuration at all
+
 ```bash
 npm install
 npm run dev     # http://localhost:3000
 ```
 
-No environment variables and no credentials are required. The production
-pipeline is expressed behind provider interfaces (`lib/providers/types.ts`) and
-resolves to a deterministic mock implementation by default, so every screen is
-explorable immediately.
+No environment variables, no credentials, no database. The production
+pipeline is expressed behind provider interfaces (`lib/providers/types.ts`)
+and resolves to a deterministic mock, so every screen — the marketing site,
+the workspace, the Studio, the Riff Agent — is explorable immediately, and
+`/app` is open because there is nobody to sign in as.
+
+Worth a look first: `/`, `/app`, `/app/agent` (pick the run waiting for
+approval), `/app/studio/prj_2d55ef`, `/pricing`, `/security`.
+
+### With a real database
+
+This is what turns on authentication, the durable queue, metering, the audit
+log and everything else that needs to persist.
 
 ```bash
-npm run build      # production build
-npm run start      # serve the production build
-npm run typecheck  # tsc --noEmit
+createdb demoriff
+echo 'DATABASE_URL=postgres://localhost:5432/demoriff' > .env.local
+
+npm run db:migrate   # fourteen migrations
+npm run db:seed      # one workspace, seven members, eight projects
+npm run dev
 ```
+
+**Then sign in, because `/app` now redirects to `/signin`.** Use any seeded
+address — `daniel@meridian.app` (owner), `sofia@meridian.app` (reviewer),
+`jonas@meridian.app` (viewer). The password field is not shown: email
+sign-in is a development convenience and is refused outright in production,
+where single sign-on is the only way in.
+
+Signing in as different roles is the quickest way to see the permission
+model: a reviewer can approve an agent run and cannot start one, a creator
+the reverse.
+
+### The rest
+
+```bash
+npm run build           # production build (also builds the embed script)
+npm run start           # serve the production build
+npm run typecheck       # tsc --noEmit
+npm test                # 319 tests; 495 with DATABASE_URL set
+npm run worker          # render + webhook + audit-stream worker (needs ffmpeg)
+npm run build:extension # the Chromium capture extension, into extension/dist
+npm run db:studio       # browse the database
+```
+
+`npm run worker` needs `ffmpeg` and `ffprobe` on the PATH. The extension
+loads into Chromium via `chrome://extensions` → Developer mode → Load
+unpacked → `extension/dist`.
+
+`.env.example` documents every variable, each with a note on what breaks
+without it. None is required for either path above.
+
+> `npm audit` reports four moderate advisories, all inside `drizzle-kit`'s
+> deprecated `@esbuild-kit/*` loader. It is a devDependency used to generate
+> and apply migrations; it is not in the dependency tree the application
+> ships.
 
 ---
 

@@ -27,6 +27,22 @@ import type { NextRequest } from "next/server";
 
 const MUTATING = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 
+/**
+ * The origins a state-changing request may come from.
+ *
+ * Configuration first, and in production *only* configuration. A deployment
+ * that sets `NEXT_PUBLIC_SITE_URL` is pinned to it, and nothing a caller
+ * sends can widen that — `Host` is attacker-controlled behind a permissive
+ * proxy, so an allowlist built from it allows whatever the attacker wrote.
+ *
+ * Outside production the host the browser actually connected to is added.
+ * This used to be `request.nextUrl.origin`, meaning to say "the deployment's
+ * own address" — but in Next 16 that reports the configured origin rather
+ * than the one serving the request, so it always read
+ * `http://localhost:3000`. Signing in therefore worked on port 3000 and
+ * nowhere else, and failed with a message that named nothing you could
+ * change.
+ */
 function trustedOrigins(request: NextRequest): string[] {
   const origins: string[] = [];
 
@@ -38,13 +54,12 @@ function trustedOrigins(request: NextRequest): string[] {
     if (trimmed) origins.push(trimmed);
   }
 
-  // The request's own origin, so a deployment behind an unknown hostname —
-  // a preview URL, a customer's own domain — is not locked out of itself.
-  origins.push(request.nextUrl.origin);
-
   if (process.env.NODE_ENV !== "production") {
+    const host = request.headers.get("host");
+    if (host) origins.push(`http://${host}`, `https://${host}`);
     origins.push("http://localhost:3000", "http://127.0.0.1:3000");
   }
+
   return origins;
 }
 
