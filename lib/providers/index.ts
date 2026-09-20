@@ -3,6 +3,8 @@ import { createDeepgramTranscription } from "./deepgram";
 import { heuristicDirection } from "./direction";
 import { createElevenLabsSynthesis } from "./elevenlabs";
 import { ruleMasking } from "./masking";
+import { frameMasking } from "@/lib/masking/service";
+import { VisionLocator } from "@/lib/masking/locator";
 import { mockProviders } from "./mock";
 import { QueuedRenderProvider } from "./queued-render";
 import type { ProviderSet } from "./types";
@@ -53,10 +55,20 @@ function liveProviders(): ProviderSet {
     transcription: createDeepgramTranscription({ apiKey: deepgramKey }),
     synthesis: createElevenLabsSynthesis({ apiKey: elevenLabsKey, workspaceId }),
     translation: createAnthropicTranslation({ apiKey: anthropicKey }),
-    // Direction and masking are ours. There is no vendor to swap in, which is
-    // why they look the same in both sets.
+    // Direction is ours; there is no vendor to swap in, which is why it
+    // looks the same in both sets.
     direction: heuristicDirection,
-    masking: ruleMasking,
+    // Masking in live mode can honour rules over frame contents, because a
+    // text locator is available. Mock mode keeps `ruleMasking`, which
+    // refuses those rules out loud rather than returning an empty region
+    // list that reads as "nothing to hide".
+    masking: frameMasking({
+      locator: new VisionLocator({ apiKey: anthropicKey }),
+      // Two a second catches a page a viewer could read. Faster costs a
+      // model call per frame of every recording, for text that would have
+      // to appear and vanish inside 250ms to be missed.
+      fps: 2,
+    }),
     // Rendering goes through the durable queue in both modes; in live mode it
     // is the only option, because a lost render is a lost customer hour.
     render: new QueuedRenderProvider(workspaceId),

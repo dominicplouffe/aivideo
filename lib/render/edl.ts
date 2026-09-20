@@ -1,4 +1,5 @@
 import type { Project, Segment } from "@/lib/app-data";
+import type { MaskedRegion } from "@/lib/providers/types";
 
 /**
  * The edit decision list.
@@ -200,7 +201,15 @@ export interface BuildEdlInput {
   captions?: boolean;
   zoomEnabled?: boolean;
   /** Regions from the masking provider, in source time. */
-  masks?: { at: number; until: number; rect: [number, number, number, number]; style: string }[];
+  /**
+   * Regions from the masking provider, in source time.
+   *
+   * Geometry and treatment only. The provider also reports *why* each region
+   * exists, which belongs in the recording's manifest rather than in an edit
+   * decision list — the encoder has no use for it and carrying it here would
+   * make every caller invent a reason.
+   */
+  masks?: Pick<MaskedRegion, "at" | "until" | "rect" | "style">[];
   /** Synthesized narration, one clip per surviving segment. */
   narration?: { segIndex: number; url: string; durationSec: number; voiceId?: string }[];
   musicUrl?: string;
@@ -293,7 +302,9 @@ export function buildEdl(input: BuildEdlInput): Edl {
       from,
       until,
       rect: region.rect,
-      style: (region.style as EdlMask["style"]) ?? "blur",
+      // No cast: the provider contract names the same three styles the
+      // encoder understands, so a fourth one cannot reach here unnoticed.
+      style: region.style ?? "blur",
     });
   }
 

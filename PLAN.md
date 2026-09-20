@@ -125,9 +125,18 @@ actually evaluate instead of returning an empty region list that reads like
    Chromium. Firefox and Safari ports are still open.
 2. **Desktop apps** (macOS, Windows) for full-desktop capture, system audio and
    hardware encoding.
-3. **Masking at capture time** — ~~selectors~~ done and enforced in the
-   extension; detectors, regions and patterns still need the frame-level
-   service that `lib/providers/masking.ts` currently refuses to fake.
+3. ~~**Masking at capture time**~~ **Done, both lines.** Selectors are
+   enforced in the extension before the compositor paints, so unmasked
+   pixels never exist in a file. Detectors, regions and patterns now have
+   the frame-level service `lib/providers/masking.ts` used to refuse to
+   fake: frames sampled through a pipe (never to disk), text located by a
+   vision model, sensitivity decided separately so it is testable without an
+   OCR engine, and per-frame hits expanded into timeline regions that bridge
+   the frames nobody inspected. Everything errs towards masking — Luhn
+   raises confidence and never vetoes. A frame that cannot be read fails the
+   render rather than passing as clean. Verified in the pixels: 95% of the
+   detail inside the box is gone while the mask is on, and unchanged after
+   it ends. See `lib/masking/README.md`.
 4. ~~**DOM snapshotting** per step, with assets inlined~~ **Done.** Scripts
    stripped, field values withheld, shadow DOM preserved, assets absolutised
    at capture and inlined offline against a budget. The tour model pairs
