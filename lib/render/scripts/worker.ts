@@ -1,14 +1,20 @@
 import { randomUUID } from "node:crypto";
 import { closeDb, isDatabaseConfigured } from "@/lib/db/client";
+import { processWebhookOne } from "@/lib/webhooks/worker";
 import { processOne } from "../worker";
 
 /**
- * The render worker process.
+ * The worker process.
  *
  * A loop, a poll interval and a shutdown signal — nothing else. The loop
  * lives here rather than in the library because the thing that needs to
  * interrupt it is the process, and a library function has no business
  * deciding when to stop.
+ *
+ * It drains renders first and webhooks second. A customer waiting on a video
+ * cares more about it than the receiver of its announcement does, and a
+ * webhook queued by a render should not be delivered before the render it
+ * describes has finished being recorded.
  *
  *   DATABASE_URL=... npm run worker
  */
@@ -47,16 +53,26 @@ async function main() {
         },
       });
 
-      if (!outcome) {
-        await new Promise((resolve) => setTimeout(resolve, POLL_MS));
+      if (outcome) {
+        console.log(
+          outcome.status === "completed"
+            ? `[${workerId}] ${outcome.jobId} rendered — ${outcome.durationSec?.toFixed(2)}s, ${outcome.bytes} bytes`
+            : `[${workerId}] ${outcome.jobId} render failed — ${outcome.error}`,
+        );
         continue;
       }
 
-      console.log(
-        outcome.status === "completed"
-          ? `[${workerId}] ${outcome.jobId} completed — ${outcome.durationSec?.toFixed(2)}s, ${outcome.bytes} bytes`
-          : `[${workerId}] ${outcome.jobId} failed — ${outcome.error}`,
-      );
+      const delivery = await processWebhookOne({ workerId });
+      if (delivery) {
+        console.log(
+          delivery.status === "completed"
+            ? `[${workerId}] ${delivery.jobId} delivered — HTTP ${delivery.httpStatus}`
+            : `[${workerId}] ${delivery.jobId} delivery failed — ${delivery.error}`,
+        );
+        continue;
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, POLL_MS));
     } catch (error) {
       // A failure here is the queue itself, not a job. Back off rather than
       // spinning against a database that is down.

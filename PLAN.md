@@ -95,15 +95,18 @@ The largest remaining block. Nothing above the provider boundary changes.
    is horizontal: GPU encoding, autoscaling and a cluster to run the worker
    on — deployment, not design. See `lib/render/README.md`.
 5. ~~**Synthesis and cloning adapters.**~~ **Done.** ElevenLabs, requesting raw
-   PCM so span durations are exact rather than decoded, and refusing to clone a
-   voice without a recorded consent phrase. Revocation propagating to future
-   renders is still open.
+   PCM so span durations are exact rather than decoded, refusing to clone a
+   voice without a recorded consent phrase, and refusing to render with one
+   whose consent was later withdrawn.
 6. ~~**Job queue.**~~ **Done.** `FOR UPDATE SKIP LOCKED` claiming, lease-based
-   crash recovery, exponential backoff, dead-lettering, idempotency keys.
-   Webhook emission is still open.
+   crash recovery, exponential backoff, dead-lettering, idempotency keys, and
+   outbound webhook delivery on the same machinery.
 
-Still open in this phase: webhook emission on job completion, and revoking a
-cloned voice so future renders stop using it.
+6.5 and 6.6, closing the phase: **outbound webhooks** ride the same durable
+queue as renders, signed with a timestamped HMAC so a captured delivery
+cannot be replayed; and **withdrawing consent for a cloned voice** now stops
+renders that were queued while consent still stood, checked at the last
+moment before bytes exist.
 
 Also done in this phase, beyond the original list: an Anthropic translation
 adapter that enforces the glossary and the shot's length budget rather than

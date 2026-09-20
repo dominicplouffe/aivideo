@@ -7,7 +7,7 @@ import { after, before, beforeEach, describe, it } from "node:test";
 import { eq } from "drizzle-orm";
 import { closeDb, getDb, isDatabaseConfigured } from "@/lib/db/client";
 import * as s from "@/lib/db/schema";
-import { enqueue, getJob } from "@/lib/jobs/queue";
+import { claim, enqueue, getJob } from "@/lib/jobs/queue";
 import { LocalStorage, setStorage } from "@/lib/storage";
 import { processOne } from "./worker";
 import { runFfmpeg } from "./ffmpeg";
@@ -114,6 +114,81 @@ describe("render worker", { skip: RUN ? false : "DATABASE_URL and ffmpeg are bot
       path: `renders/${job.id}/render.mp4`,
     });
     assert.equal(bytes.byteLength > 1000, true);
+  });
+
+  it("refuses to render with a voice whose consent was withdrawn", async () => {
+    const db = getDb();
+    await db.delete(s.members).where(eq(s.members.workspaceId, WS));
+    const [member] = await db.insert(s.members).values({
+      workspaceId: WS, name: "Renata", email: "r@example.com", role: "creator",
+    }).returning();
+    const [voice] = await db.insert(s.voices).values({
+      workspaceId: WS,
+      providerVoiceId: "el_clone_revoked",
+      name: "Renata",
+      kind: "clone",
+      consentSubjectId: member.id,
+      consentRecordedAt: new Date("2026-03-04T00:00:00Z"),
+      // Already withdrawn when the job is claimed — the ordering that matters,
+      // because the job was queued while consent still stood.
+      revokedAt: new Date("2026-06-01T00:00:00Z"),
+    }).returning();
+
+    const sourcePath = await sourceVideo();
+    const edl = edlFor(sourcePath);
+    const { job } = await enqueue({
+      workspaceId: WS,
+      kind: "render",
+      payload: {
+        edl: {
+          ...edl,
+          audio: [
+            { kind: "narration", url: `file://${sourcePath}`, at: 0, durationSec: 1, gainDb: 0, voiceId: voice.id },
+          ],
+        },
+      },
+    });
+
+    const outcome = await processOne({ workerId: "w1", scratchRoot: dir });
+
+    assert.equal(outcome?.status, "failed");
+    assert.match(outcome?.error ?? "", /consent was withdrawn/);
+    const stored = await getJob(job.id);
+    // Permanent: no number of retries restores someone's permission.
+    assert.match(stored?.lastError ?? "", /permanent:/);
+
+    await db.delete(s.voices).where(eq(s.voices.workspaceId, WS));
+    await db.delete(s.members).where(eq(s.members.workspaceId, WS));
+  });
+
+  it("announces a completed render when the submitter asked for one", async () => {
+    const sourcePath = await sourceVideo();
+    const { job } = await enqueue({
+      workspaceId: WS,
+      kind: "render",
+      payload: { edl: edlFor(sourcePath) },
+      webhookUrl: "https://hooks.example/demoriff",
+    });
+
+    const outcome = await processOne({ workerId: "w1", scratchRoot: dir });
+    assert.equal(outcome?.status, "completed");
+
+    // The announcement is queued, not sent inline: a slow receiver must not
+    // hold a render worker hostage.
+    const delivery = await claim("w-webhook", ["webhook"]);
+    assert.notEqual(delivery, null);
+    const payload = delivery!.payload as { url: string; event: { type: string; data: Record<string, unknown> } };
+    assert.equal(payload.url, "https://hooks.example/demoriff");
+    assert.equal(payload.event.type, "render.completed");
+    assert.equal(payload.event.data.renderId, job.id);
+    assert.equal(Math.abs(Number(payload.event.data.durationSec) - 6) < 0.1, true);
+  });
+
+  it("does not announce anything when no webhook was requested", async () => {
+    const sourcePath = await sourceVideo();
+    await enqueue({ workspaceId: WS, kind: "render", payload: { edl: edlFor(sourcePath) } });
+    await processOne({ workerId: "w1", scratchRoot: dir });
+    assert.equal(await claim("w-webhook", ["webhook"]), null);
   });
 
   it("returns null rather than spinning when the queue is empty", async () => {

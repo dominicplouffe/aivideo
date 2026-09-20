@@ -33,6 +33,8 @@ export interface Job {
   lastError: string | null;
   runAfter: Date;
   createdAt: Date;
+  /** Where to announce this job's outcome, when the caller asked for one. */
+  webhookUrl: string | null;
 }
 
 export interface EnqueueOptions {
@@ -84,6 +86,7 @@ function toJob(r: typeof s.jobs.$inferSelect): Job {
     lastError: r.lastError,
     runAfter: r.runAfter,
     createdAt: r.createdAt,
+    webhookUrl: r.webhookUrl,
   };
 }
 
@@ -210,6 +213,7 @@ interface RawJobRow {
   /** Postgres timestamps arrive as strings on a raw result, not as Dates. */
   run_after: string | Date;
   created_at: string | Date;
+  webhook_url: string | null;
 }
 
 function fromRawRow(r: RawJobRow): Job {
@@ -228,6 +232,7 @@ function fromRawRow(r: RawJobRow): Job {
     // first line of code that does arithmetic on it.
     runAfter: new Date(r.run_after),
     createdAt: new Date(r.created_at),
+    webhookUrl: r.webhook_url,
   };
 }
 

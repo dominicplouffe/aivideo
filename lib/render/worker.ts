@@ -4,6 +4,7 @@ import path from "node:path";
 import { claim, complete, fail, heartbeat, type Job } from "@/lib/jobs/queue";
 import { getStorage } from "@/lib/storage";
 import { ProviderError } from "@/lib/providers/errors";
+import { emitEvent, type WebhookEventType } from "@/lib/webhooks/outbound";
 import { buildEdl, validateEdl, type Edl } from "./edl";
 import { compile, probe, runFfmpeg, toSrt } from "./ffmpeg";
 
@@ -134,6 +135,42 @@ export async function renderEdl(
 }
 
 /**
+ * Refuses a render whose narration was spoken by a withdrawn voice.
+ *
+ * Consent is not a checkbox at creation time. Someone who recorded a voice
+ * clone for their employer and then left can withdraw it, and the promise
+ * that makes that meaningful is that no video is produced with their voice
+ * afterwards — including a re-render of a project approved months ago. The
+ * check belongs here, at the last moment before the bytes exist, because
+ * every earlier gate can be passed by a job that was queued before the
+ * revocation.
+ *
+ * A voice this database has never seen is allowed through: unknown is not
+ * the same as revoked, and treating it as such would fail every render in a
+ * deployment whose voices are not yet imported.
+ */
+async function assertVoicesUsable(edl: Edl): Promise<void> {
+  const voiceIds = edl.audio
+    .filter((track) => track.kind === "narration" && track.voiceId)
+    .map((track) => track.voiceId!);
+  if (voiceIds.length === 0) return;
+
+  const { isDatabaseConfigured } = await import("@/lib/db/client");
+  if (!isDatabaseConfigured()) return;
+
+  const { findRevoked } = await import("@/lib/db/repositories/voices");
+  const revoked = await findRevoked(voiceIds);
+  if (revoked.length === 0) return;
+
+  throw new ProviderError(
+    `Refusing to render: consent was withdrawn for ${revoked
+      .map((voice) => `${voice.name} (${voice.id})`)
+      .join(", ")}. Re-record the narration with a voice that is still permitted.`,
+    { provider: "render-worker", retryable: false },
+  );
+}
+
+/**
  * Claims and processes one job. Returns null when the queue is empty.
  *
  * One job per call, by design: a worker loop belongs to the process that owns
@@ -152,6 +189,7 @@ export async function processOne(options: RenderWorkerOptions): Promise<RenderOu
   let dir: string | null = null;
   try {
     const edl = await (options.resolveEdl ?? defaultResolveEdl)(job);
+    await assertVoicesUsable(edl);
 
     const result = await renderEdl(edl, {
       scratchRoot: options.scratchRoot,
@@ -177,6 +215,15 @@ export async function processOne(options: RenderWorkerOptions): Promise<RenderOu
       renderedAt: new Date().toISOString(),
     });
 
+    await announce(job, "render.completed", {
+      renderId: job.id,
+      projectId: edl.projectId,
+      locale: edl.locale,
+      durationSec: result.durationSec,
+      bytes: result.bytes,
+      url: signed.url,
+    });
+
     return {
       jobId: job.id,
       status: "completed",
@@ -190,11 +237,49 @@ export async function processOne(options: RenderWorkerOptions): Promise<RenderOu
     // attempts immediately rather than letting backoff repeat a certain
     // failure for the next twenty minutes.
     const permanent = error instanceof ProviderError && !error.retryable;
-    await fail(job.id, options.workerId, permanent ? `permanent: ${message}` : message);
+    const outcome = await fail(job.id, options.workerId, permanent ? `permanent: ${message}` : message);
+    // Announce a failure only once the queue has stopped retrying it. A
+    // customer does not want three "render failed" alerts for one render
+    // that eventually succeeded on the third attempt.
+    if (outcome.status === "dead") {
+      await announce(job, "render.failed", {
+        renderId: job.id,
+        projectId: (job.payload as { projectId?: string }).projectId ?? null,
+        error: message,
+        attempts: job.attempts,
+      });
+    }
     return { jobId: job.id, status: "failed", error: message };
   } finally {
     clearInterval(beat);
     if (dir) await rm(dir, { recursive: true, force: true });
+  }
+}
+
+/**
+ * Queues the outcome announcement, when the submitter asked for one.
+ *
+ * A failure to *queue* a webhook must never fail the render that succeeded.
+ * The video exists and is stored; a missing notification is a smaller
+ * problem than a job marked failed after its work was done.
+ */
+async function announce(
+  job: Job,
+  type: WebhookEventType,
+  data: Record<string, unknown>,
+): Promise<void> {
+  if (!job.webhookUrl) return;
+  try {
+    await emitEvent({
+      workspaceId: job.workspaceId,
+      type,
+      url: job.webhookUrl,
+      data,
+      // One announcement per job per outcome, however often this runs.
+      idempotencyKey: `${type}:${job.id}`,
+    });
+  } catch (error) {
+    console.error(`[render] could not queue ${type} for ${job.id}:`, error);
   }
 }
 

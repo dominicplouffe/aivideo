@@ -70,6 +70,12 @@ export interface EdlAudio {
   gainDb: number;
   /** Narration ducks music by this much while it plays. */
   ducksBy?: number;
+  /**
+   * Which voice spoke this. Recorded so a render can be refused when the
+   * speaker has since withdrawn consent — a check that is impossible if the
+   * EDL only remembers a URL to some audio.
+   */
+  voiceId?: string;
 }
 
 export interface EdlOutput {
@@ -196,7 +202,7 @@ export interface BuildEdlInput {
   /** Regions from the masking provider, in source time. */
   masks?: { at: number; until: number; rect: [number, number, number, number]; style: string }[];
   /** Synthesized narration, one clip per surviving segment. */
-  narration?: { segIndex: number; url: string; durationSec: number }[];
+  narration?: { segIndex: number; url: string; durationSec: number; voiceId?: string }[];
   musicUrl?: string;
   brand?: { colors: string[]; font: string; captionStyle: string };
   resolution?: keyof typeof RESOLUTIONS;
@@ -327,6 +333,7 @@ export function buildEdl(input: BuildEdlInput): Edl {
       at: first.outputStart,
       durationSec: clip.durationSec,
       gainDb: 0,
+      voiceId: clip.voiceId ?? project.voice,
     });
   }
   if (input.musicUrl) {
