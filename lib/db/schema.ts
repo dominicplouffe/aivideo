@@ -161,6 +161,73 @@ export const sessions = pgTable(
 );
 
 /* ============================================================
+   Single sign-on and directory sync
+   ============================================================ */
+
+/**
+ * An identity provider connection, and the workspace it lands in.
+ *
+ * This row is the trust boundary for SSO. An assertion arrives carrying an
+ * email address and a connection id, and the only question that matters is
+ * which workspace that person is now a member of. Answering it from the
+ * email domain would mean anyone who can prove control of an address at a
+ * customer's domain joins that customer's workspace — including through an
+ * identity provider the customer never configured. Answering it from the
+ * connection id means the workspace admin decided, once, in a row they own.
+ *
+ * `domains` narrows that further rather than widening it: a connection may
+ * provision only addresses at domains the workspace has claimed, so a
+ * misconfigured identity provider that asserts `attacker@gmail.com` creates
+ * nothing.
+ */
+export const ssoConnections = pgTable(
+  "sso_connections",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workspaceId: uuid("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+    /** One vendor today. Named so a second does not require a migration. */
+    provider: text("provider").notNull().default("workos"),
+    /** The connection as the identity vendor names it. The binding itself. */
+    connectionId: text("connection_id").notNull(),
+    organizationId: text("organization_id"),
+    /** Email domains this connection may provision. Empty means none. */
+    domains: jsonb("domains").$type<string[]>().notNull().default(sql`'[]'::jsonb`),
+    /**
+     * The role a just-in-time member starts with.
+     *
+     * Defaults to the least privilege the product has. A new account that
+     * arrives from a directory nobody has reviewed should be able to watch
+     * demos, not publish them.
+     */
+    defaultRole: roleEnum("default_role").notNull().default("viewer"),
+    /** Identity-provider group name to role, applied on every assertion. */
+    roleMappings: jsonb("role_mappings").$type<Record<string, string>>().notNull().default(sql`'{}'::jsonb`),
+    /**
+     * Whether an unknown address may create a member.
+     *
+     * Off means the directory is the source of truth and SCIM does the
+     * creating; an assertion for somebody SCIM has not sent is refused.
+     */
+    justInTime: boolean("just_in_time").notNull().default(true),
+    /** SHA-256 of the SCIM bearer token. The token exists once, at issue. */
+    scimTokenHash: text("scim_token_hash"),
+    /** Shown in the UI so an admin can tell two tokens apart. */
+    scimTokenHint: text("scim_token_hint"),
+    scimTokenIssuedAt: timestamp("scim_token_issued_at", { withTimezone: true }),
+    scimLastSyncAt: timestamp("scim_last_sync_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    disabledAt: timestamp("disabled_at", { withTimezone: true }),
+  },
+  (t) => [
+    // One connection belongs to one workspace, globally. Without this a
+    // second workspace could claim a connection and receive its logins.
+    uniqueIndex("sso_connections_connection_key").on(t.connectionId),
+    uniqueIndex("sso_connections_scim_token_key").on(t.scimTokenHash),
+    index("sso_connections_workspace_idx").on(t.workspaceId),
+  ],
+);
+
+/* ============================================================
    Brand, voices, masking
    ============================================================ */
 

@@ -50,6 +50,13 @@
       "when": 1789934238807,
       "tag": "0006_smart_lionheart",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1789938395456,
+      "tag": "0007_sso_connections",
+      "breakpoints": true
     }
   ]
 }

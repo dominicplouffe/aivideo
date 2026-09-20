@@ -26,7 +26,15 @@ export interface AuditInput {
   action: string;
   resourceType: string;
   resourceId?: string | null;
-  actor?: Pick<Actor, "memberId" | "email"> | null;
+  /**
+   * Who acted.
+   *
+   * `memberId` is nullable because the log has to be able to record an
+   * identity that is not a member — a single sign-on assertion refused
+   * before any row was written is exactly the kind of thing a workspace
+   * administrator needs to see, and it has an email address but no member.
+   */
+  actor?: { memberId: string | null; email: string | null } | null;
   ip?: string | null;
   metadata?: Record<string, unknown> | null;
 }

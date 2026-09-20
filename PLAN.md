@@ -136,12 +136,20 @@ actually evaluate instead of returning an empty region list that reads like
 
 ## Phase 8 — Auth, billing, governance
 
-1. **WorkOS for SAML SSO and SCIM.** The session layer beneath it is ~~done~~:
-   database-backed sessions with hashed tokens, idle and absolute expiry,
-   rotation on sign-in and privilege change, and offboarding that ends live
-   sessions at once. Cross-origin writes are refused in `proxy.ts` for every
-   API route. What remains is the identity provider itself — the assertion
-   lands in `POST /api/auth`, which already does everything after it.
+1. ~~**WorkOS for SAML SSO and SCIM.**~~ **Done.** The connection decides
+   which workspace an assertion lands in — never the email domain, which
+   would mean anybody who can get an identity provider to assert an address
+   at a customer's domain joins that customer's workspace. `state` is
+   signed, expiring and bound to a nonce cookie, so a code obtained by one
+   browser cannot be redeemed in another; the return path travels inside the
+   signed blob and is rejected unless it is a same-site path. Group mappings
+   assign roles, most privileged wins, and never ownership. SCIM 2.0 Users
+   is served at `/api/scim/v2` with a per-connection bearer token stored
+   only as a hash, and deactivation ends every live session rather than only
+   marking the row. Verified end to end against a live server: the flow,
+   login CSRF from a second browser, three open-redirect attempts, and an
+   offboarding that killed a live session mid-request. SCIM Groups is still
+   open. See `lib/auth/README.md`.
 2. **Stripe.** The metering engine is ~~done~~: a usage ledger in seconds,
    idempotent against queue retries, top-ups that carry across periods,
    proration by the day, the 80% notice fired once, and a hard stop that is

@@ -197,3 +197,106 @@ deploying would do while wiring up SSO — would have enabled the
 development-only email sign-in, where anybody becomes anybody by typing an
 address. It now refuses in production unconditionally; when the real
 exchange exists it gets its own branch, and this one stays as it is.
+
+
+## Single sign-on
+
+`lib/auth/sso/`, and the whole of it comes down to one question: **who
+decides which workspace this person joins?**
+
+The tempting answer is the email domain — `@meridian.com` joins Meridian. It
+is also wrong. It means anybody who can get *any* identity provider to
+assert an address at a customer's domain becomes a member of that customer's
+workspace, and the customer never agreed to trust that identity provider.
+Domain ownership and "this directory speaks for us" are different claims.
+
+So the **connection** decides. A workspace admin registers one, and every
+assertion that arrives through it lands in that workspace and nowhere else
+(`sso_connections.connection_id` is unique across the whole table, so a
+second workspace cannot claim a connection and start receiving its logins).
+The email domain then only *narrows* what that connection may create: a
+connection provisions addresses at domains the workspace has claimed, and an
+empty claim list means none rather than all, because an allowlist that fails
+open is not an allowlist.
+
+Typing a work address still works, because being handed a connection id is
+not a sign-in experience. The domain routes the request and nothing more —
+the connection re-checks its own claimed domains before a row is written, so
+a wrong guess can only lead to a login that then refuses. Two workspaces
+claiming the same domain is refused rather than resolved; guessing would
+send somebody into the wrong company's identity provider.
+
+### The state parameter
+
+`state` is the only thing standing between the callback and login CSRF, and
+that attack is worth stating plainly: the attacker completes an
+authorization flow as themselves, stops before the redirect, and gets a
+victim's browser to load the callback carrying *their* code. The victim is
+now signed into the attacker's account, and every recording, script and
+brand kit they make next lands somewhere the attacker can read.
+
+Three properties, each load-bearing:
+
+1. **Signed**, so it cannot be minted by whoever is driving the browser.
+2. **Expiring** (ten minutes), so one captured from a proxy log is not useful.
+3. **Bound to a nonce that is also a cookie**, so a state issued to one
+   browser cannot be replayed in another. A signature alone proves only that
+   *we* issued it — not that we issued it to the browser presenting it.
+
+The return path rides inside the signed blob rather than as its own query
+parameter, and is rejected unless it is a same-site path. A post-login
+redirect is exactly what phishing wants, because the person has just been
+told to trust what they are looking at.
+
+### Roles from a directory
+
+Group mappings are data on the connection. The highest privilege wins rather
+than the first listed, so somebody in both `engineering` and `demo-admins`
+gets the admin role regardless of the order the directory sent them in.
+
+**Ownership is never assigned from a group.** It is a billing and deletion
+relationship, and letting a group name confer it would mean a directory
+administrator could take a workspace from the person paying for it. A role
+*change* ends every session that predates it, because a demotion that takes
+effect at the next sign-in takes effect exactly when it matters least.
+
+A new account defaults to `viewer` — the least privilege the product has. An
+account arriving from a directory nobody has reviewed should be able to
+watch demos, not publish them.
+
+## Directory sync (SCIM 2.0)
+
+`lib/auth/scim/`, served at `/api/scim/v2`. Creating accounts is the
+convenient half; **removing them on the day somebody leaves is the half
+worth having**, and it is the half that goes wrong when it is a person's job
+to remember.
+
+So deactivation does two things, not one: it marks the member row *and* ends
+every live session behind it. A deactivated member whose browser tab still
+works has been marked, not offboarded. A `DELETE` deactivates too — audit
+entries, recordings and render approvals all point at a member row, and
+removing it would either cascade away evidence or leave the trail pointing
+at nothing.
+
+Nothing in a SCIM request names a workspace. The bearer token names a
+connection, the connection names the workspace, and every query is scoped to
+it before a filter is even parsed. A directory asking about a member in
+another workspace gets the same answer as for an id that does not exist,
+because any other answer is an enumeration oracle.
+
+Only the token's hash is stored, for the same reason as the session table.
+`active: false` is read in all three shapes vendors send it — including
+Entra's string `"False"`, which read as truthy would make an offboarding
+silently do nothing.
+
+The filter grammar is parsed, not interpreted: `userName eq` and
+`externalId eq` are handled and everything else is refused with
+`invalidFilter`. A half-implemented expression evaluator over a provisioning
+endpoint returns the wrong set quietly, which means acting on the wrong
+person. `ServiceProviderConfig` declares the gaps honestly — no bulk, no
+sort, no password change — because a directory told that bulk exists will
+use it, and then every offboarding fails.
+
+**Still open:** SCIM Groups. Role assignment works today through the group
+claims on an assertion; syncing group *membership* as its own resource is
+the remaining piece.
