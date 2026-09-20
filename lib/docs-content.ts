@@ -200,10 +200,12 @@ export const docSections: DocSection[] = [
             ["Personalized link", "Unique per recipient", "Identified, tracks forwards"],
           ]},
           { t: "h2", text: "Embedding" },
-          { t: "code", lang: "html", code: `<!-- Async, 34 KB, no layout shift -->
-<div data-demoriff="asset_9f21c8" data-aspect="16:9"></div>
+          { t: "code", lang: "html", code: `<!-- Async, 6 KB, no layout shift -->
+<div data-demoriff="asset_9f21c8" data-aspect="16:9"
+     style="aspect-ratio:16/9;width:100%"></div>
 <script src="https://embed.demoriff.com/v1.js" async></script>` },
-          { t: "p", text: "The embed reserves its aspect ratio before load, so it never causes cumulative layout shift. It respects prefers-reduced-motion and does not autoplay with sound under any circumstances." },
+          { t: "p", text: "Keep the inline aspect-ratio. It reserves the exact height in markup, before our script has loaded, which is what makes cumulative layout shift zero rather than merely small — a script, however small and however async, can still run after the browser has painted. The runtime sets the same ratio when it mounts, so an embed pasted without it still works; it just shifts once on a slow connection." },
+          { t: "p", text: "The embed respects prefers-reduced-motion and does not autoplay with sound under any circumstances." },
           { t: "h2", text: "Custom domains" },
           { t: "p", text: "On Team and above, point a CNAME at share.demoriff.com and add the domain in workspace settings. Certificates are issued automatically." },
         ],

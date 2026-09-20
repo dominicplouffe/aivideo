@@ -316,12 +316,13 @@ export function DemoBuilder({ project }: { project: Project }) {
             <Group label="Embed">
               <pre className="overflow-x-auto rounded-xl border border-[var(--line)] bg-ink-900 p-2.5 font-mono text-[0.5625rem] leading-relaxed text-fg-muted">
 {`<div data-demoriff="${project.id}"
-     data-mode="interactive"></div>
+     data-mode="interactive"
+     style="aspect-ratio:16/9;width:100%"></div>
 <script src="https://embed.demoriff.com/v1.js"
         async></script>`}
               </pre>
               <p className="mt-2 text-2xs leading-snug text-fg-faint">
-                34 KB async runtime. Text is server-rendered so search engines index it.
+                6 KB async runtime. Text is server-rendered so search engines index it.
               </p>
             </Group>
           </div>

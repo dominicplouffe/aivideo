@@ -161,8 +161,11 @@ actually evaluate instead of returning an empty region list that reads like
 
 ## Phase 9 — Distribution
 
-1. Embed runtime — a 34 KB async script with no layout shift, an iframe
-   fallback, and server-rendered text for indexing.
+1. ~~Embed runtime~~ **Done.** A 3.2 KB async script against an enforced 6 KB
+   budget, zero layout shift measured with a real `PerformanceObserver`, lazy
+   below the fold, no globals, no cookies, and server-rendered step text that
+   a search engine can read with JavaScript disabled. See
+   `lib/embed/README.md`.
 2. Analytics ingestion: per-second retention at write scale, cookieless mode,
    CRM identity resolution.
 3. Help-centre connectors with two-way sync (Zendesk, Intercom, HelpScout,
@@ -197,18 +200,55 @@ actually evaluate instead of returning an empty region list that reads like
 
 ---
 
-## What is deliberately not real
+## What is real, and what is not
 
-Stated plainly so nothing here is mistaken for working infrastructure:
+Stated plainly, and kept current, so nothing here is mistaken for working
+infrastructure — or dismissed as a mock when it is not.
 
-- **Providers are mocked.** Transcription, synthesis, translation, direction,
-  masking and rendering return deterministic shaped data. The interfaces are
-  real; the implementations are not.
-- **Workspace data is seeded.** Eight projects with word-aligned transcripts,
-  members, analytics. No database.
-- **Auth accepts anything.** Sign-in routes to the app without verification.
-- **Customers and their numbers are fictional.** Northwind, Cardinal, Tessera,
-  Foldr, Halcyon and Meridian do not exist, and neither do their results.
-- **Recording is genuinely real.** `getDisplayMedia` and `MediaRecorder` do
-  capture your screen; the take plays back and downloads. What happens after —
-  transcription, editing, rendering — is simulated.
+**Real, and proven by tests that would fail if it broke:**
+
+- **Persistence.** Postgres with twelve tables, migrations, and the
+  constraints that matter enforced in the schema. The app falls back to
+  seeded fixtures when `DATABASE_URL` is unset, which is what keeps a fresh
+  clone explorable.
+- **The job queue.** `FOR UPDATE SKIP LOCKED` claiming, lease recovery,
+  backoff, dead-lettering, idempotency keys — exercised against a real
+  database under concurrency.
+- **Rendering.** An EDL, an FFmpeg compiler and a worker that produces a
+  finished MP4. The end-to-end tests render synthetic footage and probe the
+  result.
+- **Capture.** An MV3 extension that records a tab and its interaction log,
+  tested by loading the built extension into a real Chromium. Sensitive
+  fields are masked in the page before any frame is encoded.
+- **Interactive demos.** Real DOM snapshots, scripts stripped, replayed in a
+  sandboxed frame with no network access.
+- **Governance.** RBAC, an append-only hash-chained audit log, sessions that
+  revoke immediately, metering in seconds with an idempotent ledger.
+
+**Written but not exercised against the vendor:**
+
+- **Inference adapters.** Deepgram, ElevenLabs and Anthropic adapters exist
+  and are tested against stubbed transports — the request we build, the
+  fields we map, which failures retry. Nothing has run against a live key.
+- **S3 storage.** Same contract as the local adapter, unexercised without a
+  bucket.
+
+**Not built:**
+
+- **Single sign-on and directory sync.** The session layer beneath WorkOS is
+  done; the identity provider is not.
+- **Stripe.** The metering engine is done; subscriptions, payment methods and
+  invoice sync are not.
+- **Frame-level masking.** Detector and pattern rules need OCR and a
+  classifier. `lib/providers/masking.ts` throws on them rather than returning
+  an empty region list that reads like "nothing to hide".
+- **Desktop capture**, analytics ingestion, help-centre connectors and the
+  Riff Agent. The embed runtime exists and is measured; what it reports is
+  acknowledged and discarded until ingestion is built, which the endpoint
+  says in a comment rather than pretending to store.
+
+**Fictional by design:**
+
+- **Customers and their numbers.** Northwind, Cardinal, Tessera, Foldr,
+  Halcyon and Meridian do not exist, and neither do their results. Every
+  figure on the marketing site is illustrative.
