@@ -77,20 +77,34 @@ The three commercial decisions that fall out of that:
 
 The largest remaining block. Nothing above the provider boundary changes.
 
-1. **Persistence.** Postgres with Drizzle. Core tables: `workspaces`, `members`,
-   `recordings`, `projects`, `segments`, `renders`, `assets`, `locales`,
-   `brand_kits`, `voices`, `masking_policies`, `audit_events`.
-2. **Media storage.** S3 with multipart resumable upload, signed read URLs, and
-   per-workspace key scoping.
-3. **Transcription adapter.** Word-level alignment is non-negotiable — segment
-   alignment will not support the editing model.
+1. ~~**Persistence.** Postgres with Drizzle.~~ **Done.** Twelve tables, with
+   the constraints that matter enforced in the schema rather than in code —
+   `voices_clone_requires_consent` is the one to read first. Usage is metered
+   in seconds so partial minutes never round in our favour. See
+   `lib/db/README.md`.
+2. ~~**Media storage.**~~ **Done.** One contract, two adapters (local and S3),
+   workspace-scoped keys, signed time-limited reads, resumable multipart
+   upload. See `lib/storage/`.
+3. ~~**Transcription adapter.**~~ **Done.** Deepgram, with word-level
+   alignment, diarization and filler words explicitly requested — the last of
+   those is discarded by default and the editor cannot cut what the transcript
+   never admitted was there.
 4. **Render cluster.** GPU workers consuming an edit decision list. FFmpeg for
    compositing; the EDL format is already implied by the studio's timeline
-   model.
-5. **Synthesis and cloning adapters**, with the consent record stored alongside
-   each voice and revocation propagating to future renders.
-6. **Job queue.** Render, translate and re-render as durable jobs with
-   idempotency keys, retries and webhook emission.
+   model. *Next.*
+5. ~~**Synthesis and cloning adapters.**~~ **Done.** ElevenLabs, requesting raw
+   PCM so span durations are exact rather than decoded, and refusing to clone a
+   voice without a recorded consent phrase. Revocation propagating to future
+   renders is still open.
+6. ~~**Job queue.**~~ **Done.** `FOR UPDATE SKIP LOCKED` claiming, lease-based
+   crash recovery, exponential backoff, dead-lettering, idempotency keys.
+   Webhook emission is still open.
+
+Also done in this phase, beyond the original list: an Anthropic translation
+adapter that enforces the glossary and the shot's length budget rather than
+merely asking for them, and a masking engine that throws on rules it cannot
+actually evaluate instead of returning an empty region list that reads like
+"nothing to hide". See `lib/providers/README.md`.
 
 ## Phase 7 — Real capture
 
