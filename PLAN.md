@@ -165,7 +165,13 @@ actually evaluate instead of returning an empty region list that reads like
    DELETE for everyone; entries are numbered per workspace and hash-chained,
    so an alteration made with enough privilege to drop the trigger still
    leaves evidence. Erasure is possible only inside a transaction that
-   declares itself one. SIEM streaming is still open.
+   declares itself one. **SIEM streaming is now done too**: newline-delimited
+   JSON, ECS or ArcSight CEF to a customer's collector, cursored on the
+   chain's own sequence rather than a timestamp, advancing only after the
+   collector accepts — so the stream is at-least-once and never has holes.
+   Every event carries its chain hash, so a reader can verify from their own
+   copy. The collector token is sealed with AES-256-GCM rather than hashed,
+   because unlike every other credential here it has to be presented again.
 
 ## Phase 9 — Distribution
 

@@ -29,8 +29,17 @@ export interface WireRequest {
   method: string;
   headers: Record<string, string>;
   body: string;
-  /** The verified address to connect to. */
-  address: string;
+  /**
+   * The verified addresses to connect to, in order.
+   *
+   * All of them, not just the first. A host with one unreachable address
+   * and one good one is ordinary — `localhost` resolving to `::1` before
+   * `127.0.0.1` on a machine listening only on IPv4 is the everyday case —
+   * and pinning to a single answer would fail where an unpinned connection
+   * succeeds. Every address here has already passed the destination check,
+   * so offering all of them narrows nothing.
+   */
+  addresses: string[];
   signal?: AbortSignal;
 }
 
@@ -50,18 +59,29 @@ export const dial: Wire = (url, req) =>
         method: req.method,
         headers: { ...req.headers, "Content-Length": String(body.byteLength) },
         signal: req.signal,
-        // The pin. Every connection attempt for this request resolves to the
+        // The pin. Every connection attempt for this request resolves to an
         // address the destination check approved, and to nothing else.
         lookup: (_hostname, options, callback) => {
-          const family = req.address.includes(":") ? 6 : 4;
+          const entries = req.addresses.map((address) => ({
+            address,
+            family: address.includes(":") ? 6 : 4,
+          }));
+          if (entries.length === 0) {
+            (callback as (e: Error) => void)(new Error("No verified address to connect to."));
+            return;
+          }
           if (typeof options === "object" && options?.all) {
             (callback as unknown as (e: null, a: { address: string; family: number }[]) => void)(
               null,
-              [{ address: req.address, family }],
+              entries,
             );
             return;
           }
-          (callback as (e: null, a: string, f: number) => void)(null, req.address, family);
+          (callback as (e: null, a: string, f: number) => void)(
+            null,
+            entries[0].address,
+            entries[0].family,
+          );
         },
       },
       (response) => {

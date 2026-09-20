@@ -71,9 +71,9 @@ const PUBLIC_DNS = async () => ["93.184.216.34"];
 
 /** A stub wire that records the request and answers with a fixed status. */
 function wireReturning(status: number, body = "") {
-  const seen: { url: string; headers: Record<string, string>; body: string; address: string }[] = [];
+  const seen: { url: string; headers: Record<string, string>; body: string; addresses: string[] }[] = [];
   const wire: Wire = async (url, req) => {
-    seen.push({ url: url.toString(), headers: req.headers, body: req.body, address: req.address });
+    seen.push({ url: url.toString(), headers: req.headers, body: req.body, addresses: req.addresses });
     return { status, text: async () => body };
   };
   return { wire, seen };
@@ -105,7 +105,7 @@ test("a delivery connects to the address the check approved", async () => {
     resolve: async () => ["93.184.216.34"],
     wire,
   });
-  assert.equal(seen[0].address, "93.184.216.34");
+  assert.deepEqual(seen[0].addresses, ["93.184.216.34"]);
 });
 
 test("a destination on the private network is refused, and never retried", async () => {

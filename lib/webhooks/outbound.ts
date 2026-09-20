@@ -143,7 +143,7 @@ export async function deliver(
       method: "POST",
       headers,
       body,
-      address: destination.addresses[0],
+      addresses: destination.addresses,
       signal: controller.signal,
     });
 

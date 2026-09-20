@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { closeDb, isDatabaseConfigured } from "@/lib/db/client";
 import { processWebhookOne } from "@/lib/webhooks/worker";
+import { streamAll } from "@/lib/audit/siem";
 import { processOne } from "../worker";
 
 /**
@@ -16,10 +17,18 @@ import { processOne } from "../worker";
  * webhook queued by a render should not be delivered before the render it
  * describes has finished being recorded.
  *
+ * Audit streaming runs on its own clock rather than in that order. It is not
+ * queue work — the cursor on each destination *is* the queue — and it does
+ * not need to be timely to the second. Tying it to the poll loop would mean
+ * a busy render worker either starves the stream or hammers a customer's
+ * collector once per job.
+ *
  *   DATABASE_URL=... npm run worker
  */
 
 const POLL_MS = Number(process.env.RENDER_WORKER_POLL_MS ?? 2000);
+const AUDIT_STREAM_MS = Number(process.env.AUDIT_STREAM_INTERVAL_MS ?? 30_000);
+let nextStreamAt = 0;
 const workerId = process.env.RENDER_WORKER_ID ?? `render-${randomUUID().slice(0, 8)}`;
 
 let running = true;
@@ -44,6 +53,23 @@ async function main() {
 
   while (running) {
     try {
+      // First in the loop, not last. Every other branch here ends in
+      // `continue`, so a worker with a full render queue would never reach
+      // a stream step placed after them — and the stream would stop for
+      // exactly as long as the workspace was busy.
+      if (Date.now() >= nextStreamAt) {
+        nextStreamAt = Date.now() + AUDIT_STREAM_MS;
+        for (const streamed of await streamAll()) {
+          if (streamed.delivered > 0) {
+            console.log(
+              `[${workerId}] audit ${streamed.fromSeq + 1}-${streamed.toSeq} streamed to ${streamed.destinationId}`,
+            );
+          } else if (!streamed.ok) {
+            console.error(`[${workerId}] audit stream to ${streamed.destinationId} failed — ${streamed.error}`);
+          }
+        }
+      }
+
       const outcome = await processOne({
         workerId,
         onProgress: (jobId, fraction) => {

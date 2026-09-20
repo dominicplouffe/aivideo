@@ -22,6 +22,7 @@ export const maskRuleTypeEnum = pgEnum("mask_rule_type", ["detector", "selector"
 export const assetAccessEnum = pgEnum("asset_access", ["public", "email_gate", "password", "domain", "personalized"]);
 export const jobStatusEnum = pgEnum("job_status", ["queued", "running", "completed", "failed", "dead"]);
 export const usageKindEnum = pgEnum("usage_kind", ["render", "topup", "credit", "adjustment"]);
+export const siemFormatEnum = pgEnum("siem_format", ["json", "cef", "ecs"]);
 
 /* ============================================================
    Workspaces and people
@@ -224,6 +225,52 @@ export const ssoConnections = pgTable(
     uniqueIndex("sso_connections_connection_key").on(t.connectionId),
     uniqueIndex("sso_connections_scim_token_key").on(t.scimTokenHash),
     index("sso_connections_workspace_idx").on(t.workspaceId),
+  ],
+);
+
+/**
+ * Where a workspace's audit log is streamed.
+ *
+ * An enterprise buyer does not want a second place to look; they want these
+ * events in the tool their security team already watches. That makes this a
+ * customer-supplied URL dialled by a worker on our private network, which is
+ * the same shape as an outbound webhook and gets the same destination
+ * checks — see `lib/webhooks/destinations.ts`.
+ *
+ * `lastSeq` is a cursor into the workspace's own audit sequence rather than
+ * a timestamp. Timestamps tie, clocks move, and a cursor that can tie is a
+ * cursor that silently skips an entry. The sequence is dense and per
+ * workspace, so "everything after 412" has exactly one meaning.
+ */
+export const siemDestinations = pgTable(
+  "siem_destinations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workspaceId: uuid("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    format: siemFormatEnum("format").notNull().default("json"),
+    url: text("url").notNull(),
+    /** Usually `Authorization`; Splunk's collector wants that, Sumo does not. */
+    authHeaderName: text("auth_header_name"),
+    /**
+     * Sealed with AES-256-GCM, not hashed.
+     *
+     * Every other credential here is stored as a hash because we only need
+     * to recognise it again. This one has to be *presented* to the
+     * customer's collector on every delivery, so it must come back out.
+     */
+    authValueSealed: text("auth_value_sealed"),
+    /** Cursor into `audit_events.seq` for this workspace. */
+    lastSeq: integer("last_seq").notNull().default(0),
+    lastDeliveredAt: timestamp("last_delivered_at", { withTimezone: true }),
+    lastError: text("last_error"),
+    consecutiveFailures: integer("consecutive_failures").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    disabledAt: timestamp("disabled_at", { withTimezone: true }),
+  },
+  (t) => [
+    uniqueIndex("siem_destinations_workspace_name_key").on(t.workspaceId, t.name),
+    index("siem_destinations_workspace_idx").on(t.workspaceId),
   ],
 );
 

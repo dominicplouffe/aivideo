@@ -57,6 +57,13 @@
       "when": 1789938395456,
       "tag": "0007_sso_connections",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1789939293668,
+      "tag": "0008_siem_destinations",
+      "breakpoints": true
     }
   ]
 }
