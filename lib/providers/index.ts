@@ -1,4 +1,5 @@
 import { mockProviders } from "./mock";
+import { QueuedRenderProvider } from "./queued-render";
 import type { ProviderSet } from "./types";
 
 export * from "./types";
@@ -31,7 +32,17 @@ export function getProviders(): ProviderSet {
         "DEMORIFF_PROVIDERS=live requires vendor adapters. See lib/providers/index.ts.",
       );
     case "mock":
-    default:
+    default: {
+      // Even in mock mode, prefer the durable queue when a database exists.
+      // Losing a render on restart is the one mock behaviour that is not a
+      // fair stand-in for the real thing.
+      if (process.env.DATABASE_URL && process.env.DEMORIFF_WORKSPACE_ID) {
+        return {
+          ...mockProviders,
+          render: new QueuedRenderProvider(process.env.DEMORIFF_WORKSPACE_ID),
+        };
+      }
       return mockProviders;
+    }
   }
 }

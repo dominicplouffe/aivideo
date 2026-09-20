@@ -20,6 +20,7 @@ export const localeStatusEnum = pgEnum("locale_status", ["none", "queued", "rend
 export const voiceKindEnum = pgEnum("voice_kind", ["studio", "clone"]);
 export const maskRuleTypeEnum = pgEnum("mask_rule_type", ["detector", "selector", "region", "pattern"]);
 export const assetAccessEnum = pgEnum("asset_access", ["public", "email_gate", "password", "domain", "personalized"]);
+export const jobStatusEnum = pgEnum("job_status", ["queued", "running", "completed", "failed", "dead"]);
 
 /* ============================================================
    Workspaces and people
@@ -310,6 +311,55 @@ export const locales = pgTable(
     index("locales_status_idx").on(t.status),
   ],
 );
+
+/* ============================================================
+   Jobs — durable work
+   ============================================================ */
+
+export const jobs = pgTable(
+  "jobs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workspaceId: uuid("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+    kind: text("kind").notNull(),
+    status: jobStatusEnum("status").notNull().default("queued"),
+    payload: jsonb("payload").$type<Record<string, unknown>>().notNull(),
+    result: jsonb("result").$type<Record<string, unknown>>(),
+
+    // Replaying a key returns the original job rather than doing the work
+    // twice. A retried HTTP request must not produce a second render.
+    idempotencyKey: text("idempotency_key"),
+
+    priority: integer("priority").notNull().default(0),
+    attempts: integer("attempts").notNull().default(0),
+    maxAttempts: integer("max_attempts").notNull().default(5),
+
+    // Claimed work carries a lease. If a worker dies mid-job the lease
+    // expires and another worker picks it up, rather than the job being
+    // stuck "running" forever.
+    lockedBy: text("locked_by"),
+    leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
+
+    runAfter: timestamp("run_after", { withTimezone: true }).notNull().defaultNow(),
+    lastError: text("last_error"),
+    webhookUrl: text("webhook_url"),
+
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+  },
+  (t) => [
+    uniqueIndex("jobs_idempotency_key").on(t.workspaceId, t.kind, t.idempotencyKey),
+    // The claim query's index: ready work, best priority first, then oldest.
+    index("jobs_claim_idx").on(t.status, t.runAfter, t.priority, t.createdAt),
+    index("jobs_workspace_idx").on(t.workspaceId, t.createdAt),
+    check("jobs_attempts_bounded", sql`${t.attempts} >= 0 AND ${t.attempts} <= ${t.maxAttempts} + 1`),
+  ],
+);
+
+export const jobRelations = relations(jobs, ({ one }) => ({
+  workspace: one(workspaces, { fields: [jobs.workspaceId], references: [workspaces.id] }),
+}));
 
 /* ============================================================
    Audit — append only
