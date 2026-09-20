@@ -3,6 +3,7 @@ import { after, before, beforeEach, describe, it } from "node:test";
 import { eq } from "drizzle-orm";
 import { closeDb, getDb, isDatabaseConfigured } from "@/lib/db/client";
 import * as s from "@/lib/db/schema";
+import { eraseWorkspace } from "@/lib/db/erase";
 import { findRevoked, getVoice, reinstateVoice, revokeVoice } from "./voices";
 
 /**
@@ -20,7 +21,7 @@ let studioId = "";
 before(async () => {
   if (!RUN) return;
   const db = getDb();
-  await db.delete(s.workspaces).where(eq(s.workspaces.id, WS));
+  await eraseWorkspace(WS, "test setup");
   await db.insert(s.workspaces).values({ id: WS, slug: "voice-test", name: "Voice Test" });
   await db.insert(s.members).values({
     id: MEMBER, workspaceId: WS, name: "Renata", email: "r@example.com", role: "creator",
@@ -31,7 +32,7 @@ after(async () => {
   if (!RUN) return;
   const db = getDb();
   await db.delete(s.voices).where(eq(s.voices.workspaceId, WS));
-  await db.delete(s.workspaces).where(eq(s.workspaces.id, WS));
+  await eraseWorkspace(WS, "test teardown");
   await closeDb();
 });
 

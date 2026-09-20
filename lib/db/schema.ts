@@ -379,10 +379,29 @@ export const auditEvents = pgTable(
     ip: text("ip"),
     metadata: jsonb("metadata").$type<Record<string, unknown>>(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+
+    // --- tamper evidence ---------------------------------------------------
+    // An audit log that can be edited is a log of what someone wanted you to
+    // believe. Each entry is numbered within its workspace and hashed over
+    // its own contents plus the previous entry's hash, so removing or
+    // altering one breaks every hash after it. A trigger blocks UPDATE and
+    // DELETE outright; the chain is what catches a change made with
+    // privileges high enough to drop the trigger first.
+    //
+    // Nullable, and deliberately so: entries written before the chain
+    // existed have no honest hash, and inventing one at migration time
+    // would be a claim of integrity nobody can stand behind. Null means
+    // "predates the chain", and `verifyChain` starts at the first entry
+    // that has one.
+    seq: integer("seq"),
+    prevHash: text("prev_hash"),
+    hash: text("hash"),
   },
   (t) => [
     index("audit_workspace_created_idx").on(t.workspaceId, t.createdAt),
     index("audit_resource_idx").on(t.resourceType, t.resourceId),
+    uniqueIndex("audit_workspace_seq_key").on(t.workspaceId, t.seq),
+    check("audit_seq_positive", sql`${t.seq} > 0`),
   ],
 );
 

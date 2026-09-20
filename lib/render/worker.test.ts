@@ -7,6 +7,7 @@ import { after, before, beforeEach, describe, it } from "node:test";
 import { eq } from "drizzle-orm";
 import { closeDb, getDb, isDatabaseConfigured } from "@/lib/db/client";
 import * as s from "@/lib/db/schema";
+import { eraseWorkspace } from "@/lib/db/erase";
 import { claim, enqueue, getJob } from "@/lib/jobs/queue";
 import { LocalStorage, setStorage } from "@/lib/storage";
 import { processOne } from "./worker";
@@ -39,14 +40,14 @@ before(async () => {
   dir = await mkdtemp(path.join(tmpdir(), "demoriff-worker-"));
   setStorage(new LocalStorage(path.join(dir, "storage"), "test-secret"));
   const db = getDb();
-  await db.delete(s.workspaces).where(eq(s.workspaces.id, WS));
+  await eraseWorkspace(WS, "test setup");
   await db.insert(s.workspaces).values({ id: WS, slug: "worker-test", name: "Worker Test" });
 });
 
 after(async () => {
   if (!RUN) return;
   setStorage(null);
-  await getDb().delete(s.workspaces).where(eq(s.workspaces.id, WS));
+  await eraseWorkspace(WS, "test teardown");
   await closeDb();
   await rm(dir, { recursive: true, force: true });
 });

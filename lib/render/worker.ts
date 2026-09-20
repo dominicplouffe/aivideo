@@ -4,6 +4,7 @@ import path from "node:path";
 import { claim, complete, fail, heartbeat, type Job } from "@/lib/jobs/queue";
 import { getStorage } from "@/lib/storage";
 import { ProviderError } from "@/lib/providers/errors";
+import { recordQuietly } from "@/lib/audit/log";
 import { emitEvent, type WebhookEventType } from "@/lib/webhooks/outbound";
 import { buildEdl, validateEdl, type Edl } from "./edl";
 import { compile, probe, runFfmpeg, toSrt } from "./ffmpeg";
@@ -213,6 +214,24 @@ export async function processOne(options: RenderWorkerOptions): Promise<RenderOu
       billedSeconds: result.durationSec,
       bytes: result.bytes,
       renderedAt: new Date().toISOString(),
+    });
+
+    // Recorded quietly: the file exists and is stored, and reporting a
+    // finished render as failed because the trail was unavailable would
+    // leave the two records disagreeing forever. The failure is still loud
+    // in the operator's log.
+    await recordQuietly({
+      workspaceId: job.workspaceId,
+      action: "render.completed",
+      resourceType: "render",
+      resourceId: job.id,
+      metadata: {
+        projectId: edl.projectId,
+        locale: edl.locale,
+        billedSeconds: result.durationSec,
+        bytes: result.bytes,
+        voices: edl.audio.filter((t) => t.voiceId).map((t) => t.voiceId),
+      },
     });
 
     await announce(job, "render.completed", {

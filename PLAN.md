@@ -139,9 +139,15 @@ actually evaluate instead of returning an empty region list that reads like
 1. WorkOS for SAML SSO and SCIM; enforced domain capture.
 2. Stripe: subscriptions, metered video minutes, proration, top-ups, the 80%
    notice and the customer-controlled hard stop.
-3. RBAC across owner / admin / creator / reviewer / viewer, scoped per
-   workspace.
-4. Append-only audit log with SIEM streaming.
+3. ~~RBAC across owner / admin / creator / reviewer / viewer, scoped per
+   workspace.~~ **Done.** The matrix is data, written out in full, with the
+   workspace check inside the one authorisation seam rather than in each
+   route. See `lib/auth/README.md`.
+4. ~~Append-only audit log~~ **Done.** A database trigger refuses UPDATE and
+   DELETE for everyone; entries are numbered per workspace and hash-chained,
+   so an alteration made with enough privilege to drop the trigger still
+   leaves evidence. Erasure is possible only inside a transaction that
+   declares itself one. SIEM streaming is still open.
 
 ## Phase 9 — Distribution
 

@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 import { isDatabaseConfigured } from "@/lib/db/client";
 import { voices as voiceFixtures } from "@/lib/app-data";
+import { record } from "@/lib/audit/log";
+import { authorize, ForbiddenError } from "@/lib/auth/authorize";
+import { resolveActor, UnauthenticatedError } from "@/lib/auth/session";
 
 /**
  * Voices, and the consent action that matters most.
@@ -69,8 +72,42 @@ export async function POST(request: Request) {
     );
   }
 
+  // Withdrawing consent is owner-only, and it is checked here rather than
+  // in the repository: the repository is also how a worker and a migration
+  // reach this row, and neither of those has a person to authorise.
+  let actor;
+  try {
+    actor = await resolveActor(request, { workspaceId: existing.workspaceId ?? undefined });
+    authorize(actor, "voice.revoke", { workspaceId: actor.workspaceId });
+  } catch (error) {
+    if (error instanceof UnauthenticatedError) {
+      return NextResponse.json({ error: error.message }, { status: 401 });
+    }
+    if (error instanceof ForbiddenError) {
+      return NextResponse.json({ error: error.message }, { status: 403 });
+    }
+    throw error;
+  }
+
   const voice =
     action === "revoke" ? await revokeVoice(existing.id) : await reinstateVoice(existing.id);
+
+  // Recorded, not "logged". This is the entry a person points at years later
+  // to show when their permission ended, so it is written to the chained,
+  // append-only trail and its failure is not swallowed.
+  await record({
+    workspaceId: actor.workspaceId,
+    actor,
+    action: action === "revoke" ? "voice.revoked" : "voice.reinstated",
+    resourceType: "voice",
+    resourceId: existing.id,
+    ip: request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? null,
+    metadata: {
+      voiceName: existing.name,
+      providerVoiceId: existing.providerVoiceId,
+      revokedAt: voice?.revokedAt?.toISOString() ?? null,
+    },
+  });
 
   return NextResponse.json({
     id: voice?.id,

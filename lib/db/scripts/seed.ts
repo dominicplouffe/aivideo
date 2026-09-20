@@ -28,7 +28,14 @@ async function main() {
   console.log("seeding…");
 
   // --- workspace (cascade clears everything beneath it) --------------------
-  await getDb().delete(s.workspaces).where(eq(s.workspaces.slug, WORKSPACE_SLUG));
+  // The audit log does not cascade: its trigger refuses a delete that has
+  // not declared itself an erasure, which is exactly the protection that
+  // stops a routine teardown from removing the record of who tore it down.
+  // Reseeding is a declared erasure, so it says so.
+  await getDb().transaction(async (tx) => {
+    await tx.execute(drizzleSql`SELECT set_config('demoriff.audit_purge', 'on', true)`);
+    await tx.delete(s.workspaces).where(eq(s.workspaces.slug, WORKSPACE_SLUG));
+  });
 
   const workspaceId = id("workspace", WORKSPACE_SLUG);
   await getDb().insert(s.workspaces).values({
@@ -239,10 +246,15 @@ async function main() {
   }
 
   // --- audit trail ---------------------------------------------------------
-  await getDb().insert(s.auditEvents).values({
-    id: id("audit", "seed"),
+  // Written through the audit writer rather than inserted directly, so the
+  // seeded entry is chained like any other. A seed that bypasses the writer
+  // would leave the first link unverifiable, and "the chain is broken but
+  // it is fine, that one is from the seed" is not a thing anyone should
+  // have to know.
+  const { record } = await import("@/lib/audit/log");
+  await record({
     workspaceId,
-    actorEmail: "system@demoriff.com",
+    actor: null,
     action: "workspace.seeded",
     resourceType: "workspace",
     resourceId: workspaceId,
