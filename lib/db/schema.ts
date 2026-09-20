@@ -33,6 +33,9 @@ export const agentRunStatusEnum = pgEnum("agent_run_status", [
   "drafted", "outlining", "awaiting_approval", "approved", "recording",
   "recorded", "failed", "cancelled",
 ]);
+export const identitySourceEnum = pgEnum("identity_source", [
+  "email_gate", "crm_link", "personalized_link", "manual",
+]);
 export const agentActionKindEnum = pgEnum("agent_action_kind", [
   "navigate", "click", "type", "select", "wait", "scroll", "assert",
   "screenshot", "refused",
@@ -285,6 +288,53 @@ export const siemDestinations = pgTable(
   (t) => [
     uniqueIndex("siem_destinations_workspace_name_key").on(t.workspaceId, t.name),
     index("siem_destinations_workspace_idx").on(t.workspaceId),
+  ],
+);
+
+/* ============================================================
+   Known viewers
+   ============================================================ */
+
+/**
+ * A person who told us who they are.
+ *
+ * Everything else in analytics is deliberately anonymous: the visitor key
+ * rotates daily, is irreversible, and cannot be linked across days. This
+ * table is the opposite trade, and it exists only where somebody made it —
+ * typed their address into a gate, or followed a link a sales team sent them
+ * that says who it was for.
+ *
+ * `identifiedAt` and `source` are stored because they are the answer to "why
+ * do you have my email". A row with no answer to that question is a row that
+ * should not exist.
+ */
+export const contacts = pgTable(
+  "contacts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workspaceId: uuid("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+    email: text("email").notNull(),
+    name: text("name"),
+    company: text("company"),
+    /** The CRM's own id, once a record has been matched or created. */
+    crmId: text("crm_id"),
+    crmVendor: text("crm_vendor"),
+    source: identitySourceEnum("source").notNull(),
+    identifiedAt: timestamp("identified_at", { withTimezone: true }).notNull().defaultNow(),
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
+    /**
+     * Set when the person asks to be forgotten.
+     *
+     * The row is kept with the address cleared rather than deleted, so the
+     * sessions that pointed at it keep counting towards totals while no
+     * longer naming anybody. Deleting outright would silently restate last
+     * quarter's numbers.
+     */
+    erasedAt: timestamp("erased_at", { withTimezone: true }),
+  },
+  (t) => [
+    uniqueIndex("contacts_workspace_email_key").on(t.workspaceId, t.email),
+    index("contacts_workspace_idx").on(t.workspaceId, t.identifiedAt),
   ],
 );
 
@@ -798,6 +848,16 @@ export const analyticsSessions = pgTable(
 
     /** Irreversible, and meaningless after the salt rotates. */
     visitorKey: text("visitor_key").notNull(),
+    /**
+     * Set only when this viewer identified themselves during *this* session.
+     *
+     * Never backfilled onto earlier rows. The daily key cannot be reversed,
+     * so there is no way to find the sessions this person had before they
+     * told us who they were — and that is the point, not a limitation. An
+     * identity given for one demo is not consent to be matched against
+     * every anonymous view in the table.
+     */
+    contactId: uuid("contact_id").references(() => contacts.id, { onDelete: "set null" }),
     /** The salt's day, so yesterday's key cannot be matched to today's. */
     day: date("day").notNull(),
 

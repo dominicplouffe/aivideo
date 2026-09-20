@@ -193,9 +193,16 @@ actually evaluate instead of returning an empty region list that reads like
    mode.~~ **Done.** One row per viewing session with a per-second watch
    bitmap, deduplicated by a daily-rotating key that cannot be reversed or
    linked across days, and retention curves computed in SQL. See
-   `lib/analytics/README.md`. CRM identity resolution is still open, and is
-   deliberately the opposite trade — it needs an identity, so it belongs
-   behind an explicit opt-in rather than in the cookieless path.
+   `lib/analytics/README.md`. **CRM identity resolution is now done too**,
+   and it is deliberately the opposite trade, confined to one module.
+   Identity is given rather than inferred — an address typed into a gate, or
+   a signed expiring link a salesperson sent — and it attaches forwards
+   only, because the daily key is irreversible and earlier sessions cannot
+   be found. That is a real cost: a competitor who fingerprints shows more
+   history on day one. What they cannot show is a straight answer to "how do
+   you know that was me". Erasure keeps the count and drops the name, so
+   honouring a deletion request does not quietly restate last quarter. The
+   CRM push is a contact and one note, never a sync.
 3. ~~Help-centre connectors with two-way sync (Zendesk, Intercom, HelpScout,
    Notion, Confluence).~~ **Done.** All five, behind one interface. The sync
    is genuinely two-way in the only sense that matters: a human edit in the

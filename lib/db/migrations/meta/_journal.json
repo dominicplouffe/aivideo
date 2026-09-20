@@ -78,6 +78,13 @@
       "when": 1789940448893,
       "tag": "0010_agent",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1789942265202,
+      "tag": "0011_contacts",
+      "breakpoints": true
     }
   ]
 }

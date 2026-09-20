@@ -79,3 +79,50 @@ And a raw `sql` template hands values straight to the driver, which takes
 strings and buffers but not `Date`s. The query builder converts one; a raw
 template does not, and the resulting error mentions neither dates nor the
 query.
+
+## Knowing who watched, when they said so
+
+Everything above is built so nobody can be identified. `identity.ts` is the
+one exception, and it is deliberately the only place that makes the opposite
+trade. Three rules hold it in place.
+
+**Identity is given, never inferred.** A contact exists because somebody
+typed an address into a gate, or followed a link a salesperson sent them that
+says who it was for. No fingerprinting, no IP lookup, no "probably the same
+person as".
+
+**It attaches forwards only.** The session in which somebody identified
+themselves carries the contact. Earlier sessions do not — and *cannot*,
+because the daily key is irreversible and there is no way to find them. That
+is the design rather than a limitation: an address given for one demo is not
+consent to be matched against every anonymous view in the table. It is worth
+being plain that this is a real cost. A competitor that fingerprints will
+show a customer more history on day one. What they cannot show is a straight
+answer to "how do you know that was me".
+
+**Erasure keeps the count and drops the name.** The contact row survives with
+its address replaced and the sessions keep counting towards totals. Deleting
+outright would unlink the sessions and quietly restate every report that
+counted them; a deletion request is about a person's name, not about
+rewriting last quarter. The placeholder is per-contact rather than shared,
+because the unique index is on the address and two erased people must not
+collide.
+
+A personalised link carries a signed, expiring contact id. Signed, because an
+unsigned id in a URL is an invitation to iterate and a viewer who edited it
+would attach their watching to somebody else's record. Expiring, because a
+link forwarded six months later is opened by whoever it was forwarded to, and
+recording that as the original recipient is worse than recording nobody.
+
+`POST /api/identify` is public, so it never takes a workspace from the
+request — the asset's public slug resolves it — and it refuses an asset whose
+access is not gated. Otherwise the endpoint would be a way to write arbitrary
+contacts into any workspace that ever published anything.
+
+The CRM push (`lib/crm/`) is deliberately the narrowest surface that is
+useful: find or create a contact, attach one note saying what they watched.
+Not a sync. A CRM is the customer's system of record for their pipeline, and
+a demo tool that writes lifecycle stages or owner fields into it is a demo
+tool their revenue operations team removes. Anonymous sessions are never
+pushed, because they are not attributable to anybody and putting them in
+somebody's CRM would be inventing data.
