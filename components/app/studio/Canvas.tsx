@@ -1,6 +1,6 @@
 "use client";
 
-import { cn, formatDuration } from "@/lib/utils";
+import { cn, formatDuration, stablePercent } from "@/lib/utils";
 import { Icon } from "@/components/ui/Icon";
 import { MockApp } from "@/components/marketing/MockApp";
 import type { Project, Segment } from "@/lib/app-data";
@@ -264,7 +264,11 @@ export function TimelineStrip({
                   "flex-1 rounded-full transition-all duration-500",
                   inCut ? "bg-rose-500/35" : state.studioSound ? "bg-cyan-400/65" : "bg-fg-faint/45",
                 )}
-                style={{ height: `${(inCut ? 0.1 : Math.max(0.12, v)) * 100}%` }}
+                // `stablePercent`, not a template string: this height comes
+                // from `Math.sin`, which Node and the browser are allowed to
+                // disagree about in the last bits — and that disagreement
+                // becomes a hydration mismatch on every studio page.
+                style={{ height: stablePercent(inCut ? 0.1 : Math.max(0.12, v)) }}
               />
             );
           })}

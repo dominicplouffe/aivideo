@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { cn } from "@/lib/utils";
+import { cn, stablePercent } from "@/lib/utils";
 import { Icon, type IconName } from "@/components/ui/Icon";
 import { MockApp } from "./MockApp";
 
@@ -263,7 +263,11 @@ export function HeroCanvas() {
                       key={i}
                       className="flex-1 rounded-full transition-all duration-700"
                       style={{
-                        height: `${(cutsApplied && dead ? 0.08 : v) * 100}%`,
+                        // Rounded: this comes from `Math.sin`, which Node
+                        // and the browser may compute differently in the
+                        // last bits — enough to fail hydration on the one
+                        // element above the fold on the home page.
+                        height: stablePercent(cutsApplied && dead ? 0.08 : v),
                         background:
                           cutsApplied && dead
                             ? "color-mix(in oklab, var(--color-rose-500) 45%, transparent)"

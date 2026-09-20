@@ -1,16 +1,22 @@
 import type { Metadata } from "next";
+import { getProjects } from "@/lib/data";
 import Link from "next/link";
 import { PageHeader, Panel, StatTile } from "@/components/app/Shared";
 import { Button } from "@/components/ui/Button";
 import { Icon } from "@/components/ui/Icon";
-import { projects } from "@/lib/app-data";
 import { relativeTime, formatNumber, cn } from "@/lib/utils";
 
 export const metadata: Metadata = { title: "Guides" };
 
 const destinations = ["Zendesk", "Intercom", "Notion", "Confluence", "HelpScout", "Markdown"];
 
-export default function GuidesPage() {
+export default async function GuidesPage() {
+  // From the data access layer, so the ids on this page are the ids the
+  // pages it links to will look up. When the list read fixtures and the
+  // detail pages read Postgres — or the other way round — every link on the
+  // screen was a 404 waiting for somebody to click it.
+  const projects = await getProjects();
+
   const withGuides = projects.filter((p) => p.outputs.includes("guide"));
 
   return (

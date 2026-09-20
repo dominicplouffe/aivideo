@@ -6,11 +6,11 @@ import { cn, formatDuration, formatNumber, relativeTime } from "@/lib/utils";
 import { Icon } from "@/components/ui/Icon";
 import { Button } from "@/components/ui/Button";
 import { StatusPill, Avatar, EmptyState } from "./Shared";
-import { projects, collections, members, currentUser, type ProjectStatus } from "@/lib/app-data";
+import { collections, members, currentUser, type Project, type ProjectStatus } from "@/lib/app-data";
 
 const statuses: (ProjectStatus | "all")[] = ["all", "published", "ready", "processing", "stale", "draft"];
 
-export function ProjectLibrary() {
+export function ProjectLibrary({ projects }: { projects: Project[] }) {
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState<ProjectStatus | "all">("all");
   const [collection, setCollection] = useState<string>("all");
@@ -34,7 +34,7 @@ export function ProjectLibrary() {
         if (sort === "title") return a.title.localeCompare(b.title);
         return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
       });
-  }, [query, status, collection, sort]);
+  }, [projects, query, status, collection, sort]);
 
   return (
     <div>

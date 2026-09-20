@@ -1,9 +1,10 @@
 import type { Metadata } from "next";
+import { getProjects } from "@/lib/data";
 import Link from "next/link";
 import { PageHeader, Panel, StatTile } from "@/components/app/Shared";
 import { Button } from "@/components/ui/Button";
 import { Icon } from "@/components/ui/Icon";
-import { localeMatrix, projects } from "@/lib/app-data";
+import { localeMatrix } from "@/lib/app-data";
 import { cn } from "@/lib/utils";
 
 export const metadata: Metadata = { title: "Localization" };
@@ -16,7 +17,13 @@ const statusStyle: Record<string, string> = {
   none: "bg-transparent text-fg-faint border-[var(--line)]",
 };
 
-export default function LocalizationPage() {
+export default async function LocalizationPage() {
+  // From the data access layer, so the ids on this page are the ids the
+  // pages it links to will look up. When the list read fixtures and the
+  // detail pages read Postgres — or the other way round — every link on the
+  // screen was a 404 waiting for somebody to click it.
+  const projects = await getProjects();
+
   const localized = projects.filter((p) => p.locales.length > 0);
   const published = localeMatrix.filter((l) => l.status === "published").length;
   const stale = localeMatrix.filter((l) => l.status === "stale").length;

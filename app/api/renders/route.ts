@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
 import { getProviders, type RenderOutput } from "@/lib/providers";
 import { getProject } from "@/lib/app-data";
+import { isDatabaseConfigured } from "@/lib/db/client";
+import { authorize, ForbiddenError } from "@/lib/auth/authorize";
+import { resolveActor, UnauthenticatedError } from "@/lib/auth/session";
+import { checkDestination, describeRefusal } from "@/lib/webhooks/destinations";
 
 const VALID_OUTPUTS: RenderOutput[] = ["video", "guide", "interactive", "clips"];
 
@@ -21,8 +25,36 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Body must be valid JSON." }, { status: 400 });
   }
 
+  // Submitting a render creates database rows, spends a workspace's quota
+  // and — via webhook_url — makes this worker dial a destination somebody
+  // else chose. Every sibling route resolves an actor; this one did not,
+  // which made it the anonymous door into all three.
+  if (isDatabaseConfigured()) {
+    try {
+      const actor = await resolveActor(request);
+      authorize(actor, "render.submit", { workspaceId: actor.workspaceId });
+    } catch (error) {
+      if (error instanceof UnauthenticatedError) {
+        return NextResponse.json({ error: error.message }, { status: 401 });
+      }
+      if (error instanceof ForbiddenError) {
+        return NextResponse.json({ error: error.message }, { status: 403 });
+      }
+      throw error;
+    }
+  }
+
   if (!body.project_id || !getProject(body.project_id)) {
     return NextResponse.json({ error: "Unknown project_id." }, { status: 404 });
+  }
+
+  // Refused here as well as at delivery, so a bad URL is a 422 somebody can
+  // read rather than a job that quietly dead-letters an hour later.
+  if (body.webhook_url) {
+    const destination = await checkDestination(body.webhook_url);
+    if (!destination.ok) {
+      return NextResponse.json({ error: describeRefusal(destination.reason) }, { status: 422 });
+    }
   }
 
   const outputs = (body.outputs ?? ["video"]).filter((o): o is RenderOutput =>

@@ -101,6 +101,10 @@ export function DemoBuilder({ project }: { project: Project }) {
               </button>
             ))}
           </div>
+          <Button variant="outline" size="sm" href={`/app/demos/${project.id}/preview`}>
+            <Icon name="play" className="size-4" strokeWidth={1.9} />
+            <span className="hidden sm:inline">Preview</span>
+          </Button>
           <Button variant="outline" size="sm">
             <Icon name="code" className="size-4" strokeWidth={1.8} />
             <span className="hidden sm:inline">Embed</span>
@@ -312,12 +316,13 @@ export function DemoBuilder({ project }: { project: Project }) {
             <Group label="Embed">
               <pre className="overflow-x-auto rounded-xl border border-[var(--line)] bg-ink-900 p-2.5 font-mono text-[0.5625rem] leading-relaxed text-fg-muted">
 {`<div data-demoriff="${project.id}"
-     data-mode="interactive"></div>
+     data-mode="interactive"
+     style="aspect-ratio:16/9;width:100%"></div>
 <script src="https://embed.demoriff.com/v1.js"
         async></script>`}
               </pre>
               <p className="mt-2 text-2xs leading-snug text-fg-faint">
-                34 KB async runtime. Text is server-rendered so search engines index it.
+                6 KB async runtime. Text is server-rendered so search engines index it.
               </p>
             </Group>
           </div>

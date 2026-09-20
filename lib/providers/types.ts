@@ -95,16 +95,27 @@ export interface MaskingRule {
   selector?: string;
   rect?: [number, number, number, number];
   regex?: string;
-  style?: "blur" | "pixelate" | "redact";
+  style?: MaskStyle;
+}
+
+/** How a region is obscured. The same three everywhere: CSS, ffmpeg, here. */
+export type MaskStyle = "blur" | "pixelate" | "redact";
+
+export interface MaskedRegion {
+  at: number;
+  until: number;
+  rect: [number, number, number, number];
+  style: MaskStyle;
+  /** Which rule matched, for the recording's manifest. */
+  reason: string;
+  /** What kind of thing was found. Never the value itself. */
+  category?: string;
 }
 
 export interface MaskingProvider {
   readonly name: string;
   /** Returns regions to obscure, per frame range. Applied before encoding. */
-  detect(input: {
-    mediaUrl: string;
-    rules: MaskingRule[];
-  }): Promise<{ regions: { at: number; until: number; rect: [number, number, number, number]; style: string; reason: string }[] }>;
+  detect(input: { mediaUrl: string; rules: MaskingRule[] }): Promise<{ regions: MaskedRegion[] }>;
 }
 
 export type RenderOutput = "video" | "guide" | "interactive" | "clips";

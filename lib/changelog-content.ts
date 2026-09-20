@@ -35,7 +35,7 @@ export const releases: Release[] = [
       { kind: "new", text: "Branching forks with per-path analytics and a visual path editor." },
       { kind: "new", text: "Inline lead capture with CRM field mapping to HubSpot and Salesforce." },
       { kind: "new", text: "Responsive DOM reconstruction for viewports down to 360px wide." },
-      { kind: "improved", text: "Tour runtime reduced from 51 KB to 34 KB and moved fully async." },
+      { kind: "improved", text: "Tour runtime reduced from 34 KB to 6 KB and moved fully async." },
       { kind: "improved", text: "Server-rendered tour text is now indexed by search engines within 48 hours." },
       { kind: "fixed", text: "Spotlight positions no longer drift on pages with sticky headers." },
     ],

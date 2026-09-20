@@ -1,7 +1,8 @@
 import { seeded } from "@/lib/utils";
+import { heuristicDirection } from "./direction";
 import type {
   DirectionProvider, MaskingProvider, ProviderSet, RenderJob, RenderProvider,
-  SynthesisProvider, TranscriptionProvider, TranslationProvider, ZoomKeyframe,
+  SynthesisProvider, TranscriptionProvider, TranslationProvider,
 } from "./types";
 
 /**
@@ -9,8 +10,6 @@ import type {
  * real vendor adapter, return plausibly shaped data, and never call out to the
  * network — which is what makes the app runnable with no credentials.
  */
-
-const FILLERS = new Set(["um", "uh", "so", "like", "basically", "actually", "just", "yeah"]);
 
 export const mockTranscription: TranscriptionProvider = {
   name: "mock-transcription",
@@ -65,44 +64,11 @@ export const mockTranslation: TranslationProvider = {
   },
 };
 
-export const mockDirection: DirectionProvider = {
-  name: "mock-direction",
-  async direct({ events, transcript, maxScale = 2.2 }) {
-    const keyframes: ZoomKeyframe[] = [];
-    let lastAt = -Infinity;
-
-    for (const e of events) {
-      if (e.kind !== "click") continue;
-      // Suppression: never push twice inside 1.2 seconds.
-      if (e.at - lastAt < 1.2) continue;
-
-      const bounds = e.bounds ?? { x: 50, y: 40, w: 12, h: 6 };
-      const area = Math.max(1, bounds.w * bounds.h);
-      // Smaller targets earn a tighter frame, capped so the source stays sharp.
-      const scale = Math.min(maxScale, 1 + 90 / area);
-
-      // Hold until the narration stops describing this moment.
-      const narrationEnd =
-        transcript.words.find((w) => w.start > e.at + 0.4 && /[.!?]$/.test(w.word))?.end ?? e.at + 2.4;
-
-      keyframes.push({
-        at: e.at,
-        holdSec: Math.max(1.1, narrationEnd - e.at),
-        scale: Number(scale.toFixed(2)),
-        anchor: { x: bounds.x, y: bounds.y },
-        easing: "push",
-        inferred: !e.selector,
-      });
-      lastAt = e.at;
-    }
-
-    const cuts = transcript.words
-      .filter((w) => FILLERS.has(w.word.toLowerCase().replace(/\W/g, "")))
-      .map((w) => ({ start: w.start, end: w.end, reason: "filler" }));
-
-    return { keyframes, cuts };
-  },
-};
+/**
+ * Direction is first-party logic, not a vendor stand-in, so the mock set
+ * uses the real engine. Re-exported here so the two sets stay symmetrical.
+ */
+export const mockDirection: DirectionProvider = heuristicDirection;
 
 export const mockMasking: MaskingProvider = {
   name: "mock-masking",

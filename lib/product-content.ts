@@ -710,7 +710,7 @@ export const productPages: ProductPage[] = [
     specs: [
       { label: "Capture", value: "DOM snapshot per step, with computed styles and assets inlined" },
       { label: "Steps", value: "Up to 120 per demo, with unlimited branches" },
-      { label: "Embed", value: "Script tag, iframe, or direct link; 34 KB runtime, async" },
+      { label: "Embed", value: "Script tag, iframe, or direct link; 6 KB runtime, async" },
       { label: "Responsive", value: "Reconstructed layouts down to 360px wide" },
       { label: "Analytics", value: "Per-step, per-branch, per-hotspot, plus CRM sync" },
     ],
@@ -994,7 +994,7 @@ export const productPages: ProductPage[] = [
           "Custom domain, brand kit, chapters and searchable transcript",
           "CTA as booking link, form, trial start, or next video",
           "Public, password, email-gate or domain-restricted access",
-          "Embeds with a 34 KB async runtime and no layout shift",
+          "Embeds with a 6 KB async runtime and no layout shift",
         ],
       },
     ],

@@ -2,24 +2,45 @@
   "name": "demoriff",
   "version": "0.1.0",
   "private": true,
-  "description": "DemoRiff — turn a raw screen recording into a studio-grade product demo, a narrated walkthrough, and a step-by-step guide.",
+  "description": "DemoRiff \u2014 turn a raw screen recording into a studio-grade product demo, a narrated walkthrough, and a step-by-step guide.",
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "node scripts/build-embed.mjs && next build",
     "start": "next start",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate",
+    "db:seed": "tsx lib/db/scripts/seed.ts",
+    "db:studio": "drizzle-kit studio",
+    "test": "tsx --test \"lib/**/*.test.ts\" \"extension/**/*.test.ts\"",
+    "worker": "tsx lib/render/scripts/worker.ts",
+    "build:extension": "node scripts/build-extension.mjs",
+    "build:embed": "node scripts/build-embed.mjs"
   },
   "dependencies": {
+    "drizzle-orm": "^0.45.2",
     "next": "^16.3.5",
+    "postgres": "^3.4.9",
     "react": "19.1.1",
-    "react-dom": "19.1.1"
+    "react-dom": "19.1.1",
+    "server-only": "^0.0.1"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "4.1.13",
+    "@types/chrome": "^0.3.0",
     "@types/node": "22.15.3",
     "@types/react": "19.1.9",
     "@types/react-dom": "19.1.7",
+    "drizzle-kit": "^0.31.10",
+    "esbuild": "^0.28.2",
+    "playwright": "^1.63.0",
     "tailwindcss": "4.1.13",
+    "tsx": "^4.23.15",
     "typescript": "5.8.3"
+  },
+  "optionalDependencies": {
+    "@anthropic-ai/sdk": "^0.127.0",
+    "@aws-sdk/client-s3": "^3.1136.0",
+    "@aws-sdk/s3-request-presigner": "^3.1136.0"
   }
 }

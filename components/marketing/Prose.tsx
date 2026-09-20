@@ -11,7 +11,12 @@ const toneMap = {
 
 export function Prose({ blocks, className }: { blocks: Block[]; className?: string }) {
   return (
-    <div className={cn("max-w-2xl", className)}>
+    // `min-w-0` alongside the max width, because this is almost always a grid
+    // item and grid items default to `min-width: auto` — so one wide block
+    // inside the article (a table, a code sample) widens the whole track
+    // instead of scrolling inside itself, and the page scrolls sideways on a
+    // phone. The max width caps the measure; this stops the floor rising.
+    <div className={cn("min-w-0 max-w-2xl", className)}>
       {blocks.map((b, i) => {
         switch (b.t) {
           case "h2":

@@ -9,13 +9,19 @@ import { projects, retentionCurve, viewsSeries, topAccounts, trafficSources } fr
 
 const periods = ["7 days", "30 days", "90 days", "12 months"] as const;
 
-export function AnalyticsView() {
+export function AnalyticsView({ curves }: { curves?: Record<string, number[]> }) {
   const published = projects.filter((p) => p.status === "published");
   const [period, setPeriod] = useState<(typeof periods)[number]>("30 days");
   const [projectId, setProjectId] = useState(published[0].id);
 
   const project = published.find((p) => p.id === projectId) ?? published[0];
-  const curve = useMemo(() => retentionCurve(project.id, 48), [project.id]);
+  // A measured curve when the workspace has views, the seeded one when it
+  // does not. An empty dashboard on a new workspace teaches nothing about
+  // what the product does.
+  const curve = useMemo(
+    () => curves?.[project.id] ?? retentionCurve(project.id, 48),
+    [curves, project.id],
+  );
   const series = useMemo(() => viewsSeries(project.id, 30), [project.id]);
 
   // Biggest single-step drop — the sentence that lost them.

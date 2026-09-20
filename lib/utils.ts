@@ -89,3 +89,21 @@ export function seeded(seed: string): () => number {
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
 }
+
+/**
+ * A percentage that survives hydration.
+ *
+ * `Math.sin` and friends are only required to be *close* to correct — the
+ * specification allows an implementation-defined approximation — so Node and
+ * the browser can disagree in the last bits. That is invisible until one of
+ * those values becomes a style string: React renders
+ * `height: "33.3694%"` on the server, recomputes `33.369414019811785%` in
+ * the browser, and reports a hydration mismatch on a decorative waveform.
+ *
+ * Two decimal places is far finer than a pixel at any size this is used at,
+ * and it is coarse enough that no floating-point discrepancy can cross a
+ * boundary.
+ */
+export function stablePercent(fraction: number): string {
+  return `${(fraction * 100).toFixed(2)}%`;
+}

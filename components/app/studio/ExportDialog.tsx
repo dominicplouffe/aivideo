@@ -12,7 +12,7 @@ type Step = "configure" | "rendering" | "done";
 const formats: { id: string; label: string; meta: string; icon: IconName }[] = [
   { id: "video", label: "Demo video", meta: "MP4 · H.264 · 4K60", icon: "play" },
   { id: "guide", label: "Step-by-step guide", meta: "Markdown + screenshots", icon: "doc" },
-  { id: "interactive", label: "Interactive tour", meta: "Embeddable · 34 KB runtime", icon: "cursor" },
+  { id: "interactive", label: "Interactive tour", meta: "Embeddable · 6 KB runtime", icon: "cursor" },
   { id: "clips", label: "Social cuts", meta: "6 clips · 9:16 + 1:1", icon: "scissors" },
 ];
 

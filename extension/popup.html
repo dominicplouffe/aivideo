@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>DemoRiff Capture</title>
+    <style>
+      /* Self-contained: an extension popup cannot reach the app's stylesheet,
+         and a CDN font would be a network request on every open. */
+      :root {
+        color-scheme: dark;
+        --ink: #0b0d14;
+        --ink-2: #12151f;
+        --line: #232838;
+        --text: #f5f7ff;
+        --muted: #9aa3b8;
+        --iris: #6e56f8;
+        --cyan: #22d3ee;
+        --red: #e5484d;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        width: 320px;
+        font: 13px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+        background: var(--ink);
+        color: var(--text);
+      }
+      header {
+        display: flex; align-items: center; gap: 8px;
+        padding: 14px 16px 10px;
+        border-bottom: 1px solid var(--line);
+      }
+      .mark {
+        width: 18px; height: 18px; border-radius: 5px;
+        background: linear-gradient(135deg, var(--iris), var(--cyan));
+      }
+      h1 { margin: 0; font-size: 13px; font-weight: 600; letter-spacing: -0.01em; }
+      main { padding: 14px 16px 16px; display: grid; gap: 12px; }
+      .row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+      label.toggle { display: flex; align-items: center; gap: 8px; color: var(--muted); }
+      button {
+        width: 100%; padding: 10px 12px; border-radius: 8px; border: 1px solid transparent;
+        font: inherit; font-weight: 600; cursor: pointer;
+        background: linear-gradient(135deg, var(--iris), #8b74ff); color: white;
+      }
+      button.stop { background: var(--red); }
+      button:disabled { opacity: 0.5; cursor: not-allowed; }
+      .stat { background: var(--ink-2); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
+      .stat dt { color: var(--muted); font-size: 11px; margin: 0; }
+      .stat dd { margin: 2px 0 0; font-variant-numeric: tabular-nums; font-size: 15px; }
+      .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+      .note { color: var(--muted); font-size: 11px; margin: 0; }
+      .error { color: var(--red); font-size: 11px; margin: 0; }
+      .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--red); display: inline-block; }
+      @media (prefers-reduced-motion: no-preference) {
+        .recording .dot { animation: pulse 1.6s ease-in-out infinite; }
+      }
+      @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
+    </style>
+  </head>
+  <body>
+    <header><span class="mark"></span><h1>DemoRiff Capture</h1></header>
+    <main>
+      <div class="grid">
+        <div class="stat"><dt>Elapsed</dt><dd id="elapsed">0:00</dd></div>
+        <div class="stat"><dt>Interactions</dt><dd id="events">0</dd></div>
+      </div>
+      <label class="toggle"><input type="checkbox" id="mic" checked /> Record my microphone</label>
+      <button id="toggle">Start recording</button>
+      <p class="note" id="note">
+        Password and payment fields are blurred in the page before any frame is
+        recorded. What you type is never written to the interaction log.
+      </p>
+      <p class="error" id="error" hidden></p>
+    </main>
+    <script type="module" src="dist/popup.js"></script>
+  </body>
+</html>
