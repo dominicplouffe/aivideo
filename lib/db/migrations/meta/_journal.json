@@ -43,6 +43,13 @@
       "when": 1789932909498,
       "tag": "0005_superb_scream",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1789934238807,
+      "tag": "0006_smart_lionheart",
+      "breakpoints": true
     }
   ]
 }

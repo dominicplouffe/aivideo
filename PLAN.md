@@ -166,8 +166,13 @@ actually evaluate instead of returning an empty region list that reads like
    below the fold, no globals, no cookies, and server-rendered step text that
    a search engine can read with JavaScript disabled. See
    `lib/embed/README.md`.
-2. Analytics ingestion: per-second retention at write scale, cookieless mode,
-   CRM identity resolution.
+2. ~~Analytics ingestion: per-second retention at write scale, cookieless
+   mode.~~ **Done.** One row per viewing session with a per-second watch
+   bitmap, deduplicated by a daily-rotating key that cannot be reversed or
+   linked across days, and retention curves computed in SQL. See
+   `lib/analytics/README.md`. CRM identity resolution is still open, and is
+   deliberately the opposite trade — it needs an identity, so it belongs
+   behind an explicit opt-in rather than in the cookieless path.
 3. Help-centre connectors with two-way sync (Zendesk, Intercom, HelpScout,
    Notion, Confluence).
 
@@ -224,6 +229,9 @@ infrastructure — or dismissed as a mock when it is not.
   sandboxed frame with no network access.
 - **Governance.** RBAC, an append-only hash-chained audit log, sessions that
   revoke immediately, metering in seconds with an idempotent ledger.
+- **Distribution.** A 3.5 KB embed runtime with measured zero layout shift,
+  and cookieless per-second analytics — both exercised end to end against a
+  running server.
 
 **Written but not exercised against the vendor:**
 
@@ -242,10 +250,8 @@ infrastructure — or dismissed as a mock when it is not.
 - **Frame-level masking.** Detector and pattern rules need OCR and a
   classifier. `lib/providers/masking.ts` throws on them rather than returning
   an empty region list that reads like "nothing to hide".
-- **Desktop capture**, analytics ingestion, help-centre connectors and the
-  Riff Agent. The embed runtime exists and is measured; what it reports is
-  acknowledged and discarded until ingestion is built, which the endpoint
-  says in a comment rather than pretending to store.
+- **Desktop capture**, help-centre connectors, CRM identity resolution and
+  the Riff Agent.
 
 **Fictional by design:**
 

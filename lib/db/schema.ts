@@ -1,6 +1,6 @@
 import {
-  pgTable, pgEnum, text, uuid, integer, real, boolean, timestamp,
-  jsonb, index, uniqueIndex, primaryKey, check,
+  pgTable, pgEnum, text, uuid, integer, real, boolean, timestamp, date,
+  jsonb, index, uniqueIndex, primaryKey, check, customType,
 } from "drizzle-orm/pg-core";
 import { relations, sql } from "drizzle-orm";
 
@@ -450,6 +450,80 @@ export const jobs = pgTable(
 export const jobRelations = relations(jobs, ({ one }) => ({
   workspace: one(workspaces, { fields: [jobs.workspaceId], references: [workspaces.id] }),
 }));
+
+/**
+ * Postgres `bit varying`, as a string of ones and zeros.
+ *
+ * Drizzle has no built-in for it and this is the type that makes per-second
+ * retention affordable: one bit per second of an asset, so a forty-minute
+ * demo's entire watch pattern is 2,400 bits — about 300 bytes — rather than
+ * 2,400 rows.
+ */
+const bitmap = customType<{ data: string; driverData: string }>({
+  dataType: () => "bit varying",
+});
+
+/* ============================================================
+   Analytics
+   ============================================================ */
+
+/**
+ * One row per viewing session.
+ *
+ * The obvious design is an event per progress ping, and it is the one that
+ * falls over: a demo watched for four minutes at a ping every two seconds is
+ * 120 rows, and a customer with real traffic writes millions a day to
+ * produce a chart with 240 points on it.
+ *
+ * So the player keeps the watch pattern in memory and sends it once, as a
+ * bitmap, when the session ends. Per-second resolution, one row, and the
+ * retention curve is a `get_bit` over a `generate_series` — which Postgres
+ * does well and which needs no pipeline, no warehouse and no nightly job.
+ *
+ * There is no cookie and no stored identifier. `visitorKey` is a hash of the
+ * viewer's address and user agent with a salt that rotates daily and is
+ * never written down: it deduplicates two views from the same person on the
+ * same day, and is useless for anything else the day after.
+ */
+export const analyticsSessions = pgTable(
+  "analytics_sessions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workspaceId: uuid("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+    projectId: uuid("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+
+    /** Irreversible, and meaningless after the salt rotates. */
+    visitorKey: text("visitor_key").notNull(),
+    /** The salt's day, so yesterday's key cannot be matched to today's. */
+    day: date("day").notNull(),
+
+    /** Origin only — the path of a page on someone else's site is their data. */
+    fromOrigin: text("from_origin"),
+    locale: text("locale"),
+    /** Coarse on purpose: "mobile" is useful, a device fingerprint is not. */
+    deviceKind: text("device_kind"),
+
+    /** One bit per second of the asset. Bit n set means second n was watched. */
+    watched: bitmap("watched"),
+    /** The asset's length when it was watched, so a re-edit does not rewrite history. */
+    assetSeconds: integer("asset_seconds").notNull(),
+    /** Distinct seconds watched. Denormalised because every list view sorts on it. */
+    watchedSeconds: integer("watched_seconds").notNull().default(0),
+    reachedEnd: boolean("reached_end").notNull().default(false),
+    ctaClicked: boolean("cta_clicked").notNull().default(false),
+
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    // One session per viewer per asset per day. A refresh is the same view.
+    uniqueIndex("analytics_sessions_dedupe").on(t.projectId, t.visitorKey, t.day),
+    index("analytics_sessions_project_idx").on(t.projectId, t.startedAt),
+    index("analytics_sessions_workspace_idx").on(t.workspaceId, t.startedAt),
+    check("analytics_watched_nonneg", sql`${t.watchedSeconds} >= 0`),
+    check("analytics_asset_seconds_positive", sql`${t.assetSeconds} > 0`),
+  ],
+);
 
 /* ============================================================
    Audit — append only

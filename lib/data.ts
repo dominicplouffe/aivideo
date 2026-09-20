@@ -63,3 +63,38 @@ export async function getWorkspace() {
     return fixtures.workspace;
   }
 }
+
+/**
+ * A project's retention curve, as fractions of viewers still watching.
+ *
+ * Returns real measurement when a database has any, and the seeded fixture
+ * otherwise — the same fallback every other read here uses, and what keeps
+ * the product explorable from a fresh clone.
+ *
+ * Resampled to `points` because a chart has a few dozen pixels per second
+ * at best: drawing 2,400 points into 600 pixels is slower and no more
+ * truthful. The maximum within each bucket is taken rather than the mean,
+ * because a rewatched span is the signal and averaging flattens it.
+ */
+export async function getRetentionCurve(projectId: string, points = 48): Promise<number[]> {
+  if (!isDatabaseConfigured()) return fixtures.retentionCurve(projectId, points);
+
+  try {
+    const { retentionCurve } = await import("@/lib/analytics/ingest");
+    const curve = await retentionCurve(projectId);
+    if (curve.length === 0) return fixtures.retentionCurve(projectId, points);
+
+    const bucket = curve.length / points;
+    return Array.from({ length: points }, (_, i) => {
+      const from = Math.floor(i * bucket);
+      const to = Math.max(from + 1, Math.floor((i + 1) * bucket));
+      let peak = 0;
+      for (let n = from; n < to && n < curve.length; n++) {
+        peak = Math.max(peak, curve[n].fraction);
+      }
+      return peak;
+    });
+  } catch {
+    return fixtures.retentionCurve(projectId, points);
+  }
+}
