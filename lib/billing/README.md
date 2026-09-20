@@ -79,3 +79,66 @@ did not incur. A downgrade returns a credit, applied to the next invoice
 rather than refunded automatically — refunding to a card that has since been
 replaced fails silently. Enterprise has no list price, so it prorates to
 nothing and is handled on the contract.
+
+## The Stripe webhook is the only path that writes a plan
+
+`POST /api/billing/stripe`. Everything about it is arranged around two
+properties.
+
+**The body is read as text, once, before anything parses it.** The signature
+is over the exact bytes Stripe sent; parsing and re-serialising changes
+whitespace and key order, and it never matches again. That is why the route
+does not call `request.json()` at all. Every `v1` value in the header is
+checked rather than the first, because Stripe sends two during a secret
+rotation and checking one breaks every delivery in the window where an
+operator is least able to tell whether it is their fault. And there is a
+tolerance window, because without one a captured delivery replays forever and
+a replayed `invoice.paid` is a free subscription.
+
+**Every delivery is claimed by its event id before it is acted on.** Stripe
+retries for three days, including deliveries we handled perfectly well but
+answered slowly. A retried `invoice.paid` granting a second period, or a
+retried `subscription.deleted` cancelling a workspace that had already
+resubscribed, is the kind of bug that arrives as an angry support ticket
+rather than as an exception.
+
+Nothing else writes `workspaces.plan`. "Upgrade by POSTing your own
+subscription" is the oldest billing bug there is, and the only defence that
+holds is that no other code path can do it.
+
+### What a plan change does and does not touch
+
+- **Plan, seats and included seconds follow the subscription.** That is what
+  was bought.
+- **Usage already recorded does not reset.** Someone upgrading mid-period has
+  used what they used; zeroing it hands them the month back and makes the
+  invoice disagree with the ledger.
+- **Top-up seconds are never touched.** They were paid for outright and carry
+  across periods. A plan change is not a reason to take them back.
+- **Cancellation drops to free, not to nothing.** Somebody who stops paying
+  keeps their recordings and their history; they lose the allowance, not the
+  work.
+- **`past_due` keeps access.** A failed renewal is usually an expired card,
+  and locking somebody out of their own demos over it costs more goodwill
+  than the invoice is worth. Dunning has days to fix it, so
+  `invoice.payment_failed` deliberately does nothing.
+
+The period rolls on `invoice.paid` rather than on a timer of ours. A timer
+drifts out of step with Stripe's billing anchor and gives somebody either a
+free week or a short month, every month, forever.
+
+The subscription is read from the event payload, not re-fetched. The event
+carries the object as it was at the moment of the change; a fetch returns
+what it looks like *now*, so two events arriving out of order would both
+apply the later state and a downgrade followed by an upgrade would lose the
+upgrade.
+
+A workspace learns its Stripe customer id exactly once, from
+`checkout.session.completed`'s `client_reference_id`, and the link is only
+written when it is unset — a customer id that changes is either a mistake or
+somebody attaching their own Stripe account to a tenant they do not own.
+
+`billing_events` is pruned rather than kept forever. Stripe gives up after
+three days, so a row past a month is being kept for no reason — but the floor
+is days rather than hours, because the one thing pruning must never do is
+forget a delivery inside the window Stripe is still retrying it.

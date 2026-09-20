@@ -71,6 +71,17 @@ export const workspaces = pgTable(
     usageNoticeSentAt: timestamp("usage_notice_sent_at", { withTimezone: true }),
     periodStartsAt: timestamp("period_starts_at", { withTimezone: true }).notNull().defaultNow(),
     shareDomain: text("share_domain"),
+
+    // --- billing ------------------------------------------------------------
+    // Stripe owns the money; these are our copy of what it told us, written
+    // only from a verified webhook. A client request never sets them — that
+    // is the difference between reading a subscription and inventing one.
+    stripeCustomerId: text("stripe_customer_id"),
+    stripeSubscriptionId: text("stripe_subscription_id"),
+    /** Stripe's own status string, kept verbatim so it can be read back. */
+    subscriptionStatus: text("subscription_status"),
+    /** When the current paid period ends. Null on a free workspace. */
+    subscriptionEndsAt: timestamp("subscription_ends_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     deletedAt: timestamp("deleted_at", { withTimezone: true }),
   },
@@ -289,6 +300,29 @@ export const siemDestinations = pgTable(
     uniqueIndex("siem_destinations_workspace_name_key").on(t.workspaceId, t.name),
     index("siem_destinations_workspace_idx").on(t.workspaceId),
   ],
+);
+
+/**
+ * Webhook deliveries we have already acted on.
+ *
+ * Stripe retries for three days, and it retries deliveries we handled
+ * perfectly well but answered slowly. Without this, one retried
+ * `invoice.paid` grants a second period and one retried
+ * `subscription.deleted` cancels a workspace that had already resubscribed.
+ *
+ * The event id is the whole table. Anything else about the event lives in
+ * Stripe, which is the system of record for it.
+ */
+export const billingEvents = pgTable(
+  "billing_events",
+  {
+    /** Stripe's event id, e.g. `evt_1P...`. */
+    id: text("id").primaryKey(),
+    type: text("type").notNull(),
+    workspaceId: uuid("workspace_id").references(() => workspaces.id, { onDelete: "set null" }),
+    handledAt: timestamp("handled_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("billing_events_handled_idx").on(t.handledAt)],
 );
 
 /* ============================================================

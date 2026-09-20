@@ -163,9 +163,16 @@ actually evaluate instead of returning an empty region list that reads like
    idempotent against queue retries, top-ups that carry across periods,
    proration by the day, the 80% notice fired once, and a hard stop that is
    off by default and enforced before a render starts. See
-   `lib/billing/README.md`. What remains is the Stripe adapter itself —
-   subscriptions, payment methods and invoice sync — behind the same
-   provider boundary as the inference vendors.
+   `lib/billing/README.md`. **The Stripe side is now done too.** Webhook
+   signatures are verified over the raw bytes against every `v1` value, with
+   a tolerance window, because a captured delivery replayed forever is a
+   free subscription. Every delivery is claimed by event id before it is
+   acted on, since Stripe retries for three days including deliveries we
+   handled but answered slowly. The webhook is the *only* path that writes a
+   workspace's plan — "upgrade by POSTing your own subscription" is the
+   oldest billing bug there is. Usage already incurred is never reset and
+   top-up seconds are never taken back, because a plan change is not a
+   reason to restate the ledger or to reclaim something bought outright.
 3. ~~RBAC across owner / admin / creator / reviewer / viewer, scoped per
    workspace.~~ **Done.** The matrix is data, written out in full, with the
    workspace check inside the one authorisation seam rather than in each
