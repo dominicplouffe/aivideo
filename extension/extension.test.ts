@@ -116,6 +116,7 @@ describe("capture extension", { skip: RUN ? false : "Chromium is not available" 
       tabId: null,
       startedAt: null,
       eventCount: 0,
+      snapshotCount: 0,
       bytes: 0,
       lastError: null,
       manifest: null,
@@ -215,6 +216,55 @@ describe("capture extension", { skip: RUN ? false : "Chromium is not available" 
       true,
       `no route event in ${JSON.stringify(events)}`,
     );
+
+    await driver.evaluate(
+      (id) => chrome.runtime.sendMessage({ type: "capture/disarm-tab", tabId: id }),
+      tabId,
+    );
+    await worker!.evaluate(() => chrome.storage.session.clear());
+    await driver.close();
+    await page.close();
+  });
+
+  it("snapshots a step when the person clicks, through the whole extension", async () => {
+    const page = await context!.newPage();
+    await page.route("https://demo.test/**", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "text/html; charset=utf-8",
+        body:
+          '<!doctype html><html><body><style>#go{color:rgb(1,2,3)}</style>' +
+          '<button id="go" data-testid="go">Go</button></body></html>',
+      }),
+    );
+    await page.goto("https://demo.test/");
+
+    const tabId = (await worker!.evaluate(async () => {
+      const [tab] = await chrome.tabs.query({ url: "https://demo.test/*" });
+      return tab?.id ?? null;
+    })) as number;
+
+    const driver = await context!.newPage();
+    await driver.goto(`chrome-extension://${extensionId}/popup.html`);
+    await worker!.evaluate(() => chrome.storage.session.clear());
+    await driver.evaluate(
+      (id) => chrome.runtime.sendMessage({ type: "capture/arm-tab", tabId: id, masks: [] }),
+      tabId,
+    );
+    await page.waitForFunction(() => document.getElementById("demoriff-capture-mask") !== null);
+
+    await page.click("#go");
+    await page.waitForTimeout(400);
+
+    const state = (await driver.evaluate(() =>
+      chrome.runtime.sendMessage({ type: "capture/state" }),
+    )) as { snapshotCount: number };
+
+    // The snapshot is taken on the click itself and forwarded to the
+    // offscreen document, which is where large media already lives —
+    // chrome.storage.session's ten-megabyte quota would not survive sixty
+    // steps, and it would take the interaction log down with it.
+    assert.equal(state.snapshotCount >= 1, true, "a click should produce a step snapshot");
 
     await driver.evaluate(
       (id) => chrome.runtime.sendMessage({ type: "capture/disarm-tab", tabId: id }),

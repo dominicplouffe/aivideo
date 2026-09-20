@@ -25,6 +25,7 @@ const EMPTY: CaptureState = {
   tabId: null,
   startedAt: null,
   eventCount: 0,
+  snapshotCount: 0,
   bytes: 0,
   lastError: null,
   manifest: null,
@@ -121,6 +122,7 @@ async function startCapture(tabId: number, masks: MaskRule[], withMicrophone: bo
     tabId,
     startedAt: Date.now(),
     eventCount: 0,
+    snapshotCount: 0,
     bytes: 0,
     lastError: null,
     manifest: null,
@@ -189,6 +191,21 @@ chrome.runtime.onMessage.addListener((message: ExtensionMessage, _sender, respon
       case "content/events": {
         const count = await appendEvents(message.events);
         await writeState({ eventCount: count });
+        respond({ ok: true });
+        return;
+      }
+      case "content/snapshot": {
+        // Snapshots go to the offscreen document, which is already where
+        // large media lives. chrome.storage.session has a ten-megabyte
+        // quota, and a sixty-step demo would blow through it and take the
+        // interaction log down with it.
+        await ensureOffscreen();
+        await chrome.runtime.sendMessage({
+          type: "offscreen/snapshot",
+          snapshot: message.snapshot,
+        } satisfies ExtensionMessage);
+        const current = await readState();
+        await writeState({ snapshotCount: current.snapshotCount + 1 });
         respond({ ok: true });
         return;
       }

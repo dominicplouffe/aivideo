@@ -101,6 +101,10 @@ export function DemoBuilder({ project }: { project: Project }) {
               </button>
             ))}
           </div>
+          <Button variant="outline" size="sm" href={`/app/demos/${project.id}/preview`}>
+            <Icon name="play" className="size-4" strokeWidth={1.9} />
+            <span className="hidden sm:inline">Preview</span>
+          </Button>
           <Button variant="outline" size="sm">
             <Icon name="code" className="size-4" strokeWidth={1.8} />
             <span className="hidden sm:inline">Embed</span>

@@ -1,4 +1,4 @@
-import { applyCaptureMasks, createObserver, defaultMaskSelectors } from "@/lib/capture";
+import { applyCaptureMasks, captureSnapshot, createObserver, defaultMaskSelectors } from "@/lib/capture";
 import type { AppliedMask } from "@/lib/capture/masking";
 import type { CaptureObserver } from "@/lib/capture/observer";
 import type { CaptureEvent, MaskRule } from "@/lib/capture/types";
@@ -26,6 +26,55 @@ let flushTimer: ReturnType<typeof setInterval> | null = null;
 
 const FLUSH_MS = 1000;
 
+/**
+ * Snapshot budget.
+ *
+ * An interactive demo is a handful of steps, not a frame-by-frame archive.
+ * These numbers are what keeps a forty-minute recording from producing four
+ * hundred snapshots of the same screen and a payload nobody can upload.
+ */
+const SNAPSHOT_MIN_GAP_MS = 750;
+const SNAPSHOT_MAX_COUNT = 60;
+const SNAPSHOT_MAX_BYTES = 24 * 1024 * 1024;
+
+let lastSnapshotAt = 0;
+let snapshotCount = 0;
+let snapshotBytes = 0;
+
+/**
+ * Snapshots the page for a step of the interactive demo.
+ *
+ * Taken synchronously, on the click itself. A snapshot a moment later is a
+ * snapshot of a different page: the menu has closed, the toast has faded,
+ * the row the person clicked is no longer highlighted.
+ */
+function maybeSnapshot(selector: string | undefined) {
+  const at = Date.now();
+  if (at - lastSnapshotAt < SNAPSHOT_MIN_GAP_MS) return;
+  if (snapshotCount >= SNAPSHOT_MAX_COUNT || snapshotBytes >= SNAPSHOT_MAX_BYTES) return;
+  lastSnapshotAt = at;
+
+  let snapshot;
+  try {
+    snapshot = captureSnapshot(document, { targetSelector: selector });
+  } catch {
+    // A page that breaks serialisation must not break the recording. The
+    // video and the interaction log are still worth having.
+    return;
+  }
+
+  snapshotCount += 1;
+  snapshotBytes += snapshot.bytes;
+  chrome.runtime
+    .sendMessage({ type: "content/snapshot", snapshot } satisfies ExtensionMessage)
+    .catch(() => {
+      // Unlike events, a dropped snapshot is not re-queued: it is tens of
+      // kilobytes of a screen we can reconstruct from the video, and
+      // retrying would hold the whole page's markup in memory for a worker
+      // that may never wake.
+    });
+}
+
 function flush() {
   if (buffer.length === 0) return;
   const batch = buffer;
@@ -42,6 +91,9 @@ function flush() {
 
 function arm(rules: MaskRule[]) {
   if (observer) return;
+  lastSnapshotAt = 0;
+  snapshotCount = 0;
+  snapshotBytes = 0;
 
   // Masks go on before the observer, and well before the first frame: the
   // point of masking at capture time is that the clear pixels never exist.
@@ -56,7 +108,10 @@ function arm(rules: MaskRule[]) {
       buffer.push(event);
       // A click is worth sending promptly so the recorder UI can show it;
       // a mutation burst is not worth waking the worker for.
-      if (event.kind === "click" || event.kind === "route") flush();
+      if (event.kind === "click" || event.kind === "route") {
+        flush();
+        maybeSnapshot(event.selector);
+      }
     },
   });
   observer.start();

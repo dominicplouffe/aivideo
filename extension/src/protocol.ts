@@ -1,4 +1,5 @@
 import type { CaptureEvent, CaptureManifest, MaskRule } from "@/lib/capture/types";
+import type { Snapshot } from "@/lib/capture/snapshot";
 
 /**
  * Messages between the three halves of the extension.
@@ -21,11 +22,20 @@ export type ExtensionMessage =
   | { type: "content/arm"; masks: MaskRule[] }
   | { type: "content/disarm" }
   | { type: "content/events"; events: CaptureEvent[] }
+  | { type: "content/snapshot"; snapshot: Snapshot }
   | { type: "content/ready"; url: string; title: string }
   | { type: "offscreen/record"; streamId: string; withMicrophone: boolean }
   | { type: "offscreen/stop" }
   | { type: "offscreen/chunk"; bytes: number }
-  | { type: "offscreen/done"; videoUrl: string; durationSec: number; bytes: number }
+  | { type: "offscreen/snapshot"; snapshot: Snapshot }
+  | {
+      type: "offscreen/done";
+      videoUrl: string;
+      /** A JSON blob of the step snapshots, for the interactive demo. */
+      stepsUrl: string | null;
+      durationSec: number;
+      bytes: number;
+    }
   | { type: "offscreen/error"; message: string };
 
 export interface CaptureState {
@@ -33,6 +43,7 @@ export interface CaptureState {
   tabId: number | null;
   startedAt: number | null;
   eventCount: number;
+  snapshotCount: number;
   bytes: number;
   lastError: string | null;
   manifest: CaptureManifest | null;

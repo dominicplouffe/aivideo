@@ -1,3 +1,4 @@
+import type { Snapshot } from "@/lib/capture/snapshot";
 import type { ExtensionMessage } from "./protocol";
 
 /**
@@ -18,6 +19,7 @@ let recorder: MediaRecorder | null = null;
 let chunks: Blob[] = [];
 let startedAt = 0;
 let stream: MediaStream | null = null;
+let steps: Snapshot[] = [];
 
 function send(message: ExtensionMessage) {
   chrome.runtime.sendMessage(message).catch(() => {});
@@ -74,6 +76,7 @@ async function startRecording(streamId: string, withMicrophone: boolean) {
   });
 
   chunks = [];
+  steps = [];
   startedAt = Date.now();
 
   recorder.ondataavailable = (event) => {
@@ -91,9 +94,18 @@ async function startRecording(streamId: string, withMicrophone: boolean) {
     // A blob URL rather than the bytes: passing hundreds of megabytes
     // through the message channel would serialise the whole recording into
     // a structured clone, twice.
+    // The steps ship as their own blob rather than inside the message: a
+    // sixty-step demo is tens of megabytes of markup, and structured-cloning
+    // it through the service worker would copy all of it twice.
+    const stepsUrl =
+      steps.length > 0
+        ? URL.createObjectURL(new Blob([JSON.stringify(steps)], { type: "application/json" }))
+        : null;
+
     send({
       type: "offscreen/done",
       videoUrl: URL.createObjectURL(blob),
+      stepsUrl,
       durationSec: (Date.now() - startedAt) / 1000,
       bytes: blob.size,
     });
@@ -118,6 +130,7 @@ chrome.runtime.onMessage.addListener((message: ExtensionMessage) => {
       send({ type: "offscreen/error", message: String(error) }),
     );
   }
+  if (message.type === "offscreen/snapshot") steps.push(message.snapshot);
   if (message.type === "offscreen/stop") stopRecording();
   return undefined;
 });
