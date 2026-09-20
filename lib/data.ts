@@ -1,6 +1,7 @@
 import "server-only";
 import { isDatabaseConfigured } from "@/lib/db/client";
 import * as fixtures from "@/lib/app-data";
+import * as agentFixtures from "@/lib/agent/fixtures";
 import type { Project } from "@/lib/app-data";
 import { getCurrentActor } from "@/lib/auth/current";
 import { allowed, type Actor } from "@/lib/auth/authorize";
@@ -177,4 +178,117 @@ export async function getRetentionCurve(projectId: string, points = 48): Promise
   } catch {
     return fixtures.retentionCurve(projectId, points);
   }
+}
+
+/* ------------------------------------------------------------ the agent */
+
+/**
+ * Agent runs, for the workspace shell.
+ *
+ * Behind `project.view` rather than `agent.run`: seeing that a run exists,
+ * what it plans to do and what it was refused is exactly the transparency
+ * the feature is sold on, and a workspace where only the people who can
+ * start runs can see them is a workspace where nobody notices a bad one.
+ * Starting and approving are the privileged actions, and they are checked
+ * where they happen.
+ */
+export async function getAgentRuns() {
+  const { allowed: may, actor } = await guard("project.view");
+  if (!may) return [];
+
+  if (!isDatabaseConfigured()) return agentFixtures.agentRuns;
+  try {
+    const { getDb } = await import("@/lib/db/client");
+    const schema = await import("@/lib/db/schema");
+    const { desc, eq } = await import("drizzle-orm");
+
+    const rows = actor
+      ? await getDb()
+          .select()
+          .from(schema.agentRuns)
+          .where(eq(schema.agentRuns.workspaceId, actor.workspaceId))
+          .orderBy(desc(schema.agentRuns.createdAt))
+          .limit(50)
+      : [];
+
+    return rows.length > 0 ? rows.map(toViewRun) : agentFixtures.agentRuns;
+  } catch (error) {
+    console.error("[data] agent run read failed, serving fixtures:", error);
+    return agentFixtures.agentRuns;
+  }
+}
+
+export async function getAgentRunDetail(id: string) {
+  const { allowed: may, actor } = await guard("project.view");
+  if (!may) return null;
+
+  if (!isDatabaseConfigured()) {
+    const run = agentFixtures.getAgentRun(id);
+    return run ? { run, actions: run.actions } : null;
+  }
+
+  try {
+    const { getRun, actionsFor } = await import("@/lib/agent/run");
+    if (!actor) return null;
+
+    const run = await getRun(actor.workspaceId, id);
+    if (!run) {
+      // Fixture ids still resolve, so a seeded deployment that has a
+      // database but no runs of its own is still explorable.
+      const seeded = agentFixtures.getAgentRun(id);
+      return seeded ? { run: seeded, actions: seeded.actions } : null;
+    }
+
+    const actions = await actionsFor(run.id);
+    return {
+      run: toViewRun(run),
+      actions: actions.map((action) => ({
+        ordinal: action.ordinal,
+        kind: action.kind,
+        outlineOrdinal: action.outlineOrdinal,
+        url: action.url,
+        target: action.target,
+        detail: action.detail,
+        refusedReason: action.refusedReason,
+        atMs: action.atMs,
+      })) as agentFixtures.FixtureAction[],
+    };
+  } catch (error) {
+    console.error("[data] agent run read failed, serving fixtures:", error);
+    const seeded = agentFixtures.getAgentRun(id);
+    return seeded ? { run: seeded, actions: seeded.actions } : null;
+  }
+}
+
+/** One shape for the screen, whichever source served it. */
+function toViewRun(row: {
+  id: string;
+  brief: string;
+  status: string;
+  outline: unknown;
+  allowedOrigins: string[];
+  requestedByEmail: string | null;
+  approvedByEmail: string | null;
+  approvedAt: Date | null;
+  startedAt: Date | null;
+  finishedAt: Date | null;
+  error: string | null;
+  createdAt: Date;
+}): agentFixtures.FixtureRun {
+  return {
+    id: row.id,
+    brief: row.brief,
+    status: row.status as agentFixtures.FixtureStatus,
+    outline: (row.outline ?? []) as agentFixtures.FixtureRun["outline"],
+    removed: [],
+    allowedOrigins: row.allowedOrigins ?? [],
+    requestedByEmail: row.requestedByEmail ?? "",
+    approvedByEmail: row.approvedByEmail,
+    approvedAt: row.approvedAt?.toISOString() ?? null,
+    startedAt: row.startedAt?.toISOString() ?? null,
+    finishedAt: row.finishedAt?.toISOString() ?? null,
+    error: row.error,
+    createdAt: row.createdAt.toISOString(),
+    actions: [],
+  };
 }

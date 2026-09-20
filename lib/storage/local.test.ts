@@ -105,7 +105,12 @@ describe("signed reads", () => {
     const sig = url.searchParams.get("sig")!;
 
     assert.ok(store.verify(`read:${key}`, exp, sig));
-    assert.ok(!store.verify(`read:${key}`, exp, sig.replace(/.$/, "0")), "tampered signature");
+    // Flipped to a character it is not, rather than to a fixed "0": one
+    // signature in sixteen already ends in "0", and a "tampered" value equal
+    // to the original is a test that passes fifteen times and then does not.
+    const tampered = `${sig.slice(0, -1)}${sig.endsWith("0") ? "1" : "0"}`;
+    assert.notEqual(tampered, sig);
+    assert.ok(!store.verify(`read:${key}`, exp, tampered), "tampered signature");
     assert.ok(!store.verify(`read:${WS_B}/notes/a.txt`, exp, sig), "signature reused for another key");
     assert.ok(!store.verify(`read:${key}`, exp, "abc"), "length mismatch must not throw");
   });

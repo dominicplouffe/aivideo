@@ -22,6 +22,7 @@ const primary: NavEntry[] = [
   { label: "Projects", href: "/app/projects", icon: "folder" },
   { label: "Guides", href: "/app/guides", icon: "doc" },
   { label: "Interactive demos", href: "/app/demos", icon: "cursor" },
+  { label: "Riff Agent", href: "/app/agent", icon: "rocket", badge: "Beta" },
   { label: "Analytics", href: "/app/analytics", icon: "chart" },
 ];
 
