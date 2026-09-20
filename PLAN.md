@@ -89,9 +89,11 @@ The largest remaining block. Nothing above the provider boundary changes.
    alignment, diarization and filler words explicitly requested — the last of
    those is discarded by default and the editor cannot cut what the transcript
    never admitted was there.
-4. **Render cluster.** GPU workers consuming an edit decision list. FFmpeg for
-   compositing; the EDL format is already implied by the studio's timeline
-   model. *Next.*
+4. ~~**Render cluster.**~~ **Done, as a worker.** An EDL format, an FFmpeg
+   compiler, and a queue worker that renders, stores and meters. Proven by
+   rendering synthetic footage end to end and probing the result. What remains
+   is horizontal: GPU encoding, autoscaling and a cluster to run the worker
+   on — deployment, not design. See `lib/render/README.md`.
 5. ~~**Synthesis and cloning adapters.**~~ **Done.** ElevenLabs, requesting raw
    PCM so span durations are exact rather than decoded, and refusing to clone a
    voice without a recorded consent phrase. Revocation propagating to future
@@ -99,6 +101,9 @@ The largest remaining block. Nothing above the provider boundary changes.
 6. ~~**Job queue.**~~ **Done.** `FOR UPDATE SKIP LOCKED` claiming, lease-based
    crash recovery, exponential backoff, dead-lettering, idempotency keys.
    Webhook emission is still open.
+
+Still open in this phase: webhook emission on job completion, and revoking a
+cloned voice so future renders stop using it.
 
 Also done in this phase, beyond the original list: an Anthropic translation
 adapter that enforces the glossary and the shot's length budget rather than

@@ -1,0 +1,168 @@
+import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { after, before, beforeEach, describe, it } from "node:test";
+import { eq } from "drizzle-orm";
+import { closeDb, getDb, isDatabaseConfigured } from "@/lib/db/client";
+import * as s from "@/lib/db/schema";
+import { enqueue, getJob } from "@/lib/jobs/queue";
+import { LocalStorage, setStorage } from "@/lib/storage";
+import { processOne } from "./worker";
+import { runFfmpeg } from "./ffmpeg";
+import type { Edl } from "./edl";
+
+/**
+ * The worker's job is to turn a queued row into a stored video and a truthful
+ * record of what it produced. That involves a real queue, a real encoder and
+ * real bytes on disk, so this test uses all three: anything less would be
+ * testing the parts that were never in doubt.
+ */
+
+function hasFfmpeg(): boolean {
+  try {
+    execFileSync("ffmpeg", ["-version"], { stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+const RUN = isDatabaseConfigured() && hasFfmpeg();
+const WS = "44444444-4444-4444-8444-444444444444";
+
+let dir: string;
+
+before(async () => {
+  if (!RUN) return;
+  dir = await mkdtemp(path.join(tmpdir(), "demoriff-worker-"));
+  setStorage(new LocalStorage(path.join(dir, "storage"), "test-secret"));
+  const db = getDb();
+  await db.delete(s.workspaces).where(eq(s.workspaces.id, WS));
+  await db.insert(s.workspaces).values({ id: WS, slug: "worker-test", name: "Worker Test" });
+});
+
+after(async () => {
+  if (!RUN) return;
+  setStorage(null);
+  await getDb().delete(s.workspaces).where(eq(s.workspaces.id, WS));
+  await closeDb();
+  await rm(dir, { recursive: true, force: true });
+});
+
+beforeEach(async () => {
+  if (!RUN) return;
+  await getDb().delete(s.jobs).where(eq(s.jobs.workspaceId, WS));
+});
+
+async function sourceVideo(): Promise<string> {
+  const target = path.join(dir, "source.mp4");
+  await runFfmpeg([
+    "-y", "-f", "lavfi", "-i", "testsrc=size=320x180:rate=30:duration=12",
+    "-c:v", "libx264", "-pix_fmt", "yuv420p", target,
+  ]);
+  return target;
+}
+
+function edlFor(sourcePath: string): Edl {
+  return {
+    version: 1,
+    projectId: "prj_1",
+    locale: "en-US",
+    source: { url: `file://${sourcePath}`, durationSec: 12 },
+    output: { width: 320, height: 180, fps: 30, container: "mp4", videoCodec: "h264", audioCodec: "aac", crf: 34 },
+    clips: [
+      { sourceStart: 0, sourceEnd: 3, outputStart: 0, label: "s1" },
+      { sourceStart: 6, sourceEnd: 9, outputStart: 3, label: "s2" },
+    ],
+    zooms: [],
+    masks: [],
+    captions: [],
+    audio: [],
+    brand: { colors: [], font: "Inter", captionStyle: "", introSec: 0, outroSec: 0 },
+    durationSec: 6,
+  };
+}
+
+describe("render worker", { skip: RUN ? false : "DATABASE_URL and ffmpeg are both required" }, () => {
+  it("renders a queued job, stores the video and records what it produced", async () => {
+    const sourcePath = await sourceVideo();
+    const { job } = await enqueue({
+      workspaceId: WS,
+      kind: "render",
+      payload: { projectId: "prj_1", edl: edlFor(sourcePath), outputs: ["video"] },
+    });
+
+    const outcome = await processOne({ workerId: "w1", scratchRoot: dir });
+
+    assert.equal(outcome?.status, "completed", outcome?.error);
+    assert.equal(outcome?.jobId, job.id);
+    assert.equal(Math.abs((outcome?.durationSec ?? 0) - 6) < 0.1, true);
+
+    const stored = await getJob(job.id);
+    assert.equal(stored?.status, "completed");
+    const result = stored?.result as { video?: { status: string }; billedSeconds?: number };
+    assert.equal(result.video?.status, "ready");
+    // Billed from the probed output, in seconds. Not from the request, which
+    // is a prediction, and not rounded up to a minute.
+    assert.equal(Math.abs((result.billedSeconds ?? 0) - 6) < 0.1, true);
+
+    // The video is actually in storage and is not empty.
+    const bytes = await new LocalStorage(path.join(dir, "storage"), "test-secret").get({
+      workspaceId: WS,
+      path: `renders/${job.id}/render.mp4`,
+    });
+    assert.equal(bytes.byteLength > 1000, true);
+  });
+
+  it("returns null rather than spinning when the queue is empty", async () => {
+    assert.equal(await processOne({ workerId: "w1", scratchRoot: dir }), null);
+  });
+
+  it("dead-letters an impossible render instead of retrying it to the limit", async () => {
+    const { job } = await enqueue({
+      workspaceId: WS,
+      kind: "render",
+      // Neither an EDL nor a project to build one from: no number of retries
+      // will make this job renderable.
+      payload: { outputs: ["video"] },
+      maxAttempts: 3,
+    });
+
+    const outcome = await processOne({ workerId: "w1", scratchRoot: dir });
+    assert.equal(outcome?.status, "failed");
+
+    const stored = await getJob(job.id);
+    assert.match(stored?.lastError ?? "", /permanent:/);
+  });
+
+  it("leaves no scratch directory behind, on success or on failure", async () => {
+    const sourcePath = await sourceVideo();
+    const before = await scratchDirs();
+
+    await enqueue({
+      workspaceId: WS,
+      kind: "render",
+      payload: { edl: edlFor(sourcePath) },
+    });
+    await processOne({ workerId: "w1", scratchRoot: dir });
+
+    await enqueue({
+      workspaceId: WS,
+      kind: "render",
+      payload: { edl: { ...edlFor(sourcePath), source: { url: "file:///nonexistent.mp4", durationSec: 1 } } },
+    });
+    await processOne({ workerId: "w1", scratchRoot: dir });
+
+    // A 4K intermediate is gigabytes. One leaked per job fills the disk in an
+    // afternoon, and then every job fails for a reason that looks unrelated.
+    assert.deepEqual(await scratchDirs(), before);
+  });
+});
+
+async function scratchDirs(): Promise<string[]> {
+  const { readdir } = await import("node:fs/promises");
+  const entries = await readdir(dir, { withFileTypes: true });
+  return entries.filter((e) => e.isDirectory() && e.name.startsWith("demoriff-render-")).map((e) => e.name);
+}

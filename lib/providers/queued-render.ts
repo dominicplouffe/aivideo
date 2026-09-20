@@ -37,9 +37,12 @@ export class QueuedRenderProvider implements RenderProvider {
   constructor(private readonly workspaceId: string) {}
 
   async submit(req: RenderRequest): Promise<RenderJob> {
-    // Only finished video minutes are metered. Guides, tours, clips and every
-    // localized variant are derived from work already paid for.
-    const minutesBilled = req.outputs.includes("video") ? 0 : 0;
+    // Nothing is metered at submit time. The billed amount is the finished
+    // video's duration, which does not exist until the render does — the
+    // worker probes the output and records it on completion. Guessing here
+    // and correcting later means either over-charging or a reconciliation
+    // job, and both are worse than waiting a few minutes for a real number.
+    const minutesBilled = 0;
 
     const { job } = await enqueue({
       workspaceId: this.workspaceId,

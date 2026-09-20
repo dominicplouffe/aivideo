@@ -2,7 +2,7 @@
   "name": "demoriff",
   "version": "0.1.0",
   "private": true,
-  "description": "DemoRiff — turn a raw screen recording into a studio-grade product demo, a narrated walkthrough, and a step-by-step guide.",
+  "description": "DemoRiff \u2014 turn a raw screen recording into a studio-grade product demo, a narrated walkthrough, and a step-by-step guide.",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
@@ -12,7 +12,8 @@
     "db:migrate": "drizzle-kit migrate",
     "db:seed": "tsx lib/db/scripts/seed.ts",
     "db:studio": "drizzle-kit studio",
-    "test": "tsx --test \"lib/**/*.test.ts\""
+    "test": "tsx --test \"lib/**/*.test.ts\"",
+    "worker": "tsx lib/render/scripts/worker.ts"
   },
   "dependencies": {
     "drizzle-orm": "^0.45.2",

@@ -33,6 +33,28 @@ beforeEach(async () => {
 });
 
 describe("job queue", { skip: RUN ? false : "DATABASE_URL not set" }, () => {
+  it("returns a fully populated job from a claim", async () => {
+    const { job: queued } = await enqueue({
+      workspaceId: WS,
+      kind: "render",
+      payload: { n: 1 },
+      maxAttempts: 7,
+    });
+
+    const claimed = await claim("worker-fields");
+
+    // `claim` runs raw SQL, whose rows keep their database column names. Every
+    // multi-word field here was silently undefined until that mapping was made
+    // explicit, and a worker cannot store its output without the workspace id.
+    assert.equal(claimed?.id, queued.id);
+    assert.equal(claimed?.workspaceId, WS);
+    assert.equal(claimed?.kind, "render");
+    assert.equal(claimed?.maxAttempts, 7);
+    assert.equal(claimed?.lastError, null);
+    assert.equal(claimed?.runAfter instanceof Date, true);
+    assert.equal(claimed?.createdAt instanceof Date, true);
+  });
+
   it("claims a queued job exactly once across concurrent workers", async () => {
     await enqueue({ workspaceId: WS, kind: "render", payload: { n: 1 } });
 

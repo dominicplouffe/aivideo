@@ -184,8 +184,51 @@ export async function claim(workerId: string, kinds?: string[]): Promise<Job | n
     RETURNING j.*;
   `);
 
-  const row = (rows as unknown as (typeof s.jobs.$inferSelect)[])[0];
-  return row ? toJob(row) : null;
+  const row = (rows as unknown as RawJobRow[])[0];
+  return row ? fromRawRow(row) : null;
+}
+
+/**
+ * A row as raw SQL returns it.
+ *
+ * `db.execute` hands back the driver's result untouched, so the columns keep
+ * their database names. Drizzle's camelCase mapping only applies to the query
+ * builder. Casting a raw row to the schema's inferred type compiles happily
+ * and then yields `undefined` for every multi-word column at runtime, which
+ * is a quiet way to lose a workspace id.
+ */
+interface RawJobRow {
+  id: string;
+  workspace_id: string;
+  kind: string;
+  status: JobStatus;
+  payload: Record<string, unknown>;
+  result: Record<string, unknown> | null;
+  attempts: number;
+  max_attempts: number;
+  last_error: string | null;
+  /** Postgres timestamps arrive as strings on a raw result, not as Dates. */
+  run_after: string | Date;
+  created_at: string | Date;
+}
+
+function fromRawRow(r: RawJobRow): Job {
+  return {
+    id: r.id,
+    workspaceId: r.workspace_id,
+    kind: r.kind,
+    status: r.status,
+    payload: r.payload,
+    result: r.result,
+    attempts: r.attempts,
+    maxAttempts: r.max_attempts,
+    lastError: r.last_error,
+    // The query builder parses timestamps; raw SQL does not. Handing a caller
+    // a string where the type promises a Date is a crash waiting for the
+    // first line of code that does arithmetic on it.
+    runAfter: new Date(r.run_after),
+    createdAt: new Date(r.created_at),
+  };
 }
 
 /** Extends the lease on a long-running job so it is not reclaimed mid-flight. */
