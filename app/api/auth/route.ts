@@ -22,7 +22,8 @@ import { resolveActor, UnauthenticatedError } from "@/lib/auth/session";
  */
 
 const SSO_PENDING =
-  "Single sign-on is not configured for this deployment. Set WORKOS_API_KEY and WORKOS_CLIENT_ID.";
+  "Single sign-on is not wired up yet, and there is no other way to sign in to " +
+  "a production deployment. This build cannot authenticate anyone here.";
 
 function clientIp(request: Request): string | null {
   return request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? null;
@@ -70,7 +71,18 @@ export async function POST(request: Request) {
       { status: 503 },
     );
   }
-  if (process.env.NODE_ENV === "production" && !process.env.WORKOS_API_KEY) {
+  // Refused in production unconditionally.
+  //
+  // The first version of this said "unless WORKOS_API_KEY is set", which
+  // meant that setting that variable — exactly what somebody deploying
+  // would do while wiring up SSO — silently enabled an email-only sign-in
+  // where anybody could become anybody by typing their address. An
+  // environment variable that turns a development shortcut into a
+  // production authentication bypass is the worst shape a guard can have.
+  //
+  // When the WorkOS exchange exists it gets its own branch above this one,
+  // and this stays exactly as it is.
+  if (process.env.NODE_ENV === "production") {
     return NextResponse.json({ error: SSO_PENDING }, { status: 501 });
   }
 

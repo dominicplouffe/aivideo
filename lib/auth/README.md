@@ -149,3 +149,51 @@ delete a workspace and its trail. It requires a stated reason and reports
 what it destroyed to the operator's log — the one record the deletion cannot
 reach. Test teardown uses the same function on purpose: a test that reaches
 for a private escape hatch stops exercising the rule everyone else follows.
+
+## Where the checks actually live
+
+The framework's guidance is blunt about this: a check in a route handler
+protects that route, and the majority of security checks belong as close as
+possible to the data source. So `lib/data.ts` is a **Data Access Layer** —
+every read authorizes before it returns, which protects every caller that
+will ever exist, including the page somebody adds in six months without
+reading the comment above it.
+
+Three rules hold there:
+
+- **Nothing is passed in.** The actor is read back from `getCurrentActor()`,
+  a `cache()`-wrapped helper, so a page, its layout and every read inside one
+  render share a single session lookup. A value threaded through props is a
+  value that eventually reaches a client component by accident.
+- **Refusal returns nothing, never someone else's data.** A caller who may
+  not see a project gets `null` — the same answer as for a project that does
+  not exist, because a different answer for one that exists in a workspace
+  you cannot see is an oracle for what that workspace contains.
+- **No database means no authorization to do.** The app runs on seeded
+  fixtures with nobody signed in, which is what keeps it explorable from a
+  fresh clone.
+
+`getCurrentActor()` returns null rather than throwing when called outside a
+request — from a script, a worker, a test. Every check downstream then
+denies, instead of an exception about a React cache that says nothing about
+what went wrong.
+
+The app layout redirects a signed-out visitor to sign-in. That is not the
+authorization; it is the courtesy. Without it somebody sees a workspace full
+of empty states and has to work out why.
+
+### Tenant isolation is in the query
+
+`getProjectById` takes a workspace and filters on it, rather than looking up
+an id across every tenant and leaving the caller to check afterwards. That
+kind of check is one somebody eventually forgets, and it fails silently — by
+returning the wrong customer's data rather than an error anybody notices.
+
+### A guard that an environment variable could switch off
+
+The first version of the production sign-in guard read "refuse unless
+`WORKOS_API_KEY` is set". Setting that variable — exactly what somebody
+deploying would do while wiring up SSO — would have enabled the
+development-only email sign-in, where anybody becomes anybody by typing an
+address. It now refuses in production unconditionally; when the real
+exchange exists it gets its own branch, and this one stays as it is.

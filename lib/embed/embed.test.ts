@@ -22,6 +22,17 @@ const CHROMIUM = [
 const RUN = Boolean(CHROMIUM);
 const HOST = "https://customer.test";
 
+/**
+ * Generous on purpose.
+ *
+ * These assertions are about *whether* something happens — a beacon is
+ * sent, an iframe mounts — not how quickly. A tight budget turns "the suite
+ * is busy" into a failure that looks like a bug, and a test that fails for
+ * reasons unrelated to what it checks is a test people learn to re-run
+ * rather than read.
+ */
+const BROWSER_TIMEOUT_MS = 15_000;
+
 let browser: Browser | null = null;
 let runtime = "";
 
@@ -52,6 +63,20 @@ function hostPage(embedTag: string, options: { tall?: boolean } = {}) {
   </body></html>`;
 }
 
+/** Beacon URLs intercepted per page, in arrival order. */
+const beaconLog = new WeakMap<Page, string[]>();
+
+/** Waits for a beacon to be intercepted, or gives up. */
+async function waitForBeacon(page: Page, timeoutMs = BROWSER_TIMEOUT_MS): Promise<string | null> {
+  const log = beaconLog.get(page) ?? [];
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (log.length > 0) return log[0];
+    await page.waitForTimeout(50);
+  }
+  return null;
+}
+
 async function openHost(
   html: string,
   options: { slowScript?: boolean; onConsole?: (page: Page) => void } = {},
@@ -80,9 +105,17 @@ async function openHost(
       body: '<!doctype html><html><body style="margin:0;background:#101322;color:#fff">player</body></html>',
     }),
   );
-  await page.route("https://demoriff.test/api/embed/**", (route) =>
-    route.fulfill({ status: 204, body: "" }),
-  );
+  // Beacons are observed by intercepting them, not by listening for the
+  // request event. `sendBeacon` is fire-and-forget, and under load the event
+  // arrives late or not at all — which made this look like a slow test when
+  // it was actually an unobservable one. Interception happens before the
+  // request leaves, so it cannot be missed.
+  const beacons: string[] = [];
+  beaconLog.set(page, beacons);
+  await page.route("https://demoriff.test/api/embed/**", (route) => {
+    beacons.push(route.request().url());
+    return route.fulfill({ status: 204, body: "" });
+  });
   await page.goto(`${HOST}/`);
   return page;
 }
@@ -205,7 +238,7 @@ describe("the embed on a customer's page", { skip: RUN ? false : "Chromium is no
           }),
       },
     );
-    await page.locator("[data-demoriff] iframe").waitFor({ state: "attached", timeout: 5000 });
+    await page.locator("[data-demoriff] iframe").waitFor({ state: "attached", timeout: BROWSER_TIMEOUT_MS });
 
     // It mounts rather than refusing — but somebody has to be able to find
     // out why their page moved.
@@ -255,7 +288,7 @@ describe("the embed on a customer's page", { skip: RUN ? false : "Chromium is no
                 <script async src="${HOST}/embed.js"></script>`),
     );
     const frame = page.locator("[data-demoriff] iframe");
-    await frame.waitFor({ state: "attached", timeout: 5000 });
+    await frame.waitFor({ state: "attached", timeout: BROWSER_TIMEOUT_MS });
 
     const src = await frame.getAttribute("src");
     assert.match(src ?? "", /https:\/\/demoriff\.test\/embed\/prj_abc/);
@@ -284,7 +317,7 @@ describe("the embed on a customer's page", { skip: RUN ? false : "Chromium is no
     assert.equal(await page.locator("[data-demoriff] iframe").count(), 0);
 
     await page.evaluate(() => window.scrollTo(0, 2200));
-    await page.locator("[data-demoriff] iframe").waitFor({ state: "attached", timeout: 5000 });
+    await page.locator("[data-demoriff] iframe").waitFor({ state: "attached", timeout: BROWSER_TIMEOUT_MS });
     await page.close();
   });
 
@@ -303,7 +336,7 @@ describe("the embed on a customer's page", { skip: RUN ? false : "Chromium is no
       document.body.appendChild(host);
     });
 
-    await page.locator('[data-demo="prj_late"] iframe').waitFor({ state: "attached", timeout: 5000 });
+    await page.locator('[data-demo="prj_late"] iframe').waitFor({ state: "attached", timeout: BROWSER_TIMEOUT_MS });
     await page.close();
   });
 
@@ -313,7 +346,7 @@ describe("the embed on a customer's page", { skip: RUN ? false : "Chromium is no
                 <script async src="${HOST}/embed.js"></script>
                 <script async src="${HOST}/embed.js"></script>`),
     );
-    await page.locator("[data-demoriff] iframe").waitFor({ state: "attached", timeout: 5000 });
+    await page.locator("[data-demoriff] iframe").waitFor({ state: "attached", timeout: BROWSER_TIMEOUT_MS });
     await page.waitForTimeout(300);
 
     assert.equal(await page.locator("[data-demoriff] iframe").count(), 1);
@@ -326,14 +359,12 @@ describe("the embed on a customer's page", { skip: RUN ? false : "Chromium is no
                 <script async src="${HOST}/embed.js"></script>`),
     );
 
-    const beacon = page.waitForRequest((request) => request.url().includes("/api/embed/view"), {
-      timeout: 5000,
-    });
-    await page.locator("[data-demoriff] iframe").waitFor({ state: "attached", timeout: 5000 });
-    const request = await beacon;
+    await page.locator("[data-demoriff] iframe").waitFor({ state: "attached", timeout: BROWSER_TIMEOUT_MS });
+    const beacon = await waitForBeacon(page);
 
-    assert.match(request.url(), /demo=prj_1/);
-    assert.match(request.url(), /from=https%3A%2F%2Fcustomer.test/);
+    assert.notEqual(beacon, null, "the runtime should report a view");
+    assert.match(beacon!, /demo=prj_1/);
+    assert.match(beacon!, /from=https%3A%2F%2Fcustomer.test/);
 
     // No consent banner needed, because nothing is stored.
     const cookies = await page.context().cookies();
@@ -352,14 +383,10 @@ describe("the embed on a customer's page", { skip: RUN ? false : "Chromium is no
                 <script async src="${HOST}/embed.js"></script>`),
     );
 
-    let reported = false;
-    page.on("request", (request) => {
-      if (request.url().includes("/api/embed/view")) reported = true;
-    });
-    await page.locator("[data-demoriff] iframe").waitFor({ state: "attached", timeout: 5000 });
-    await page.waitForTimeout(400);
+    await page.locator("[data-demoriff] iframe").waitFor({ state: "attached", timeout: BROWSER_TIMEOUT_MS });
+    await page.waitForTimeout(600);
 
-    assert.equal(reported, false);
+    assert.deepEqual(beaconLog.get(page), []);
     await page.close();
   });
 });

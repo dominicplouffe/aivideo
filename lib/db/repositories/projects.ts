@@ -152,8 +152,21 @@ export async function getProjectBySlug(
   return project ?? null;
 }
 
-export async function getProjectById(id: string): Promise<Project | null> {
-  const rows = await getDb().select().from(s.projects).where(eq(s.projects.id, id)).limit(1);
+/**
+ * A project by id, within a workspace.
+ *
+ * The workspace is required rather than optional. An id-only lookup reads
+ * across every tenant in the database and leaves it to the caller to check
+ * afterwards — which is a check somebody eventually forgets, and the kind
+ * that fails silently by returning the wrong customer's data rather than an
+ * error anyone notices.
+ */
+export async function getProjectById(workspaceId: string, id: string): Promise<Project | null> {
+  const rows = await getDb()
+    .select()
+    .from(s.projects)
+    .where(and(eq(s.projects.id, id), eq(s.projects.workspaceId, workspaceId)))
+    .limit(1);
   const [project] = await hydrate(rows);
   return project ?? null;
 }

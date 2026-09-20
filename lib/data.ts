@@ -2,20 +2,57 @@ import "server-only";
 import { isDatabaseConfigured } from "@/lib/db/client";
 import * as fixtures from "@/lib/app-data";
 import type { Project } from "@/lib/app-data";
+import { getCurrentActor } from "@/lib/auth/current";
+import { allowed, type Actor } from "@/lib/auth/authorize";
+import type { Permission } from "@/lib/auth/roles";
 
 /**
- * The single read path for workspace data.
+ * The data access layer.
  *
- * When DATABASE_URL is set the repositories serve real rows; otherwise the
- * seeded fixtures do. Both return identical shapes, so no component knows or
- * cares which is behind it — and the project stays runnable with no
- * infrastructure, which is what makes it explorable.
+ * Every read of workspace data goes through here, and every read checks
+ * whether the person asking is allowed to see it. That is the whole point of
+ * the module existing: an authorization check written in a route handler
+ * protects that route, while a check written next to the query protects
+ * every caller that will ever exist — including the page somebody adds in
+ * six months without reading this comment.
  *
- * The database module is imported lazily so a deployment without a database
- * never even loads the driver.
+ * Three rules hold throughout:
+ *
+ *  1. **Nothing is passed in.** The actor is read back from a cached helper
+ *     rather than threaded through arguments, because a value passed from
+ *     component to component is a value that eventually reaches a client
+ *     component by accident.
+ *  2. **Refusal returns nothing, never someone else's data.** A caller who
+ *     may not see a project gets `null`, the same as for a project that does
+ *     not exist — which is also the correct answer to "does this id exist in
+ *     a workspace I cannot see".
+ *  3. **No database means no authorization to do.** The app runs on seeded
+ *     fixtures with nobody signed in, which is what keeps it explorable from
+ *     a fresh clone. Requiring a session in that mode would mean nobody
+ *     could ever see it.
  */
 
 const WORKSPACE = process.env.DEMORIFF_WORKSPACE_SLUG ?? "meridian";
+
+/**
+ * The actor, and whether they hold a permission.
+ *
+ * Returns `{ allowed: true, actor: null }` when there is no database: there
+ * is no one to authorize and nothing tenant-scoped to protect.
+ */
+async function guard(
+  permission: Permission,
+): Promise<{ allowed: boolean; actor: Actor | null }> {
+  if (!isDatabaseConfigured()) return { allowed: true, actor: null };
+
+  const actor = await getCurrentActor();
+  if (!actor) return { allowed: false, actor: null };
+
+  return {
+    allowed: allowed(actor, permission, { workspaceId: actor.workspaceId }),
+    actor,
+  };
+}
 
 /** Which source is serving reads. Surfaced in the UI so it is never ambiguous. */
 export function dataSource(): "postgres" | "fixtures" {
@@ -23,6 +60,11 @@ export function dataSource(): "postgres" | "fixtures" {
 }
 
 export async function getProjects(): Promise<Project[]> {
+  const { allowed: may } = await guard("project.view");
+  // An empty list, not an error: a nav item that renders zero projects is a
+  // better answer to "you are signed out" than a stack trace in a layout.
+  if (!may) return [];
+
   if (!isDatabaseConfigured()) return fixtures.projects;
   try {
     const { listProjects } = await import("@/lib/db/repositories/projects");
@@ -37,6 +79,12 @@ export async function getProjects(): Promise<Project[]> {
 }
 
 export async function getProject(idOrSlug: string): Promise<Project | null> {
+  const { allowed: may, actor } = await guard("project.view");
+  // Indistinguishable from "no such project", on purpose: a different
+  // answer for a project that exists in a workspace you cannot see is an
+  // oracle for what that workspace contains.
+  if (!may) return null;
+
   if (!isDatabaseConfigured()) return fixtures.getProject(idOrSlug) ?? null;
   try {
     const repo = await import("@/lib/db/repositories/projects");
@@ -44,7 +92,11 @@ export async function getProject(idOrSlug: string): Promise<Project | null> {
     if (bySlug) return bySlug;
     // Ids are UUIDs in the database; anything else cannot be one.
     const looksLikeUuid = /^[0-9a-f-]{36}$/i.test(idOrSlug);
-    const byId = looksLikeUuid ? await repo.getProjectById(idOrSlug) : null;
+    // Scoped in the query rather than filtered afterwards: an id-only
+    // lookup reads across every tenant and leaves the caller to remember a
+    // check that fails silently, by returning the wrong customer's data.
+    const byId =
+      looksLikeUuid && actor ? await repo.getProjectById(actor.workspaceId, idOrSlug) : null;
     return byId ?? fixtures.getProject(idOrSlug) ?? null;
   } catch (error) {
     console.error("[data] project read failed, serving fixtures:", error);
@@ -53,6 +105,9 @@ export async function getProject(idOrSlug: string): Promise<Project | null> {
 }
 
 export async function getWorkspace() {
+  const { allowed: may } = await guard("project.view");
+  if (!may) return null;
+
   if (!isDatabaseConfigured()) return fixtures.workspace;
   try {
     const { getWorkspace: read } = await import("@/lib/db/repositories/workspace");
@@ -77,6 +132,9 @@ export async function getWorkspace() {
  * because a rewatched span is the signal and averaging flattens it.
  */
 export async function getRetentionCurve(projectId: string, points = 48): Promise<number[]> {
+  const { allowed: may } = await guard("analytics.view");
+  if (!may) return [];
+
   if (!isDatabaseConfigured()) return fixtures.retentionCurve(projectId, points);
 
   try {

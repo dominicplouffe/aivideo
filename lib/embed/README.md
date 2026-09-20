@@ -64,6 +64,13 @@ consent banner and without asking their legal team first.
 
 ## Two details that cost an afternoon
 
+**A beacon is fire-and-forget, so it has to be observed by interception.**
+The test first listened for Playwright's request event, which passed alone
+and failed intermittently under load — at five seconds and still at fifteen.
+Raising the timeout was the wrong instinct twice: `sendBeacon` hands the
+request to the browser and returns, and the event can arrive late or not at
+all. Intercepting the route catches it before it leaves, deterministically.
+
 **The runtime must be served over HTTPS.** A browser blocks an `http://`
 script on an `https://` page as mixed content — silently, with no error the
 customer will notice. It also blocks a public page from reaching `localhost`
