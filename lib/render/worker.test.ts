@@ -192,6 +192,62 @@ describe("render worker", { skip: RUN ? false : "DATABASE_URL and ffmpeg are bot
     assert.equal(await claim("w-webhook", ["webhook"]), null);
   });
 
+  it("meters a finished render in seconds, once", async () => {
+    const sourcePath = await sourceVideo();
+    const { usage } = await import("@/lib/billing/metering");
+    // Measured as a delta: earlier tests in this file render too, and the
+    // workspace's usage is cumulative by design.
+    const before = (await usage(WS)).usedSeconds;
+
+    const { job } = await enqueue({
+      workspaceId: WS, kind: "render", payload: { edl: edlFor(sourcePath) },
+    });
+
+    await processOne({ workerId: "w1", scratchRoot: dir });
+
+    const first = await usage(WS);
+    const charged = first.usedSeconds - before;
+    assert.equal(Math.abs(charged - 6) <= 1, true, `charged ${charged}s for a 6s render`);
+
+    // The same job completing again — a reclaimed lease, a redelivered
+    // message — must not bill the customer twice for one video.
+    const { meter } = await import("@/lib/billing/metering");
+    const repeat = await meter({
+      workspaceId: WS, seconds: 6, resourceType: "render",
+      resourceId: job.id, idempotencyKey: `render:${job.id}`,
+    });
+    assert.equal(repeat.ok && repeat.duplicate, true);
+    assert.equal((await usage(WS)).usedSeconds, first.usedSeconds);
+  });
+
+  it("refuses to start a render when the workspace asked to be stopped", async () => {
+    const db = getDb();
+    await db
+      .update(s.workspaces)
+      .set({ hardStopAtLimit: true, videoSecondsLimit: 60, videoSecondsUsed: 60 })
+      .where(eq(s.workspaces.id, WS));
+
+    const sourcePath = await sourceVideo();
+    const { job } = await enqueue({
+      workspaceId: WS, kind: "render", payload: { edl: edlFor(sourcePath) },
+    });
+
+    const outcome = await processOne({ workerId: "w1", scratchRoot: dir });
+
+    assert.equal(outcome?.status, "failed");
+    // Named, not generic: the difference between a customer fixing it in a
+    // minute and filing a ticket.
+    assert.match(outcome?.error ?? "", /hard stop/);
+    const stored = await getJob(job.id);
+    // No number of retries produces quota.
+    assert.match(stored?.lastError ?? "", /permanent:/);
+
+    await db
+      .update(s.workspaces)
+      .set({ hardStopAtLimit: false, videoSecondsLimit: 36000, videoSecondsUsed: 0 })
+      .where(eq(s.workspaces.id, WS));
+  });
+
   it("returns null rather than spinning when the queue is empty", async () => {
     assert.equal(await processOne({ workerId: "w1", scratchRoot: dir }), null);
   });

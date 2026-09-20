@@ -5,6 +5,7 @@ import { claim, complete, fail, heartbeat, type Job } from "@/lib/jobs/queue";
 import { getStorage } from "@/lib/storage";
 import { ProviderError } from "@/lib/providers/errors";
 import { recordQuietly } from "@/lib/audit/log";
+import { checkBeforeWork, markNoticeSent, meter } from "@/lib/billing/metering";
 import { emitEvent, type WebhookEventType } from "@/lib/webhooks/outbound";
 import { buildEdl, validateEdl, type Edl } from "./edl";
 import { compile, probe, runFfmpeg, toSrt } from "./ffmpeg";
@@ -172,6 +173,29 @@ async function assertVoicesUsable(edl: Edl): Promise<void> {
 }
 
 /**
+ * Refuses a render that a workspace's hard stop forbids.
+ *
+ * Checked here, before the encode, because refusing is only useful before
+ * the compute is spent. A workspace that has run out and asked to be stopped
+ * gets a clear reason rather than a generic failure — the difference between
+ * a customer fixing it in a minute and filing a ticket.
+ */
+async function assertQuota(job: Job): Promise<void> {
+  const { isDatabaseConfigured } = await import("@/lib/db/client");
+  if (!isDatabaseConfigured()) return;
+
+  const verdict = await checkBeforeWork(job.workspaceId);
+  if (verdict.ok) return;
+
+  throw new ProviderError(
+    `This workspace has used its ${Math.round(verdict.snapshot.limitSeconds / 60)} included ` +
+      `minutes and has a hard stop enabled, so rendering is paused. Add a top-up or turn the ` +
+      `hard stop off in billing settings.`,
+    { provider: "render-worker", retryable: false },
+  );
+}
+
+/**
  * Claims and processes one job. Returns null when the queue is empty.
  *
  * One job per call, by design: a worker loop belongs to the process that owns
@@ -191,6 +215,7 @@ export async function processOne(options: RenderWorkerOptions): Promise<RenderOu
   try {
     const edl = await (options.resolveEdl ?? defaultResolveEdl)(job);
     await assertVoicesUsable(edl);
+    await assertQuota(job);
 
     const result = await renderEdl(edl, {
       scratchRoot: options.scratchRoot,
@@ -215,6 +240,34 @@ export async function processOne(options: RenderWorkerOptions): Promise<RenderOu
       bytes: result.bytes,
       renderedAt: new Date().toISOString(),
     });
+
+    // Metered before it is announced, and keyed on the job id. A job whose
+    // lease expired is reclaimed and can complete twice; without that key
+    // the customer pays twice for one video and hears about it from an
+    // invoice rather than from us.
+    const metered = await meter({
+      workspaceId: job.workspaceId,
+      seconds: result.durationSec,
+      resourceType: "render",
+      resourceId: job.id,
+      idempotencyKey: `render:${job.id}`,
+      metadata: { projectId: edl.projectId, locale: edl.locale },
+    }).catch((error) => {
+      // The video exists. Failing the job now would leave the customer with
+      // a file they were told they did not get.
+      console.error(`[render] could not meter ${job.id}:`, error);
+      return null;
+    });
+
+    if (metered?.ok && metered.noticeDue) {
+      await markNoticeSent(job.workspaceId);
+      await announce(job, "usage.warning", {
+        usedSeconds: metered.snapshot.usedSeconds,
+        allowanceSeconds: metered.snapshot.limitSeconds + metered.snapshot.topupSeconds,
+        fractionUsed: Number(metered.snapshot.fractionUsed.toFixed(3)),
+        hardStopAtLimit: metered.snapshot.hardStopAtLimit,
+      });
+    }
 
     // Recorded quietly: the file exists and is stored, and reporting a
     // finished render as failed because the trail was unavailable would

@@ -21,6 +21,7 @@ export const voiceKindEnum = pgEnum("voice_kind", ["studio", "clone"]);
 export const maskRuleTypeEnum = pgEnum("mask_rule_type", ["detector", "selector", "region", "pattern"]);
 export const assetAccessEnum = pgEnum("asset_access", ["public", "email_gate", "password", "domain", "personalized"]);
 export const jobStatusEnum = pgEnum("job_status", ["queued", "running", "completed", "failed", "dead"]);
+export const usageKindEnum = pgEnum("usage_kind", ["render", "topup", "credit", "adjustment"]);
 
 /* ============================================================
    Workspaces and people
@@ -38,6 +39,18 @@ export const workspaces = pgTable(
     // Metered in seconds so partial minutes never round in our favour.
     videoSecondsLimit: integer("video_seconds_limit").notNull().default(600),
     videoSecondsUsed: integer("video_seconds_used").notNull().default(0),
+    // Bought, not rented: top-up seconds are paid for outright and carry
+    // across billing periods. Expiring them would mean charging for time
+    // and then taking it back, which is the kind of term customers read
+    // about afterwards.
+    topupSeconds: integer("topup_seconds").notNull().default(0),
+    // Off by default. Running out of quota mid-launch because a setting
+    // nobody chose cut the workspace off is worse than an overage line on
+    // an invoice — so the stop exists, and the customer turns it on.
+    hardStopAtLimit: boolean("hard_stop_at_limit").notNull().default(false),
+    // Set when the 80% notice goes out, cleared when the period rolls, so
+    // the warning arrives once rather than on every render afterwards.
+    usageNoticeSentAt: timestamp("usage_notice_sent_at", { withTimezone: true }),
     periodStartsAt: timestamp("period_starts_at", { withTimezone: true }).notNull().defaultNow(),
     shareDomain: text("share_domain"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -47,6 +60,43 @@ export const workspaces = pgTable(
     uniqueIndex("workspaces_slug_key").on(t.slug),
     check("workspaces_usage_nonneg", sql`${t.videoSecondsUsed} >= 0`),
     check("workspaces_limit_nonneg", sql`${t.videoSecondsLimit} >= 0`),
+    check("workspaces_topup_nonneg", sql`${t.topupSeconds} >= 0`),
+  ],
+);
+
+/**
+ * The usage ledger.
+ *
+ * `workspaces.video_seconds_used` is a counter, and a counter is a summary
+ * of something it cannot itself explain. When a customer asks why their
+ * invoice says what it says, the answer has to be a list of renders with
+ * their durations, not a number that was incremented somewhere.
+ *
+ * It is also what makes metering idempotent. A render job whose lease
+ * expires is reclaimed and may complete twice; without a unique key on the
+ * ledger, the second completion bills the customer again for one video.
+ */
+export const usageEvents = pgTable(
+  "usage_events",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workspaceId: uuid("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+    kind: usageKindEnum("kind").notNull(),
+    // Signed: a top-up adds, a credit for a failed render subtracts. Stored
+    // in seconds, never minutes, so a partial minute cannot round our way.
+    seconds: integer("seconds").notNull(),
+    resourceType: text("resource_type"),
+    resourceId: text("resource_id"),
+    // The period this counted against, so a late-arriving render is billed
+    // to the month it belongs to rather than the month it was recorded in.
+    periodStartsAt: timestamp("period_starts_at", { withTimezone: true }).notNull(),
+    idempotencyKey: text("idempotency_key").notNull(),
+    metadata: jsonb("metadata").$type<Record<string, unknown>>(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("usage_events_idempotency_key").on(t.workspaceId, t.idempotencyKey),
+    index("usage_events_period_idx").on(t.workspaceId, t.periodStartsAt),
   ],
 );
 

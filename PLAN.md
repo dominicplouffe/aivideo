@@ -137,8 +137,13 @@ actually evaluate instead of returning an empty region list that reads like
 ## Phase 8 — Auth, billing, governance
 
 1. WorkOS for SAML SSO and SCIM; enforced domain capture.
-2. Stripe: subscriptions, metered video minutes, proration, top-ups, the 80%
-   notice and the customer-controlled hard stop.
+2. **Stripe.** The metering engine is ~~done~~: a usage ledger in seconds,
+   idempotent against queue retries, top-ups that carry across periods,
+   proration by the day, the 80% notice fired once, and a hard stop that is
+   off by default and enforced before a render starts. See
+   `lib/billing/README.md`. What remains is the Stripe adapter itself —
+   subscriptions, payment methods and invoice sync — behind the same
+   provider boundary as the inference vendors.
 3. ~~RBAC across owner / admin / creator / reviewer / viewer, scoped per
    workspace.~~ **Done.** The matrix is data, written out in full, with the
    workspace check inside the one authorisation seam rather than in each
