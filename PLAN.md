@@ -187,8 +187,17 @@ actually evaluate instead of returning an empty region list that reads like
    `lib/analytics/README.md`. CRM identity resolution is still open, and is
    deliberately the opposite trade — it needs an identity, so it belongs
    behind an explicit opt-in rather than in the cookieless path.
-3. Help-centre connectors with two-way sync (Zendesk, Intercom, HelpScout,
-   Notion, Confluence).
+3. ~~Help-centre connectors with two-way sync (Zendesk, Intercom, HelpScout,
+   Notion, Confluence).~~ **Done.** All five, behind one interface. The sync
+   is genuinely two-way in the only sense that matters: a human edit in the
+   help centre is never silently overwritten. Three hashes over *visible
+   text* — what we last sent, what they last held, and the guide as it
+   stands — decide whether each side has moved, and a sync that would
+   discard somebody's edit is held and reported rather than performed.
+   Overriding takes an explicit choice and lands in the audit log with a
+   name against it. Every adapter creates drafts; publishing stays a human
+   decision on the vendor's side. See `lib/connectors/README.md` for what
+   each vendor gets wrong, because each one is wrong in its own way.
 
 ## Phase 10 — Riff Agent
 

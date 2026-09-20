@@ -64,6 +64,13 @@
       "when": 1789939293668,
       "tag": "0008_siem_destinations",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1789939836544,
+      "tag": "0009_connectors",
+      "breakpoints": true
     }
   ]
 }

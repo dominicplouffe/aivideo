@@ -23,6 +23,12 @@ export const assetAccessEnum = pgEnum("asset_access", ["public", "email_gate", "
 export const jobStatusEnum = pgEnum("job_status", ["queued", "running", "completed", "failed", "dead"]);
 export const usageKindEnum = pgEnum("usage_kind", ["render", "topup", "credit", "adjustment"]);
 export const siemFormatEnum = pgEnum("siem_format", ["json", "cef", "ecs"]);
+export const connectorVendorEnum = pgEnum("connector_vendor", [
+  "zendesk", "intercom", "helpscout", "notion", "confluence",
+]);
+export const connectorLinkStateEnum = pgEnum("connector_link_state", [
+  "in_sync", "local_ahead", "remote_ahead", "diverged", "unlinked",
+]);
 
 /* ============================================================
    Workspaces and people
@@ -271,6 +277,70 @@ export const siemDestinations = pgTable(
   (t) => [
     uniqueIndex("siem_destinations_workspace_name_key").on(t.workspaceId, t.name),
     index("siem_destinations_workspace_idx").on(t.workspaceId),
+  ],
+);
+
+/* ============================================================
+   Help-centre connectors
+   ============================================================ */
+
+/** One help centre, connected to one workspace. */
+export const connectorInstallations = pgTable(
+  "connector_installations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workspaceId: uuid("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+    vendor: connectorVendorEnum("vendor").notNull(),
+    /** The customer's own instance: a Zendesk subdomain, a Confluence site. */
+    baseUrl: text("base_url").notNull(),
+    /** Where new articles land — a Zendesk section, a Notion page. */
+    containerId: text("container_id"),
+    containerName: text("container_name"),
+    /** Sealed with AES-256-GCM. Presented to the vendor on every call. */
+    credentialsSealed: text("credentials_sealed"),
+    lastSyncAt: timestamp("last_sync_at", { withTimezone: true }),
+    lastError: text("last_error"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    disabledAt: timestamp("disabled_at", { withTimezone: true }),
+  },
+  (t) => [
+    uniqueIndex("connector_installations_workspace_vendor_key").on(t.workspaceId, t.vendor, t.baseUrl),
+    index("connector_installations_workspace_idx").on(t.workspaceId),
+  ],
+);
+
+/**
+ * One project's guide, and the article it became.
+ *
+ * The three hashes are the whole of two-way sync. `pushedHash` is what we
+ * last sent, `remoteHash` is what the help centre last told us it holds, and
+ * comparing both against the guide as it stands now says whether each side
+ * has moved. Without the pushed hash there is no way to tell "they edited
+ * it" from "we changed it", and a sync that cannot tell those apart will
+ * eventually overwrite somebody's work.
+ */
+export const connectorLinks = pgTable(
+  "connector_links",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    installationId: uuid("installation_id").notNull().references(() => connectorInstallations.id, { onDelete: "cascade" }),
+    projectId: uuid("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+    locale: text("locale").notNull().default("en-US"),
+    /** The vendor's id for the article. */
+    externalId: text("external_id").notNull(),
+    externalUrl: text("external_url"),
+    /** Hash of the document as we last sent it. */
+    pushedHash: text("pushed_hash"),
+    /** Hash of the document as the help centre last reported it. */
+    remoteHash: text("remote_hash"),
+    state: connectorLinkStateEnum("state").notNull().default("in_sync"),
+    lastPushedAt: timestamp("last_pushed_at", { withTimezone: true }),
+    lastPulledAt: timestamp("last_pulled_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("connector_links_installation_project_key").on(t.installationId, t.projectId, t.locale),
+    index("connector_links_project_idx").on(t.projectId),
   ],
 );
 
