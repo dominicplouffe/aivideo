@@ -223,12 +223,14 @@ export function SharePage({ project }: { project: Project }) {
               <div className="mt-3 flex gap-2">
                 <input
                   readOnly
+                  aria-label="Share link"
                   value={`demos.meridian.app/${project.slug}`}
                   className="h-9 min-w-0 flex-1 rounded-lg border border-[var(--line)] bg-ink-900 px-3 font-mono text-2xs text-fg"
                 />
                 <Button
                   variant="secondary"
                   size="sm"
+                  aria-label={copied ? "Link copied" : "Copy share link"}
                   onClick={() => {
                     navigator.clipboard?.writeText(`https://demos.meridian.app/${project.slug}`);
                     setCopied(true);
