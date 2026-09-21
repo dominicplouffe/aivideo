@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Inter, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 import { site } from "@/lib/site";
+import { themeBootstrapScript } from "@/lib/theme";
 
 const inter = Inter({
   subsets: ["latin"],
@@ -58,8 +59,11 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: "#04050A",
-  colorScheme: "dark",
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#F3F4F8" },
+    { media: "(prefers-color-scheme: dark)", color: "#04050A" },
+  ],
+  colorScheme: "light dark",
   width: "device-width",
   initialScale: 1,
 };
@@ -67,6 +71,14 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" className={`${inter.variable} ${mono.variable}`} suppressHydrationWarning>
+      <head>
+        {/*
+          Sets `data-theme` from the saved preference before first paint.
+          `suppressHydrationWarning` on <html> is what lets the attribute
+          differ from the server's markup without a warning.
+        */}
+        <script id="theme-init" dangerouslySetInnerHTML={{ __html: themeBootstrapScript }} />
+      </head>
       <body className="min-h-dvh antialiased">{children}</body>
     </html>
   );

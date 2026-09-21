@@ -20,7 +20,7 @@ const roleTone: Record<string, string> = {
   Admin: "bg-iris-500/15 text-iris-300 border-iris-500/30",
   Creator: "bg-cyan-500/15 text-cyan-300 border-cyan-500/30",
   Reviewer: "bg-amber-500/15 text-amber-400 border-amber-500/30",
-  Viewer: "bg-white/6 text-fg-subtle border-[var(--line)]",
+  Viewer: "bg-fg/6 text-fg-subtle border-[var(--line)]",
 };
 
 export default async function TeamPage() {
@@ -91,7 +91,7 @@ export default async function TeamPage() {
                         className={cn(
                           "inline-block rounded-md border px-2 py-0.5 text-2xs capitalize",
                           roleTone[m.role.charAt(0).toUpperCase() + m.role.slice(1)] ??
-                            "bg-white/6 text-fg-subtle border-[var(--line)]",
+                            "bg-fg/6 text-fg-subtle border-[var(--line)]",
                         )}
                       >
                         {m.role}

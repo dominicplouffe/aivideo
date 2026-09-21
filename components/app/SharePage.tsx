@@ -67,7 +67,7 @@ export function SharePage({
   };
 
   return (
-    <div className="min-h-dvh bg-ink-1000">
+    <div data-theme="dark" className="min-h-dvh bg-ink-1000 text-fg">
       {/* branded header */}
       <header className="hairline-b bg-ink-950">
         <div className="container-page flex h-14 items-center justify-between gap-4">

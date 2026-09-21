@@ -13,7 +13,7 @@ const statusStyle: Record<string, string> = {
   published: "bg-mint-500/15 text-mint-400 border-mint-500/30",
   rendering: "bg-iris-500/15 text-iris-300 border-iris-500/30",
   stale: "bg-amber-500/15 text-amber-400 border-amber-500/30",
-  queued: "bg-white/6 text-fg-subtle border-[var(--line)]",
+  queued: "bg-fg/6 text-fg-subtle border-[var(--line)]",
   none: "bg-transparent text-fg-faint border-[var(--line)]",
 };
 
@@ -209,7 +209,7 @@ export default async function LocalizationPage() {
                 {[
                   { l: "Published", c: "bg-mint-500/15 border-mint-500/30" },
                   { l: "Rendering", c: "bg-iris-500/15 border-iris-500/30" },
-                  { l: "Queued", c: "bg-white/6 border-[var(--line)]" },
+                  { l: "Queued", c: "bg-fg/6 border-[var(--line)]" },
                   { l: "Stale", c: "bg-amber-500/15 border-amber-500/30" },
                   { l: "Not localized", c: "bg-transparent border-[var(--line)]" },
                 ].map((k) => (

@@ -2,48 +2,179 @@
 
 /* ============================================================
    DemoRiff design system
-   Dark-first, ink-based surface stack with a single signature
-   gradient. Tokens below are the only source of colour truth —
-   components never hardcode hex values.
+   Ink-based surface stack with a single signature gradient, in a
+   dark and a light rendering. The two palettes below are the only
+   source of colour truth — components never hardcode hex values.
+
+   The rendering is chosen by `data-theme` on <html>, set before
+   first paint by the bootstrap script in app/layout.tsx from the
+   saved preference (light, dark, or follow the system). A subtree
+   can pin itself to one rendering with its own `data-theme`; the
+   marketing site and public share pages do, because their artwork
+   is drawn for dark.
    ============================================================ */
 
+@layer base {
+  :root,
+  [data-theme="dark"] {
+    color-scheme: dark;
+
+    /* --- surfaces ---------------------------------------------- */
+    --color-ink-1000: #04050A;
+    --color-ink-950: #06070D;
+    --color-ink-900: #090B12;
+    --color-ink-850: #0D1017;
+    --color-ink-800: #12151E;
+    --color-ink-750: #171B26;
+    --color-ink-700: #1D2230;
+    --color-ink-600: #272D3D;
+    --color-ink-500: #363E52;
+
+    /* --- text -------------------------------------------------- */
+    --color-fg: #EEF0F6;
+    --color-fg-strong: #FFFFFF;
+    --color-fg-muted: #A7AFC2;
+    --color-fg-subtle: #737D93;
+    --color-fg-faint: #525B6E;
+
+    /* --- brand ------------------------------------------------- */
+    --color-iris-200: #D6CEFF;
+    --color-iris-300: #B9AAFF;
+    --color-iris-400: #9583FF;
+    --color-iris-500: #6E56F8;
+    --color-iris-600: #5B41E8;
+    --color-iris-700: #4A33C4;
+    --color-violet-400: #C084FC;
+    --color-violet-500: #A855F7;
+    --color-cyan-300: #67E8F9;
+    --color-cyan-400: #22D3EE;
+    --color-cyan-500: #06B6D4;
+    --color-mint-400: #34D399;
+    --color-mint-500: #10B981;
+    --color-amber-200: #FDE68A;
+    --color-amber-300: #FCD34D;
+    --color-amber-400: #F5B84E;
+    --color-amber-500: #E09B2D;
+    --color-rose-200: #FECDD3;
+    --color-rose-300: #FDA4AF;
+    --color-rose-400: #FB7185;
+    --color-rose-500: #F43F5E;
+
+    /* --- derived ----------------------------------------------- */
+    --line: color-mix(in oklab, var(--color-fg) 9%, transparent);
+    --line-strong: color-mix(in oklab, var(--color-fg) 16%, transparent);
+    --surface-glass: color-mix(in oklab, var(--color-ink-850) 72%, transparent);
+    --shadow-lift: 0 1px 0 0 color-mix(in oklab, #fff 6%, transparent) inset,
+      0 24px 60px -20px rgb(0 0 0 / 0.7);
+  }
+
+  /*
+    Light. The surface stack keeps its meaning — ink-1000 is the page,
+    ink-900 the card on it, ink-850 the hover — so the numbers read the
+    same way in both renderings. Text-grade brand tones (the 200–400
+    steps) deepen so they hold contrast on white; the 500+ steps are
+    shared, so gradients and buttons look the same in either.
+
+    `:root[data-theme="light"]` outranks the bare `:root` above on
+    specificity, so the light palette wins regardless of how many copies
+    of this sheet a bundler emits or in what order. The plain
+    `[data-theme="light"]` serves a light island inside a dark page.
+  */
+  :root[data-theme="light"],
+  [data-theme="light"] {
+    color-scheme: light;
+
+    --color-ink-1000: #F3F4F8;
+    --color-ink-950: #FAFAFD;
+    --color-ink-900: #FFFFFF;
+    --color-ink-850: #EEF0F5;
+    --color-ink-800: #E6E8EF;
+    --color-ink-750: #DDE0E8;
+    --color-ink-700: #CFD3DD;
+    --color-ink-600: #BAC0CD;
+    --color-ink-500: #9DA5B5;
+
+    --color-fg: #1B1F2A;
+    --color-fg-strong: #0B0D14;
+    --color-fg-muted: #4E5566;
+    --color-fg-subtle: #6B7385;
+    --color-fg-faint: #8E96A6;
+
+    --color-iris-200: #4A33C4;
+    --color-iris-300: #5B41E8;
+    --color-iris-400: #4E37D0;
+    --color-violet-400: #7E22CE;
+    --color-cyan-300: #0E7490;
+    --color-mint-400: #047857;
+    --color-mint-500: #059669;
+    --color-amber-200: #92400E;
+    --color-amber-300: #A16207;
+    --color-amber-400: #B45309;
+    --color-rose-200: #BE123C;
+    --color-rose-300: #E11D48;
+    --color-rose-400: #E11D48;
+
+    --shadow-lift: 0 1px 0 0 color-mix(in oklab, #fff 70%, transparent) inset,
+      0 24px 60px -20px rgb(20 24 40 / 0.18);
+  }
+
+  :root {
+    --gradient-brand: linear-gradient(
+      120deg,
+      var(--color-iris-500) 0%,
+      var(--color-violet-500) 42%,
+      var(--color-cyan-400) 100%
+    );
+  }
+}
+
+/*
+  Colour utilities point at the variables above rather than at values,
+  so `bg-ink-900` resolves against whichever palette is in force where
+  the element sits. `reference` keeps Tailwind from re-emitting the
+  variables on :root, where they would shadow the theme blocks.
+*/
+@theme inline reference {
+  --color-ink-1000: var(--color-ink-1000);
+  --color-ink-950: var(--color-ink-950);
+  --color-ink-900: var(--color-ink-900);
+  --color-ink-850: var(--color-ink-850);
+  --color-ink-800: var(--color-ink-800);
+  --color-ink-750: var(--color-ink-750);
+  --color-ink-700: var(--color-ink-700);
+  --color-ink-600: var(--color-ink-600);
+  --color-ink-500: var(--color-ink-500);
+
+  --color-fg: var(--color-fg);
+  --color-fg-strong: var(--color-fg-strong);
+  --color-fg-muted: var(--color-fg-muted);
+  --color-fg-subtle: var(--color-fg-subtle);
+  --color-fg-faint: var(--color-fg-faint);
+
+  --color-iris-200: var(--color-iris-200);
+  --color-iris-300: var(--color-iris-300);
+  --color-iris-400: var(--color-iris-400);
+  --color-iris-500: var(--color-iris-500);
+  --color-iris-600: var(--color-iris-600);
+  --color-iris-700: var(--color-iris-700);
+  --color-violet-400: var(--color-violet-400);
+  --color-violet-500: var(--color-violet-500);
+  --color-cyan-300: var(--color-cyan-300);
+  --color-cyan-400: var(--color-cyan-400);
+  --color-cyan-500: var(--color-cyan-500);
+  --color-mint-400: var(--color-mint-400);
+  --color-mint-500: var(--color-mint-500);
+  --color-amber-200: var(--color-amber-200);
+  --color-amber-300: var(--color-amber-300);
+  --color-amber-400: var(--color-amber-400);
+  --color-amber-500: var(--color-amber-500);
+  --color-rose-200: var(--color-rose-200);
+  --color-rose-300: var(--color-rose-300);
+  --color-rose-400: var(--color-rose-400);
+  --color-rose-500: var(--color-rose-500);
+}
+
 @theme {
-  /* --- surfaces ------------------------------------------------ */
-  --color-ink-1000: #04050A;
-  --color-ink-950: #06070D;
-  --color-ink-900: #090B12;
-  --color-ink-850: #0D1017;
-  --color-ink-800: #12151E;
-  --color-ink-750: #171B26;
-  --color-ink-700: #1D2230;
-  --color-ink-600: #272D3D;
-  --color-ink-500: #363E52;
-
-  /* --- text ---------------------------------------------------- */
-  --color-fg: #EEF0F6;
-  --color-fg-strong: #FFFFFF;
-  --color-fg-muted: #A7AFC2;
-  --color-fg-subtle: #737D93;
-  --color-fg-faint: #525B6E;
-
-  /* --- brand --------------------------------------------------- */
-  --color-iris-300: #B9AAFF;
-  --color-iris-400: #9583FF;
-  --color-iris-500: #6E56F8;
-  --color-iris-600: #5B41E8;
-  --color-iris-700: #4A33C4;
-  --color-violet-400: #C084FC;
-  --color-violet-500: #A855F7;
-  --color-cyan-300: #67E8F9;
-  --color-cyan-400: #22D3EE;
-  --color-cyan-500: #06B6D4;
-  --color-mint-400: #34D399;
-  --color-mint-500: #10B981;
-  --color-amber-400: #F5B84E;
-  --color-amber-500: #E09B2D;
-  --color-rose-400: #FB7185;
-  --color-rose-500: #F43F5E;
-
   /* --- typography ---------------------------------------------- */
   --font-sans: var(--font-inter), ui-sans-serif, system-ui, -apple-system,
     "Segoe UI", Roboto, sans-serif;
@@ -67,21 +198,6 @@
    ============================================================ */
 
 @layer base {
-  :root {
-    --line: color-mix(in oklab, var(--color-fg) 9%, transparent);
-    --line-strong: color-mix(in oklab, var(--color-fg) 16%, transparent);
-    --surface-glass: color-mix(in oklab, var(--color-ink-850) 72%, transparent);
-    --gradient-brand: linear-gradient(
-      120deg,
-      var(--color-iris-500) 0%,
-      var(--color-violet-500) 42%,
-      var(--color-cyan-400) 100%
-    );
-    --shadow-lift: 0 1px 0 0 color-mix(in oklab, #fff 6%, transparent) inset,
-      0 24px 60px -20px rgb(0 0 0 / 0.7);
-    color-scheme: dark;
-  }
-
   * {
     border-color: var(--line);
   }

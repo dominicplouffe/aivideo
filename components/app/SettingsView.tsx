@@ -5,6 +5,7 @@ import { cn } from "@/lib/utils";
 import { Icon, type IconName } from "@/components/ui/Icon";
 import { Button } from "@/components/ui/Button";
 import { Panel } from "./Shared";
+import { ThemePicker } from "./ThemePicker";
 
 /**
  * Workspace settings.
@@ -56,7 +57,16 @@ export function SettingsView() {
       </div>
 
       <div className="max-w-3xl space-y-4">
-        {tab === "general" ? <General /> : null}
+        {tab === "general" ? (
+          <>
+            <Panel title="Appearance" description="Saved on this device, not on the workspace">
+              <div className="p-5">
+                <ThemePicker />
+              </div>
+            </Panel>
+            <General />
+          </>
+        ) : null}
         {tab === "security" ? <Security /> : null}
         {tab === "integrations" ? <Integrations /> : null}
       </div>

@@ -105,7 +105,7 @@ export default async function BrandPage() {
                         {colors.map((c) => (
                           <span key={c} className="flex-1">
                             <span
-                              className="block h-9 rounded-lg border border-white/8"
+                              className="block h-9 rounded-lg border border-fg/10"
                               style={{ background: c }}
                             />
                             <span className="mt-1 block font-mono text-[0.5rem] text-fg-faint">

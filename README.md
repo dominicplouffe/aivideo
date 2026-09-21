@@ -246,10 +246,18 @@ that line is untouched.
 
 ## Design system
 
-Dark-first, defined entirely as tokens in `app/globals.css` under Tailwind v4's
-`@theme`. Components never hardcode a hex value.
+Defined entirely as tokens in `app/globals.css`, in a dark and a light palette.
+Colour utilities are mapped through Tailwind v4's `@theme inline`, so `bg-ink-900`
+resolves against whichever palette is in force where the element sits. Components
+never hardcode a hex value.
 
-- **Surfaces** — an eleven-step ink ramp from `ink-1000` to `ink-500`
+- **Appearance** — light, dark, or follow the system, chosen under Settings →
+  General and stored per device in `localStorage`. A script in the root layout
+  applies it before first paint. The marketing site and public share pages pin
+  themselves to dark with `data-theme="dark"`, because their artwork is drawn
+  for it.
+- **Surfaces** — a nine-step ink ramp from `ink-1000` (the page) to `ink-500`;
+  the steps keep their meaning in both palettes
 - **Brand** — one signature gradient: iris → violet → cyan
 - **Type** — Inter for UI, JetBrains Mono for labels and code
 - **Motion** — a shared `IntersectionObserver` drives every scroll reveal, and

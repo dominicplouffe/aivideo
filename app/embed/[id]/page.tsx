@@ -48,7 +48,7 @@ export default async function EmbedPage({ params }: { params: Promise<{ id: stri
   const { project, videoUrl } = share;
 
   return (
-    <div className="min-h-dvh bg-ink-950 text-fg">
+    <div data-theme="dark" className="min-h-dvh bg-ink-950 text-fg">
       {videoUrl ? (
         <video
           src={videoUrl}
