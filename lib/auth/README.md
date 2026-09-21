@@ -33,9 +33,9 @@ mistake made by omission — so it belongs where omitting it is impossible.
 header that is refused in production **loudly** rather than ignored — a
 convenience that survives into production is how an impersonation header
 becomes an authentication bypass, and one that fails noisily is one somebody
-notices. Single sign-on is the piece still missing: WorkOS issues the
-identity and `POST /api/auth` is where it lands. Everything downstream of
-that already works.
+notices. Identity itself is established by `/api/auth/authkit/callback`,
+which turns a WorkOS profile into a member; everything downstream of that
+lives here.
 
 ## Sessions are rows
 
@@ -199,10 +199,23 @@ address. It now refuses in production unconditionally; when the real
 exchange exists it gets its own branch, and this one stays as it is.
 
 
-## Single sign-on
+## Identity
 
-`lib/auth/sso/`, and the whole of it comes down to one question: **who
+`lib/auth/identity/`, and the whole of it comes down to one question: **who
 decides which workspace this person joins?**
+
+There are two answers, and which one applies depends on whether the login
+carried an organization. With one it is an enterprise login and the rest of
+this section applies. Without one it is self-serve — somebody arriving
+through Google, Microsoft or a password — and they get a workspace of their
+own, which they own. They are never joined to an existing workspace, however
+familiar the email domain looks, because the rule below does not stop
+applying just because the front door changed.
+
+A workspace is only ever created for an address the provider reports as
+verified. That gate is why self-serve signup can run in production: the route
+it replaced took an address on trust, and refused with 501 in production
+rather than pretend otherwise.
 
 The tempting answer is the email domain — `@meridian.com` joins Meridian. It
 is also wrong. It means anybody who can get *any* identity provider to

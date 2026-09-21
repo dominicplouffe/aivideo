@@ -18,9 +18,9 @@ import { verify } from "./sessions";
  * impersonation header becomes an authentication bypass, and a bypass that
  * fails loudly is one somebody notices.
  *
- * Single sign-on is the piece still missing: WorkOS issues the identity, and
- * `signIn` below is where it lands. Everything downstream of that — the
- * session row, the cookie, revocation — already works.
+ * Identity is established by `/api/auth/authkit/callback`, which is where a
+ * profile from WorkOS becomes a member. Everything downstream of that — the
+ * session row, the cookie, revocation — lives here.
  */
 
 export class UnauthenticatedError extends Error {

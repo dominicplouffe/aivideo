@@ -1,29 +1,30 @@
 import { NextResponse } from "next/server";
-import { and, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { getDb, isDatabaseConfigured } from "@/lib/db/client";
 import * as s from "@/lib/db/schema";
 import { recordQuietly } from "@/lib/audit/log";
 import { clearSessionCookie, originAllowed, readSessionCookie, serializeSessionCookie } from "@/lib/auth/cookies";
 import { issue, listForMember, revoke, revokeAllForMember, verify } from "@/lib/auth/sessions";
 import { resolveActor, UnauthenticatedError } from "@/lib/auth/session";
+import { logoutUrl } from "@/lib/auth/identity";
 
 /**
  * Sign in, sign out, and see where you are signed in.
  *
- * The identity provider is the piece still missing — WorkOS issues the
- * assertion, and this is where it lands. What is here already is everything
- * that happens *after* identity is established, which is the part with the
- * sharp edges: the session row, the cookie, and revocation that takes effect
- * at once rather than at the next expiry.
+ * Identity arrives through `/api/auth/authkit`; this route is what happens
+ * on either side of it — the session row, the cookie, and revocation that
+ * takes effect at once rather than at the next expiry.
  *
- * Until SSO is wired, sign-in accepts an email and is refused in production.
- * A development shortcut that can authenticate anybody must fail loudly
- * somewhere, and the earliest place is better than the latest.
+ * The POST here is a development shortcut that looks up an existing member
+ * by address and believes it. That is fine on a laptop and an authentication
+ * bypass anywhere else, so it is refused in production. A shortcut which can
+ * authenticate anybody has to fail loudly somewhere, and the earliest place
+ * is better than the latest.
  */
 
 const SSO_PENDING =
-  "Single sign-on is not wired up yet, and there is no other way to sign in to " +
-  "a production deployment. This build cannot authenticate anyone here.";
+  "Email sign-in is a development convenience and is refused here. Use one of " +
+  "the sign-in buttons, which go through your identity provider.";
 
 function clientIp(request: Request): string | null {
   return request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? null;
@@ -96,10 +97,16 @@ export async function POST(request: Request) {
   const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
   if (!email) return NextResponse.json({ error: "email is required." }, { status: 400 });
 
+  // Ordered, because an address may be a member of more than one workspace
+  // — `members` is unique on (workspace, email), not on email. This took the
+  // first row with no ORDER BY, so somebody in two workspaces landed in
+  // whichever one Postgres happened to return that day. Most recently used
+  // is the best guess available until there is a picker to ask with.
   const [member] = await getDb()
     .select()
     .from(s.members)
     .where(eq(s.members.email, email))
+    .orderBy(desc(s.members.lastActiveAt), s.members.createdAt, s.members.id)
     .limit(1);
 
   // The same answer whether the address is unknown or deactivated: a
@@ -163,7 +170,26 @@ export async function DELETE(request: Request) {
   // The cookie is cleared either way. A sign-out that leaves a cookie
   // behind because the session was already gone is a sign-out that looks
   // like it failed.
-  const response = NextResponse.json({ ok: true });
+  const response = NextResponse.json({
+    ok: true,
+    // Where to go next to end the session at the identity provider too.
+    //
+    // Ours is already revoked above; theirs is not, and a browser that still
+    // holds it will sail straight back through "continue with Google"
+    // without being asked anything. That looks, to the person who just
+    // pressed sign out, exactly like sign-out having done nothing.
+    //
+    // Returned rather than redirected to, because this is a DELETE answering
+    // a fetch: the caller decides whether to follow it.
+    logout_url: verdict?.ok ? workosLogoutUrl(verdict.session.workosSessionId, request) : null,
+  });
   response.headers.set("Set-Cookie", clearSessionCookie());
   return response;
+}
+
+/** The provider's logout URL, when this session came from the provider. */
+function workosLogoutUrl(sessionId: string | null, request: Request): string | null {
+  if (!sessionId) return null;
+  const origin = process.env.NEXT_PUBLIC_SITE_URL ?? new URL(request.url).origin;
+  return logoutUrl(sessionId, new URL("/signin", origin).toString());
 }

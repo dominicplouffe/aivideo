@@ -3,7 +3,7 @@ import { getDb } from "@/lib/db/client";
 import * as s from "@/lib/db/schema";
 import { recordQuietly } from "@/lib/audit/log";
 import { revokeAllForMember } from "../sessions";
-import { roleFor } from "../sso/provisioning";
+import { roleFor } from "../identity/provisioning";
 import type { ScimPrincipal } from "./tokens";
 import { ScimError, getUser } from "./users";
 

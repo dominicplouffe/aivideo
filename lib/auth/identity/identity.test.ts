@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import { after, before, beforeEach, describe, it } from "node:test";
 import { eq } from "drizzle-orm";
 import { closeDb, getDb, isDatabaseConfigured } from "@/lib/db/client";
 import * as s from "@/lib/db/schema";
 import { eraseWorkspace } from "@/lib/db/erase";
 import { listForMember } from "../sessions";
-import { MockSso, encode } from "./mock";
+import { MockIdentity, encode } from "./mock";
 import { domainAllowed, provision, roleFor } from "./provisioning";
 import {
   clearNonceCookie, issueState, readNonceCookie, safeNext, serializeNonceCookie, verifyState,
@@ -26,6 +27,7 @@ const RUN = isDatabaseConfigured();
 const WS = "77777777-7777-4777-8777-777777777777";
 const OTHER_WS = "77777777-7777-4777-8777-777777777778";
 const CONNECTION = "conn_meridian";
+const ORGANIZATION = "org_meridian";
 const OWNER = "77777777-7777-4777-8777-777777777001";
 
 // --- state, nonce and the return path (no database needed) -----------------
@@ -104,7 +106,7 @@ describe("the nonce cookie", () => {
     // identity provider, and Strict would withhold the cookie from it —
     // the flow would fail for everybody, every time.
     assert.match(cookie, /SameSite=Lax/);
-    assert.match(cookie, /Path=\/api\/auth\/sso/);
+    assert.match(cookie, /Path=\/api\/auth\/authkit/);
   });
 
   it("is read back from a request, and cleared with a zero Max-Age", () => {
@@ -173,15 +175,15 @@ describe("the claimed-domain check", () => {
 
 describe("the development identity provider", () => {
   it("returns an id that is stable for an address", async () => {
-    const provider = new MockSso(CONNECTION);
-    const first = await provider.exchange(encode({ email: "a@b.com", connectionId: CONNECTION, groups: [] }));
-    const second = await provider.exchange(encode({ email: "a@b.com", connectionId: CONNECTION, groups: [] }));
+    const provider = new MockIdentity(ORGANIZATION);
+    const first = await provider.exchange(encode({ email: "a@b.com", organizationId: ORGANIZATION, groups: [] }));
+    const second = await provider.exchange(encode({ email: "a@b.com", organizationId: ORGANIZATION, groups: [] }));
     assert.equal(first.externalId, second.externalId);
     assert.notEqual(first.externalId, "");
   });
 
   it("refuses a code it did not issue", async () => {
-    await assert.rejects(() => new MockSso(CONNECTION).exchange("not-a-code"));
+    await assert.rejects(() => new MockIdentity(ORGANIZATION).exchange("not-a-code"));
   });
 });
 
@@ -213,6 +215,7 @@ describe("provisioning through a connection", { skip: !RUN }, () => {
     await db.insert(s.ssoConnections).values({
       workspaceId: WS,
       connectionId: CONNECTION,
+      organizationId: ORGANIZATION,
       domains: ["meridian.com"],
       defaultRole: "viewer",
       roleMappings: { "demo-admins": "admin" },
@@ -223,7 +226,12 @@ describe("provisioning through a connection", { skip: !RUN }, () => {
     externalId: "idp_1",
     email: "sam@meridian.com",
     name: "Sam",
-    connectionId: CONNECTION,
+    // An enterprise login. Without an organization this is a self-serve one
+    // and lands on an entirely different path — which is the point of the
+    // fork and is covered by its own block below.
+    organizationId: ORGANIZATION,
+    emailVerified: true,
+    authenticationMethod: "SSO",
     groups: [] as string[],
     provider: "mock",
     ...over,
@@ -239,10 +247,10 @@ describe("provisioning through a connection", { skip: !RUN }, () => {
     assert.equal(result.ok && result.member.role, "viewer");
   });
 
-  it("refuses a connection nobody has registered", async () => {
-    const result = await provision(profile({ connectionId: "conn_attacker" }));
+  it("refuses an organization nobody has registered", async () => {
+    const result = await provision(profile({ organizationId: "org_attacker" }));
     assert.equal(result.ok, false);
-    assert.equal(result.ok === false && result.reason, "unknown-connection");
+    assert.equal(result.ok === false && result.reason, "unknown-organization");
   });
 
   it("refuses an address at a domain the connection has not claimed", async () => {
@@ -322,4 +330,185 @@ describe("provisioning through a connection", { skip: !RUN }, () => {
     const result = await provision(profile());
     assert.equal(result.ok === false && result.reason, "connection-disabled");
   });
+});
+
+// --- self-serve signup (database) ------------------------------------------
+
+describe("signing up without an organization", { skip: !RUN }, () => {
+  /**
+   * The path that makes signup work in production.
+   *
+   * `POST /api/auth/signup` used to answer 501 there, and the reason it gave
+   * was right: it took an address and believed it. These assert the gate that
+   * replaced that refusal, and the one thing the gate must not do — join
+   * somebody to a workspace because their email domain looked familiar.
+   */
+  // A domain nobody else in the database is using, so these never collide
+  // with a workspace some other test — or some earlier manual poking —
+  // happened to leave behind.
+  const DOMAIN = `selfserve${randomUUID().slice(0, 8)}`;
+  const SELF = `sam@${DOMAIN}.example`;
+  const EXPECTED_NAME = DOMAIN.charAt(0).toUpperCase() + DOMAIN.slice(1);
+
+  after(async () => {
+    await cleanUp();
+    await closeDb();
+  });
+
+  beforeEach(cleanUp);
+
+  async function cleanUp() {
+    const db = getDb();
+    const rows = await db
+      .select({ workspaceId: s.members.workspaceId })
+      .from(s.members)
+      .where(eq(s.members.email, SELF));
+    for (const row of rows) await eraseWorkspace(row.workspaceId, "test reset");
+  }
+
+  const selfServe = (over: Partial<Parameters<typeof provision>[0]> = {}) => ({
+    externalId: "user_self_1",
+    email: SELF,
+    name: "Sam Selfserve",
+    emailVerified: true,
+    authenticationMethod: "GoogleOAuth",
+    groups: [] as string[],
+    provider: "mock",
+    ...over,
+  });
+
+  it("creates a workspace and makes them its owner", async () => {
+    const result = await provision(selfServe());
+
+    assert.equal(result.ok, true);
+    assert.equal(result.ok && result.workspaceCreated, true);
+    assert.equal(result.ok && result.created, true);
+    // Somebody has to be able to invite the second member and cancel the plan.
+    assert.equal(result.ok && result.member.role, "owner");
+    assert.equal(result.ok && result.member.email, SELF);
+
+    if (!result.ok) return;
+    const [workspace] = await getDb()
+      .select()
+      .from(s.workspaces)
+      .where(eq(s.workspaces.id, result.member.workspaceId));
+    // Named after the company in their address. "Sam Northgate's workspace"
+    // is a name nobody keeps.
+    assert.equal(workspace.name, EXPECTED_NAME);
+    assert.equal(workspace.plan, "free");
+  });
+
+  it("refuses an address the provider has not verified", async () => {
+    // This is the whole justification for lifting the 501. A workspace is
+    // never created on somebody's *claim* to an address.
+    const result = await provision(selfServe({ emailVerified: false }));
+
+    assert.equal(result.ok, false);
+    assert.equal(result.ok === false && result.reason, "email-unverified");
+    assert.equal(
+      await countWorkspacesFor(SELF),
+      0,
+      "A refused signup must not have created a workspace.",
+    );
+  });
+
+  it("signs an existing member in rather than making a second workspace", async () => {
+    const first = await provision(selfServe());
+    assert.equal(first.ok && first.workspaceCreated, true);
+
+    const again = await provision(selfServe({ name: "Sam N" }));
+    assert.equal(again.ok, true);
+    assert.equal(again.ok && again.workspaceCreated, false);
+    assert.equal(again.ok && again.created, false);
+    assert.equal(
+      first.ok && again.ok && first.member.workspaceId,
+      again.ok && again.member.workspaceId,
+    );
+    assert.equal(await countWorkspacesFor(SELF), 1);
+  });
+
+  it("never joins a workspace because the email domain matches", async () => {
+    const db = getDb();
+    // A workspace that already exists, whose single member shares the
+    // domain. A Google account at a company's domain is proof that Google
+    // will deliver mail there, not that the company agreed to let its holder
+    // in — so this must produce a second, separate workspace.
+    const [theirs] = await db
+      .insert(s.workspaces)
+      .values({ slug: `${DOMAIN}-incumbent`, name: EXPECTED_NAME })
+      .returning();
+    await db.insert(s.members).values({
+      workspaceId: theirs.id,
+      email: `someone-else@${DOMAIN}.example`,
+      name: "Incumbent",
+      role: "owner",
+    });
+
+    try {
+      const result = await provision(selfServe());
+      assert.equal(result.ok, true);
+      assert.equal(result.ok && result.workspaceCreated, true);
+      assert.notEqual(
+        result.ok && result.member.workspaceId,
+        theirs.id,
+        "A matching email domain must never be a way into somebody else's workspace.",
+      );
+    } finally {
+      await eraseWorkspace(theirs.id, "test teardown");
+    }
+  });
+
+  it("survives two people from one company signing up at once", async () => {
+    // Read-then-write on the slug meant both transactions saw the same one
+    // free, and the second insert died on `workspaces_slug_key` — an error
+    // on the one request that was supposed to create somebody's account.
+    const results = await Promise.all(
+      Array.from({ length: 6 }, (_, i) =>
+        provision(selfServe({ email: `race${i}@${DOMAIN}.example`, externalId: `user_race_${i}` })),
+      ),
+    );
+
+    for (const [i, result] of results.entries()) {
+      assert.equal(result.ok, true, `signup ${i} failed`);
+      assert.equal(result.ok && result.workspaceCreated, true);
+    }
+
+    const ids = new Set(results.map((r) => (r.ok ? r.member.workspaceId : "")));
+    assert.equal(ids.size, 6, "Each of them should have their own workspace.");
+
+    for (const id of ids) await eraseWorkspace(id, "test teardown");
+  });
+
+  it("gives the second workspace of a name its own slug", async () => {
+    const db = getDb();
+    // The slug signup is about to want, already taken.
+    const [taken] = await db
+      .insert(s.workspaces)
+      .values({ slug: DOMAIN, name: EXPECTED_NAME })
+      .returning();
+
+    try {
+      const result = await provision(selfServe());
+      assert.equal(result.ok, true);
+      if (!result.ok) return;
+      const [made] = await db
+        .select()
+        .from(s.workspaces)
+        .where(eq(s.workspaces.id, result.member.workspaceId));
+      assert.notEqual(made.slug, DOMAIN);
+      // A random suffix, not a counter: `-2` would tell the next person
+      // somebody already holds the plain form.
+      assert.match(made.slug, new RegExp(`^${DOMAIN}-[0-9a-f]{6}$`));
+    } finally {
+      await eraseWorkspace(taken.id, "test teardown");
+    }
+  });
+
+  async function countWorkspacesFor(email: string): Promise<number> {
+    const rows = await getDb()
+      .select({ id: s.members.id })
+      .from(s.members)
+      .where(eq(s.members.email, email));
+    return rows.length;
+  }
 });

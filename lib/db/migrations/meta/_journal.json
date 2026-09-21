@@ -113,6 +113,13 @@
       "when": 1789952804489,
       "tag": "0015_contact_requests",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1789995915452,
+      "tag": "0016_authkit_organization",
+      "breakpoints": true
     }
   ]
 }

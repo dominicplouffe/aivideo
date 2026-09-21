@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { AuthForm } from "@/components/app/AuthForm";
-import { safeNext } from "@/lib/auth/sso";
+import { safeNext } from "@/lib/auth/identity";
 
 export const metadata: Metadata = {
   title: "Sign in",

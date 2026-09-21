@@ -324,11 +324,12 @@ function Security() {
             Previously: "SAML single sign-on — Okta · enforced" with a green
             tick, on a deployment where no identity provider was configured.
           */}
-          SSO and SCIM are wired to WorkOS and need{" "}
+          Sign-in, SSO and SCIM all run on WorkOS AuthKit and need{" "}
           <code className="font-mono text-fg-muted">WORKOS_API_KEY</code> and{" "}
           <code className="font-mono text-fg-muted">WORKOS_CLIENT_ID</code> set on the deployment.
           Whether they are is a property of the server, not of this workspace, so this page will not
-          guess at it.
+          guess at it. Connecting your own identity provider needs a WorkOS organization recorded
+          against this workspace, which is not yet something this screen can do.
         </p>
       </Panel>
 

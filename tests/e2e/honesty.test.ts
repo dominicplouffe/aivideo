@@ -109,23 +109,37 @@ test("a new workspace has exactly one member, and one audit entry", async () => 
   );
 });
 
-test("signing up twice with one address is refused, not silently merged", async () => {
+test("signing in a second time does not make a second workspace", async () => {
   const session = await signUp("dupe");
+  const workspaceId = session.workspaceId;
 
-  const again = await api("/api/auth/signup", {
-    method: "POST",
-    body: JSON.stringify({ email: session.email, name: "Somebody Else" }),
-  });
+  // The same person coming back through the same provider. The old signup
+  // route answered 409 here, because it could not tell "this address is
+  // taken" from "this is the person who took it" — it had never verified
+  // either. A verified identity can: this is a sign-in.
+  const again = await signInAgain(session.email);
+  assert.equal(again, workspaceId, "A returning person lands in their own workspace.");
 
-  // Quietly logging somebody into an existing account because the address
-  // matched is how one person ends up inside another company's workspace.
-  assert.equal(again.status, 409, "A duplicate address should be refused.");
   assert.equal(
     count(`select count(*) from members where email = '${session.email}'`),
     1,
-    "The refused signup must not have created a second member.",
+    "Signing in again must not have created a second member.",
+  );
+  assert.equal(
+    count(`select count(*) from workspaces where id = '${workspaceId}'`),
+    1,
   );
 });
+
+/** Runs the flow again for an address that already has a workspace. */
+async function signInAgain(email: string): Promise<string> {
+  const start = await api(`/api/auth/authkit?method=google&email=${encodeURIComponent(email)}`);
+  const to = start.headers.get("location") ?? "";
+  const nonce = (start.headers.get("set-cookie") ?? "").split(";")[0];
+  const back = await api(new URL(to).pathname + new URL(to).search, { cookie: nonce });
+  assert.equal(back.status, 302, "The second sign-in should complete.");
+  return sql(`select workspace_id from members where email = '${email}' limit 1`);
+}
 
 test("one workspace cannot read another's project, and cannot tell it exists", async () => {
   const owner = await signUp("tenant-a");

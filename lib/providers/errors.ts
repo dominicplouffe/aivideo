@@ -15,6 +15,16 @@ export class ProviderError extends Error {
       provider: string;
       retryable: boolean;
       status?: number;
+      /**
+       * The vendor's own machine-readable code, when it sends one.
+       *
+       * Some refusals are instructions rather than failures — "verify your
+       * email first", "choose an organization", "enroll in MFA" — and the
+       * caller can only say which if the code survives the trip. The message
+       * is not a substitute: it is vendor prose, and it is not safe to show
+       * a browser.
+       */
+      code?: string;
       cause?: unknown;
     },
   ) {

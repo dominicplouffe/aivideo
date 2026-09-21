@@ -53,16 +53,26 @@ npm run db:migrate
 npm run dev
 ```
 
-Then **create your own workspace at `/signup`**. It makes a workspace, signs
-you in as its owner, and gives you exactly what you would expect on day one:
-no projects, no views, no languages, ten free video minutes.
+Then **create your own workspace at `/signup`**. Press any of the three
+buttons: without WorkOS credentials a development identity provider stands in
+for one, asserts the address you typed and hands the browser straight back,
+so the whole path — signed state, nonce cookie, callback, provisioning,
+session — runs exactly as it does in production. You get what you would
+expect on day one: no projects, no views, no languages, ten free video
+minutes.
 
-There is no password field anywhere, and that is deliberate rather than
-unfinished: email sign-in is a development convenience refused outright in
-production, where single sign-on is the only way in, so a password box would
-take a credential nothing can check. `POST /api/auth/signup` refuses in
-production for the same reason — nothing verifies that the person typing an
-address owns it.
+There is no password field, and that is deliberate rather than unfinished.
+Passwords live with the identity provider; this application never sees one.
+The email box below the buttons is a development convenience that looks up an
+existing member and is refused outright in production.
+
+A workspace is created the first time somebody signs in whose address has no
+member row — and **only** when their provider says the address is verified.
+That gate is the whole reason signup can run in production at all: the route
+it replaced took an address and believed it, which is why it answered 501
+there. A verified Google account at a company's domain still never joins that
+company's existing workspace; it gets its own. Proving you can receive mail
+at a domain is not the same claim as that company agreeing to let you in.
 
 `npm run db:seed` writes a demo workspace if you want one to look at. It is
 for demos and for the test suite; nothing in the app falls back to it.
@@ -101,6 +111,20 @@ spinning.
 
 The extension loads into Chromium via `chrome://extensions` → Developer mode
 → Load unpacked → `extension/dist`.
+
+### Signing in for real
+
+```bash
+WORKOS_API_KEY=...      # both are required; there is no other way in
+WORKOS_CLIENT_ID=...
+```
+
+Register `<NEXT_PUBLIC_SITE_URL>/api/auth/authkit/callback` as the redirect
+URI in the WorkOS dashboard, and switch on whichever methods you want —
+Google, Microsoft, passwords, magic links. Enterprise SAML rides the same
+integration: a workspace's `sso_connections` row records the WorkOS
+organization, and a login carrying that organization lands in that workspace
+and nowhere else.
 
 ### Turning on a real vendor
 
@@ -161,12 +185,14 @@ without it. None is required for either path above.
 | `/app/analytics` | Per-second retention, sources, account identification |
 | `/app/team`, `/app/billing`, `/app/settings` | Workspace administration |
 | `/d/[slug]` | Public, branded share page |
-| `/signin`, `/signup` | Authentication |
+| `/signin`, `/signup` | Authentication, through WorkOS AuthKit |
 
 ### API
 
 | Endpoint | Purpose |
 | --- | --- |
+| `GET /api/auth/authkit` | Starts a sign-in — Google, Microsoft, SSO or the hosted pane |
+| `GET /api/auth/authkit/callback` | Completes it, provisions, and issues a session |
 | `POST /api/contact` | Validated contact submission with topic routing |
 | `GET /api/projects` | List projects, mirrors the public `GET /v1/projects` |
 | `POST /api/renders` | Submit a render job through the provider layer |

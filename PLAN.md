@@ -306,9 +306,12 @@ infrastructure — or dismissed as a mock when it is not.
 - **Governance.** RBAC, an append-only hash-chained audit log, sessions that
   revoke immediately, metering in seconds with an idempotent ledger, and the
   audit log streamed to a SIEM without holes.
-- **Identity.** Connection-scoped single sign-on with a signed, nonce-bound
-  state, and SCIM 2.0 Users and Groups where a directory decides roles and
-  an offboarding ends live sessions. Verified end to end against a running
+- **Identity.** WorkOS AuthKit, with a signed, nonce-bound state, and SCIM
+  2.0 Users and Groups where a directory decides roles and an offboarding
+  ends live sessions. Signup runs in production because the provider says
+  whether an address is verified and a workspace is never created without
+  that; the three buttons are three real flows; and an organization decides
+  which workspace an enterprise login lands in, never the email domain. Verified end to end against a running
   server: the full round trip, a login-CSRF replay from a second browser,
   three open-redirect attempts, and a SCIM deactivation that killed a
   session which had worked a second earlier.
@@ -324,6 +327,16 @@ infrastructure — or dismissed as a mock when it is not.
   structure, titles and alt text. All clean.
 
 **Written but not exercised against the vendor:**
+
+- **WorkOS AuthKit.** The adapter is built against the documented User
+  Management contract and tested with a stubbed transport — the authorize URL
+  per provider, the authenticate request, the response mapped to a profile,
+  each vendor error code mapped to a refusal. The whole flow above the vendor
+  boundary is exercised end to end against a development identity provider,
+  so the routes, state, provisioning and session are real. **Nothing has
+  spoken to a live WorkOS account**, because `api.workos.com` is unreachable
+  from the environment this was built in. One live sign-in is what would
+  settle it, and a wrong field name is a one-file correction.
 
 - **Inference adapters.** Deepgram, ElevenLabs and Anthropic adapters exist
   and are tested against stubbed transports — the request we build, the
@@ -349,13 +362,6 @@ infrastructure — or dismissed as a mock when it is not.
   `POST /api/projects/[id]/locales` to queue a language. What is still
   missing is the worker that drains a queued locale into a translated cut,
   and any way to create or edit a brand kit from the interface.
-- **Self-serve signup in production.** `POST /api/auth/signup` refuses with
-  501 unless `NODE_ENV` is not production, because nothing verifies that the
-  person typing an address owns it. Single sign-on is the production path and
-  needs `WORKOS_API_KEY` and `WORKOS_CLIENT_ID`. The three buttons on the
-  sign-in form — Google, Microsoft, SSO — all call the same endpoint, which
-  resolves a WorkOS connection from the email domain. There is no Google or
-  Microsoft OAuth behind the first two, and their labels promise one.
 - **Firefox and Safari extensions.** The Chromium extension is real. A
   Firefox port needs a different capture path — `chrome.offscreen` and
   `tabCapture` are Chromium-only — and Safari needs Xcode. Neither can be

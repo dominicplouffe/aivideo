@@ -17,9 +17,9 @@ import { Button } from "@/components/ui/Button";
  * on the screen.
  */
 const sso = [
-  { id: "google", label: "Continue with Google", d: "M21.35 11.1h-9.17v2.96h5.27c-.23 1.4-1.66 4.1-5.27 4.1-3.17 0-5.76-2.62-5.76-5.86s2.59-5.86 5.76-5.86c1.8 0 3.01.77 3.7 1.43l2.52-2.43C16.9 3.9 14.77 3 12.18 3 7.13 3 3 7.13 3 12.2s4.13 9.2 9.18 9.2c5.3 0 8.82-3.73 8.82-8.98 0-.6-.07-1.06-.15-1.32Z" },
-  { id: "microsoft", label: "Continue with Microsoft", d: "M3 3h8.5v8.5H3V3Zm9.5 0H21v8.5h-8.5V3ZM3 12.5h8.5V21H3v-8.5Zm9.5 0H21V21h-8.5v-8.5Z" },
-  { id: "saml", label: "Continue with SSO", d: "M12 2 4 5.5v6c0 4.7 3.2 9 8 10.5 4.8-1.5 8-5.8 8-10.5v-6L12 2Zm-1 13.5-3-3 1.4-1.4 1.6 1.6 4.1-4.1L16.5 10 11 15.5Z" },
+  { id: "google", method: "google", label: "Continue with Google", d: "M21.35 11.1h-9.17v2.96h5.27c-.23 1.4-1.66 4.1-5.27 4.1-3.17 0-5.76-2.62-5.76-5.86s2.59-5.86 5.76-5.86c1.8 0 3.01.77 3.7 1.43l2.52-2.43C16.9 3.9 14.77 3 12.18 3 7.13 3 3 7.13 3 12.2s4.13 9.2 9.18 9.2c5.3 0 8.82-3.73 8.82-8.98 0-.6-.07-1.06-.15-1.32Z" },
+  { id: "microsoft", method: "microsoft", label: "Continue with Microsoft", d: "M3 3h8.5v8.5H3V3Zm9.5 0H21v8.5h-8.5V3ZM3 12.5h8.5V21H3v-8.5Zm9.5 0H21V21h-8.5v-8.5Z" },
+  { id: "saml", method: "sso", label: "Continue with SSO", d: "M12 2 4 5.5v6c0 4.7 3.2 9 8 10.5 4.8-1.5 8-5.8 8-10.5v-6L12 2Zm-1 13.5-3-3 1.4-1.4 1.6 1.6 4.1-4.1L16.5 10 11 15.5Z" },
 ];
 
 /**
@@ -42,6 +42,14 @@ const REASONS: Record<string, string> = {
   "connection-mismatch": "That sign-in came back from a different identity provider than the one it started with.",
   "exchange-failed": "We could not complete the sign-in with your identity provider. Try again.",
   "no-database": "This deployment is running on fixtures and cannot sign anybody in.",
+  "sso-email-required": "Enter your work email, then continue with single sign-on.",
+  "sso-unknown-organization": "That identity provider is not connected to any workspace.",
+  "sso-email-unverified":
+    "Confirm your email address with your provider, then sign in again. We do not create a workspace for an address nobody has verified.",
+  "organization-selection-required":
+    "That account belongs to more than one organization. Use the link your administrator sent you.",
+  "mfa-required": "Finish setting up two-factor authentication with your provider, then try again.",
+  "sso-required": "Your organization requires single sign-on. Use the SSO button above.",
 };
 
 function explain(error: string | null | undefined): string | null {
@@ -67,22 +75,31 @@ export function AuthForm({
 }) {
   const router = useRouter();
   const [email, setEmail] = useState("");
-  const [name, setName] = useState("");
   const [pending, setPending] = useState(false);
   const [message, setMessage] = useState<string | null>(explain(error));
 
   const isSignup = mode === "signup";
 
-  function startSso() {
-    if (!email.includes("@")) {
-      // The domain is what routes the request, so there is nothing to do
-      // without it. Saying so beats a redirect that comes straight back.
+  /**
+   * Hands the browser to the identity provider.
+   *
+   * All three buttons used to call one function that resolved an enterprise
+   * SAML connection from the email domain, so "Continue with Google" did not
+   * involve Google in any way. Each one now names the method it means.
+   */
+  function start(method: string) {
+    // Only the enterprise door needs an address up front, because the domain
+    // is what routes it. Google and Microsoft collect it themselves, and
+    // asking first would be a field with nothing to do.
+    if (method === "sso" && !email.includes("@")) {
       setMessage("Enter your work email, then continue with single sign-on.");
       return;
     }
     setPending(true);
-    const url = new URL("/api/auth/sso", window.location.origin);
-    url.searchParams.set("email", email.trim().toLowerCase());
+    const url = new URL("/api/auth/authkit", window.location.origin);
+    url.searchParams.set("method", method);
+    if (email.includes("@")) url.searchParams.set("email", email.trim().toLowerCase());
+    if (isSignup) url.searchParams.set("intent", "sign-up");
     if (next) url.searchParams.set("next", next);
     window.location.href = url.toString();
   }
@@ -112,7 +129,7 @@ export function AuthForm({
           <button
             key={s.id}
             type="button"
-            onClick={startSso}
+            onClick={() => start(s.method)}
             disabled={pending}
             className="flex h-11 w-full items-center justify-center gap-2.5 rounded-xl border border-[var(--line-strong)] text-[0.875rem] font-medium text-fg transition-colors hover:bg-[color-mix(in_oklab,var(--color-fg)_6%,transparent)]"
           >
@@ -138,17 +155,15 @@ export function AuthForm({
           setPending(true);
           setMessage(null);
           try {
-            // Signup creates a workspace; sign-in looks one up. These used
-            // to be the same request, which is why "Create workspace"
-            // answered "No active account for that address."
-            const response = await fetch(isSignup ? "/api/auth/signup" : "/api/auth", {
+            // One endpoint for both, because there is only one thing left
+            // to do here: find an existing member. Creating a workspace now
+            // happens on the way back from the identity provider, once
+            // somebody has proved the address is theirs — which is the thing
+            // this form never could.
+            const response = await fetch("/api/auth", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify(
-                isSignup
-                  ? { email: email.trim().toLowerCase(), name: name.trim() }
-                  : { email: email.trim().toLowerCase() },
-              ),
+              body: JSON.stringify({ email: email.trim().toLowerCase() }),
             });
             if (response.ok) {
               router.push(next ?? "/app");
@@ -156,7 +171,7 @@ export function AuthForm({
             }
             const body = (await response.json().catch(() => ({}))) as { error?: string };
             // A production deployment answers 501 here on purpose: email
-            // sign-in is a development path, and single sign-on is the way in.
+            // sign-in is a development path, and AuthKit is the way in.
             setMessage(body.error ?? "That sign-in could not be completed.");
           } catch {
             setMessage("We could not reach the server. Check your connection and try again.");
@@ -166,9 +181,6 @@ export function AuthForm({
         }}
         className="space-y-3.5"
       >
-        {isSignup ? (
-          <Input label="Full name" value={name} onChange={setName} placeholder="Alex Morgan" autoComplete="name" />
-        ) : null}
         <Input
           label="Work email"
           type="email"
@@ -180,7 +192,7 @@ export function AuthForm({
         />
 
         <Button type="submit" size="lg" className="w-full" disabled={pending}>
-          {pending ? "One moment…" : isSignup ? "Create workspace" : "Sign in"}
+          {pending ? "One moment…" : "Sign in"}
           {pending ? null : <Icon name="arrowRight" className="size-4" strokeWidth={2} />}
         </Button>
         <p className="text-2xs leading-relaxed text-fg-faint">
@@ -191,8 +203,9 @@ export function AuthForm({
             credential nothing here can check, and leave somebody believing
             it was protecting their account.
           */}
-          This build signs you in with single sign-on. Email-only entry is a development
-          convenience and is refused on production deployments — there is no password to set.
+          Email-only entry is a development convenience, refused on production deployments —
+          there is no password to set. Use one of the buttons above to create a workspace: it is
+          made once your provider confirms the address is yours.
         </p>
       </form>
 

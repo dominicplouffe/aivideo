@@ -40,6 +40,8 @@ export interface SessionRecord {
   absoluteExpiresAt: Date;
   revokedAt: Date | null;
   revokedReason: string | null;
+  /** The identity provider's session, when the login came through one. */
+  workosSessionId: string | null;
   ip: string | null;
   userAgent: string | null;
   createdAt: Date;
@@ -60,6 +62,7 @@ function toRecord(row: typeof s.sessions.$inferSelect): SessionRecord {
     absoluteExpiresAt: row.absoluteExpiresAt,
     revokedAt: row.revokedAt,
     revokedReason: row.revokedReason,
+    workosSessionId: row.workosSessionId,
     ip: row.ip,
     userAgent: row.userAgent,
     createdAt: row.createdAt,
@@ -71,6 +74,13 @@ export async function issue(input: {
   workspaceId: string;
   ip?: string | null;
   userAgent?: string | null;
+  /**
+   * The identity provider's own session id, when the login came through one.
+   *
+   * Kept so signing out can end that session too. Null for a development
+   * email sign-in, which has no upstream session to end.
+   */
+  workosSessionId?: string | null;
   now?: Date;
 }): Promise<IssuedSession> {
   const now = input.now ?? new Date();
@@ -86,6 +96,7 @@ export async function issue(input: {
       absoluteExpiresAt: new Date(now.getTime() + ABSOLUTE_TIMEOUT_MS),
       ip: input.ip ?? null,
       userAgent: input.userAgent ?? null,
+      workosSessionId: input.workosSessionId ?? null,
       createdAt: now,
     })
     .returning();

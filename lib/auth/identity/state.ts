@@ -146,7 +146,7 @@ export const NONCE_COOKIE = "demoriff_sso";
 export function serializeNonceCookie(nonce: string): string {
   const parts = [
     `${NONCE_COOKIE}=${nonce}`,
-    "Path=/api/auth/sso",
+    "Path=/api/auth/authkit",
     "HttpOnly",
     "SameSite=Lax",
     `Max-Age=${Math.floor(TTL_MS / 1000)}`,
@@ -156,7 +156,7 @@ export function serializeNonceCookie(nonce: string): string {
 }
 
 export function clearNonceCookie(): string {
-  return `${NONCE_COOKIE}=; Path=/api/auth/sso; HttpOnly; SameSite=Lax; Max-Age=0`;
+  return `${NONCE_COOKIE}=; Path=/api/auth/authkit; HttpOnly; SameSite=Lax; Max-Age=0`;
 }
 
 export function readNonceCookie(request: Request): string | null {

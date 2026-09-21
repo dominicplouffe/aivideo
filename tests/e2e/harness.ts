@@ -8,9 +8,10 @@
  * only asserted "the dashboard shows a number" would have passed against the
  * fixture that started all this.
  *
- * Every test creates its own workspace through the real signup route. None
- * of them seeds. A workspace that has just been created is precisely the
- * state that was broken, so it is the state worth testing from.
+ * Every test creates its own workspace by signing in for the first time,
+ * through the real routes. None of them seeds. A workspace that has just
+ * been created is precisely the state that was broken, so it is the state
+ * worth testing from.
  */
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -57,34 +58,56 @@ export async function json<T = unknown>(response: Response): Promise<T> {
 }
 
 /**
- * Creates a workspace through the signup route and returns its session.
+ * Creates a workspace by signing in, and returns the session.
  *
- * A fresh address every time. Signing up twice with the same one is a
- * conflict the product refuses on purpose, and a suite that reused an
- * address would be testing that refusal by accident on the second run.
+ * This drives the real AuthKit flow rather than a test-only door: the
+ * authorize route, the signed state, the nonce cookie, the callback and
+ * provisioning all run exactly as they do for a person. The development
+ * identity provider stands in for WorkOS, which is the one substitution —
+ * `POST /api/auth/signup` used to exist for this and is gone, because a
+ * second account-creating door that takes an unverified address is the thing
+ * the whole change was about removing.
+ *
+ * A fresh address every time. Two runs sharing one would be signing the
+ * second one *in* rather than up, and testing the wrong branch by accident.
  */
-export async function signUp(label = "acct"): Promise<Session> {
+export async function signUp(label = "acct", method = "google"): Promise<Session> {
   const id = randomUUID().slice(0, 8);
   const email = `${label}-${id}@e2e.test`;
-  const name = `Test ${label} ${id}`;
-  const workspace = `E2E ${id}`;
 
-  const response = await api("/api/auth/signup", {
-    method: "POST",
-    body: JSON.stringify({ email, name, workspace }),
-  });
-  if (response.status !== 201) {
-    throw new Error(`signup failed: ${response.status} ${await response.text()}`);
+  const start = await api(`/api/auth/authkit?method=${method}&email=${encodeURIComponent(email)}`);
+  if (start.status !== 302) {
+    throw new Error(`authorize failed: ${start.status} ${await start.text()}`);
   }
 
-  const body = await json<{ workspace: { id: string }; member: { id: string } }>(response);
-  const setCookie = response.headers.get("set-cookie") ?? "";
-  const cookie = setCookie.split(";")[0];
-  if (!cookie.startsWith("demoriff_session=")) {
-    throw new Error(`signup did not set a session cookie: ${setCookie}`);
+  // The mock provider hands the browser straight back to our own callback,
+  // so following the redirect is following it into the flow rather than out
+  // to a vendor.
+  const to = start.headers.get("location");
+  const nonce = (start.headers.get("set-cookie") ?? "").split(";")[0];
+  if (!to || !nonce.startsWith("demoriff_sso=")) {
+    throw new Error(`authorize did not start a flow: ${to} / ${nonce}`);
   }
 
-  return { cookie, workspaceId: body.workspace.id, memberId: body.member.id, email, name };
+  const back = await api(new URL(to).pathname + new URL(to).search, { cookie: nonce });
+  if (back.status !== 302) {
+    throw new Error(`callback failed: ${back.status} ${await back.text()}`);
+  }
+
+  const cookie = (back.headers.getSetCookie?.() ?? [])
+    .map((value) => value.split(";")[0])
+    .find((value) => value.startsWith("demoriff_session="));
+  if (!cookie) {
+    const where = back.headers.get("location") ?? "";
+    throw new Error(`callback set no session cookie; it redirected to ${where}`);
+  }
+
+  const memberId = sql(`select id from members where email = '${email}' limit 1`);
+  const workspaceId = sql(`select workspace_id from members where email = '${email}' limit 1`);
+  if (!memberId || !workspaceId) throw new Error(`no member row for ${email}`);
+
+  const name = sql(`select name from members where email = '${email}' limit 1`);
+  return { cookie, workspaceId, memberId, email, name };
 }
 
 /** Polls a render job to a terminal state, or throws with what it last saw. */

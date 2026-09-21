@@ -178,6 +178,15 @@ export const sessions = pgTable(
     revokedAt: timestamp("revoked_at", { withTimezone: true }),
     /** Why it ended, for the "where you are signed in" screen. */
     revokedReason: text("revoked_reason"),
+    /**
+     * The identity provider's own session id, when they gave us one.
+     *
+     * Signing out here has to sign the person out there too. Without it,
+     * clicking "sign out" and then "continue with Google" silently
+     * re-authenticates against the still-live upstream session and looks, to
+     * the person, as though sign-out did nothing at all.
+     */
+    workosSessionId: text("workos_session_id"),
     ip: text("ip"),
     userAgent: text("user_agent"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -216,8 +225,17 @@ export const ssoConnections = pgTable(
     workspaceId: uuid("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
     /** One vendor today. Named so a second does not require a migration. */
     provider: text("provider").notNull().default("workos"),
-    /** The connection as the identity vendor names it. The binding itself. */
+    /** The connection as the identity vendor names it. Used by SCIM. */
     connectionId: text("connection_id").notNull(),
+    /**
+     * The organization as the identity vendor names it. The binding itself.
+     *
+     * AuthKit returns an `organization_id` on an enterprise login and no
+     * connection id, so this is what decides the workspace. It carries the
+     * same uniqueness guarantee the connection does, for the same reason: a
+     * second workspace must not be able to claim an organization and start
+     * receiving its logins.
+     */
     organizationId: text("organization_id"),
     /** Email domains this connection may provision. Empty means none. */
     domains: jsonb("domains").$type<string[]>().notNull().default(sql`'[]'::jsonb`),
@@ -251,6 +269,12 @@ export const ssoConnections = pgTable(
     // One connection belongs to one workspace, globally. Without this a
     // second workspace could claim a connection and receive its logins.
     uniqueIndex("sso_connections_connection_key").on(t.connectionId),
+    // And the same for the organization, which is what AuthKit actually
+    // returns. Partial, because the column is nullable and several rows with
+    // no organization are not a conflict.
+    uniqueIndex("sso_connections_organization_key")
+      .on(t.organizationId)
+      .where(sql`${t.organizationId} is not null`),
     uniqueIndex("sso_connections_scim_token_key").on(t.scimTokenHash),
     index("sso_connections_workspace_idx").on(t.workspaceId),
   ],
