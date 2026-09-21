@@ -41,6 +41,8 @@ export function Studio({
   const [selected, setSelected] = useState<number | null>(0);
   const [exportOpen, setExportOpen] = useState(false);
   const [saved, setSaved] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  // A question pushed from the transcript's chips into the Riff panel.
+  const [ask, setAsk] = useState<{ text: string; at: number } | null>(null);
   const raf = useRef<number | null>(null);
   const last = useRef<number>(0);
 
@@ -272,6 +274,7 @@ export function Studio({
             onSelectSegment={setSelected}
             onToggleSegment={toggleSegment}
             onToggleFillers={() => patch({ removeFillers: !state.removeFillers })}
+            onAsk={(text) => setAsk({ text, at: Date.now() })}
           />
         </div>
 
@@ -301,7 +304,14 @@ export function Studio({
         </div>
 
         <div className="hidden min-h-0 min-w-0 xl:block">
-          <Inspector project={project} segment={inspected} state={state} onState={patch} />
+          <Inspector
+            project={project}
+            segment={inspected}
+            state={state}
+            onState={patch}
+            ask={ask}
+            onAsked={() => setAsk(null)}
+          />
         </div>
       </div>
 

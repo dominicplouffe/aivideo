@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { cn, formatDuration, stablePercent } from "@/lib/utils";
 import { Icon } from "@/components/ui/Icon";
 import { MockApp } from "@/components/marketing/MockApp";
@@ -245,6 +245,42 @@ export function TimelineStrip({
     .map((s, i) => ({ s, i }))
     .filter(({ i }) => !state.deletedSegments.has(i));
 
+  /**
+   * The speech lane, bucketed across the source recording.
+   *
+   * Density is the fraction of each bucket that carries a spoken word, which
+   * is a real property of the transcript. `cut` marks a bucket containing
+   * words the current edit removes, so the red bars line up with what
+   * actually disappears.
+   */
+  const speech = useMemo(() => {
+    const BUCKETS = 110;
+    const words = project.segments.flatMap((segment, segIndex) =>
+      segment.words.map((word) => ({ ...word, segIndex })),
+    );
+
+    const span = Math.max(
+      project.sourceDurationSec,
+      words.reduce((end, word) => Math.max(end, word.t + word.d), 0),
+      1,
+    );
+    const bucketSec = span / BUCKETS;
+
+    const bars = Array.from({ length: BUCKETS }, () => ({ spoken: 0, cut: false }));
+    for (const word of words) {
+      const index = Math.min(BUCKETS - 1, Math.max(0, Math.floor(word.t / bucketSec)));
+      bars[index].spoken += word.d;
+      if (word.cut || state.deletedSegments.has(word.segIndex)) bars[index].cut = true;
+    }
+
+    // Clamped at 1: several short words can overflow a bucket, and a bar
+    // taller than the lane is a rendering bug rather than a louder moment.
+    return bars.map((bar) => ({
+      density: Math.min(1, bar.spoken / bucketSec),
+      cut: bar.cut,
+    }));
+  }, [project.segments, project.sourceDurationSec, state.deletedSegments]);
+
   const totalWeight = live.reduce(
     (n, { s }) =>
       n + s.words.filter((w) => !(state.removeFillers && w.cut)).reduce((m, w) => m + w.d, 0),
@@ -309,26 +345,44 @@ export function TimelineStrip({
           ))}
         </div>
 
-        {/* audio lane */}
-        <div className="mt-1 flex h-7 items-center gap-px overflow-hidden rounded-lg border border-[var(--line)] bg-ink-900 px-1">
-          {Array.from({ length: 110 }).map((_, i) => {
-            const v = Math.abs(Math.sin(i * 0.61) * 0.5 + Math.sin(i * 1.73) * 0.3 + Math.sin(i * 0.23) * 0.2);
-            const inCut = state.removeFillers && [12, 13, 34, 35, 36, 61, 62, 88, 89].includes(i);
-            return (
+        {/*
+          Speech across the source take.
+
+          This was `Math.sin` at three frequencies, with the "cut" bars at a
+          hardcoded list of indices — `[12, 13, 34, 35, 36, 61, 62, 88, 89]`
+          — which turned red when filler removal was on. It sat directly
+          under a real video and read as measured audio.
+
+          It is measured now, from the transcript rather than the waveform:
+          each bar is how much of that slice of the recording was speech, and
+          a bar is red when the words in it are ones the edit removes. It is
+          labelled for what it is, because it is not an amplitude plot.
+        */}
+        <div className="mt-1 flex items-center gap-2">
+          <span className="w-16 shrink-0 font-mono text-[0.5rem] tracking-[0.1em] text-fg-faint uppercase">
+            Speech
+          </span>
+          <div className="flex h-7 flex-1 items-center gap-px overflow-hidden rounded-lg border border-[var(--line)] bg-ink-900 px-1">
+            {speech.map((bar, i) => (
               <span
                 key={i}
                 className={cn(
                   "flex-1 rounded-full transition-all duration-500",
-                  inCut ? "bg-rose-500/35" : state.studioSound ? "bg-cyan-400/65" : "bg-fg-faint/45",
+                  bar.cut && state.removeFillers
+                    ? "bg-rose-500/45"
+                    : bar.density > 0
+                      ? state.studioSound
+                        ? "bg-cyan-400/65"
+                        : "bg-fg-faint/45"
+                      : "bg-fg-faint/12",
                 )}
-                // `stablePercent`, not a template string: this height comes
-                // from `Math.sin`, which Node and the browser are allowed to
-                // disagree about in the last bits — and that disagreement
-                // becomes a hydration mismatch on every studio page.
-                style={{ height: stablePercent(inCut ? 0.1 : Math.max(0.12, v)) }}
+                // `stablePercent` rather than a template string: heights
+                // derived from floats are a hydration mismatch waiting to
+                // happen when Node and the browser round differently.
+                style={{ height: stablePercent(Math.max(0.08, bar.density)) }}
               />
-            );
-          })}
+            ))}
+          </div>
         </div>
 
         {/* playhead */}

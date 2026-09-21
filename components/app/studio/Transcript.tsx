@@ -1,9 +1,17 @@
 "use client";
 
 import { cn, formatDuration } from "@/lib/utils";
-import { Icon } from "@/components/ui/Icon";
+import { Icon, type IconName } from "@/components/ui/Icon";
 import type { Project } from "@/lib/app-data";
 import type { EditState, EditedWord } from "./types";
+
+/** What the four chips ask for, in the words a person would use. */
+const ASK_CHIPS: { label: string; icon: IconName; prompt: string }[] = [
+  { label: "Tighten", icon: "wand", prompt: "Which chapters could I drop to tighten this without losing the point?" },
+  { label: "Formal tone", icon: "target", prompt: "Does this read as too casual for a technical buyer? Be specific about where." },
+  { label: "Cut to 60s", icon: "clock", prompt: "Get this under 60 seconds and tell me what I would lose." },
+  { label: "Simplify language", icon: "globe", prompt: "Where is the language more complicated than it needs to be?" },
+];
 
 export function Transcript({
   project,
@@ -15,6 +23,7 @@ export function Transcript({
   onSelectSegment,
   onToggleSegment,
   onToggleFillers,
+  onAsk,
 }: {
   project: Project;
   state: EditState;
@@ -25,6 +34,8 @@ export function Transcript({
   onSelectSegment: (i: number) => void;
   onToggleSegment: (i: number) => void;
   onToggleFillers: () => void;
+  /** Sends a request to the Riff panel. Absent in read-only contexts. */
+  onAsk?: (prompt: string) => void;
 }) {
   const totalWords = project.segments.reduce((n, s) => n + s.words.length, 0);
   const keptWords = timeline.length;
@@ -46,15 +57,25 @@ export function Transcript({
         </span>
       </header>
 
-      {/* AI action chips */}
+      {/*
+        Action chips.
+
+        "Remove fillers" has always been real. The other four had no onClick
+        at all — four buttons styled identically to the working one, with no
+        disabled state, doing nothing. They now ask Riff, which is where that
+        kind of request actually goes.
+      */}
       <div className="flex flex-wrap gap-1.5 border-b border-[var(--line)] px-4 py-3">
         <Chip active={state.removeFillers} onClick={onToggleFillers} icon="scissors">
           Remove fillers
         </Chip>
-        <Chip icon="wand">Tighten</Chip>
-        <Chip icon="target">Formal tone</Chip>
-        <Chip icon="clock">Cut to 60s</Chip>
-        <Chip icon="globe">Simplify language</Chip>
+        {onAsk
+          ? ASK_CHIPS.map((chip) => (
+              <Chip key={chip.label} icon={chip.icon} onClick={() => onAsk(chip.prompt)}>
+                {chip.label}
+              </Chip>
+            ))
+          : null}
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
@@ -150,13 +171,8 @@ export function Transcript({
           );
         })}
 
-        <div className="rounded-xl border border-dashed border-[var(--line-strong)] px-4 py-5 text-center">
-          <p className="text-[0.8125rem] text-fg-subtle">
-            Select any span and press{" "}
-            <kbd className="rounded border border-[var(--line)] px-1 font-mono text-2xs">⌘⏎</kbd>{" "}
-            to ask Riff about it.
-          </p>
-        </div>
+        {/* The "select a span and press ⌘⏎" hint described a key handler
+            that has never existed anywhere in the Studio. */}
       </div>
     </div>
   );
@@ -169,7 +185,7 @@ function Chip({
   onClick,
 }: {
   children: React.ReactNode;
-  icon: "scissors" | "wand" | "target" | "clock" | "globe";
+  icon: IconName;
   active?: boolean;
   onClick?: () => void;
 }) {

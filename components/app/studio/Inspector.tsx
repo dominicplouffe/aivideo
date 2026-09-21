@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import { Icon, type IconName } from "@/components/ui/Icon";
 import { Button } from "@/components/ui/Button";
@@ -22,13 +22,26 @@ export function Inspector({
   segment,
   state,
   onState,
+  ask,
+  onAsked,
 }: {
   project: Project;
   segment: Segment | null;
   state: EditState;
   onState: (patch: Partial<EditState>) => void;
+  /**
+   * A question pushed in from elsewhere — the transcript's action chips.
+   * Opens the Riff tab and sends it, so a chip in one panel and a message
+   * in another are the same request rather than two features that drifted.
+   */
+  ask?: { text: string; at: number } | null;
+  onAsked?: () => void;
 }) {
   const [tab, setTab] = useState<Tab>("scene");
+
+  useEffect(() => {
+    if (ask) setTab("riff");
+  }, [ask]);
 
   return (
     <aside className="flex min-h-0 w-full flex-col border-l border-[var(--line)] bg-ink-950">
@@ -57,7 +70,9 @@ export function Inspector({
         {tab === "audio" ? <AudioTab project={project} state={state} onState={onState} /> : null}
         {tab === "brand" ? <BrandTab project={project} state={state} onState={onState} /> : null}
         {tab === "output" ? <OutputTab project={project} /> : null}
-        {tab === "riff" ? <RiffTab project={project} /> : null}
+        {tab === "riff" ? (
+          <RiffTab project={project} onState={onState} ask={ask} onAsked={onAsked} />
+        ) : null}
       </div>
     </aside>
   );
@@ -97,8 +112,8 @@ function SceneTab({
           <>
             <Readout label="Scale" value={`${segment.zoom.scale.toFixed(2)}×`} />
             <Readout label="Anchor" value={`${segment.zoom.x}% / ${segment.zoom.y}%`} />
-            <Readout label="Easing" value="Push · asymmetric, 1.5% overshoot" />
-            <Readout label="Hold" value="Bound to narration span" />
+            {/* Easing and hold were constants dressed as per-scene
+                measurements. The two values that are real stay. */}
           </>
         ) : (
           <p className="text-[0.75rem] text-fg-faint">No zoom on this scene.</p>
@@ -110,15 +125,19 @@ function SceneTab({
         <SwitchRow label="Presenter" hint="Collision-aware placement" on={state.presenter} onChange={(v) => onState({ presenter: v })} />
       </Group>
 
-      <Group label="Masking">
-        <div className="flex items-start gap-2.5 rounded-xl border border-mint-500/28 bg-mint-500/[0.06] p-3">
-          <Icon name="shield" className="mt-0.5 size-3.5 shrink-0 text-mint-400" strokeWidth={2} />
-          <p className="text-[0.75rem] leading-relaxed text-fg-muted">
-            3 values masked in this scene by <span className="text-fg">Production safeguards</span>.
-            Enforced by your workspace.
-          </p>
-        </div>
-      </Group>
+      {/*
+        The masking panel is gone, not softened.
+
+        It read "3 values masked in this scene by Production safeguards" —
+        a hardcoded 3, rendered identically for every scene of every project,
+        including ones with no recording behind them. A fabricated security
+        claim is the worst kind of placeholder, because it is the kind
+        somebody repeats to their own customer.
+
+        Masking is real and lives in lib/masking; when a recording has been
+        scanned this panel comes back reading the manifest. Until then it
+        says nothing, which is the only honest thing it can say.
+      */}
     </div>
   );
 }
@@ -134,32 +153,23 @@ function AudioTab({
   state: EditState;
   onState: (p: Partial<EditState>) => void;
 }) {
-  const [voice, setVoice] = useState(project.voice);
   return (
     <div className="space-y-5 p-4">
+      {/*
+        The narration picker is gone until synthesis is configured.
+
+        It was a <select> bound to local state that nothing saved — while
+        every other control in this panel autosaves, so a person who changed
+        the voice and reloaded found it changed back with no explanation.
+        Replacing a recorded voice needs a synthesis provider; without one
+        the video carries the voice on the recording, and there is nothing
+        to choose between.
+      */}
       <Group label="Narration">
-        <select
-          value={voice}
-          onChange={(e) => setVoice(e.target.value)}
-          className="h-9 w-full rounded-xl border border-[var(--line)] bg-ink-900 px-3 text-[0.8125rem] text-fg focus:border-iris-500/50 focus:outline-none"
-        >
-          {voices.map((v) => (
-            <option key={v.id} value={`${v.name} — ${v.descriptor}`}>
-              {v.name} — {v.accent}
-              {v.kind === "clone" ? " (clone)" : ""}
-            </option>
-          ))}
-        </select>
-        <div className="mt-2 flex items-center gap-2">
-          <button
-            type="button"
-            className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--line)] px-2.5 py-1.5 text-2xs text-fg-muted transition-colors hover:border-[var(--line-strong)] hover:text-fg"
-          >
-            <Icon name="play" className="size-3" />
-            Preview on this script
-          </button>
-          <span className="font-mono text-2xs text-fg-faint">34 languages</span>
-        </div>
+        <p className="text-[0.75rem] leading-relaxed text-fg-subtle">
+          This video uses the audio on your recording. Swapping in a studio
+          voice needs a speech synthesis provider configured.
+        </p>
       </Group>
 
       <Group label="Restoration">
@@ -170,19 +180,13 @@ function AudioTab({
           onChange={(v) => onState({ studioSound: v })}
         />
         <SwitchRow label="Music bed" hint="Ambient, −26 dB" on={state.music} onChange={(v) => onState({ music: v })} />
-        <Readout label="Loudness" value={state.studioSound ? "−16 LUFS (web)" : "unnormalised"} />
-        <Readout label="Peak" value={state.studioSound ? "−1.2 dBTP" : "−0.3 dBTP"} />
+        {/* Loudness and peak were two constants that changed with a
+            checkbox rather than with the audio. Nothing measures them yet. */}
       </Group>
 
-      <Group label="Pronunciation">
-        <p className="text-[0.75rem] leading-relaxed text-fg-subtle">
-          3 workspace overrides applied: <span className="text-fg">Meridian</span>,{" "}
-          <span className="text-fg">SKU</span>, <span className="text-fg">FTL</span>.
-        </p>
-        <button className="mt-2 text-2xs font-medium text-iris-300 hover:text-iris-400">
-          Edit dictionary
-        </button>
-      </Group>
+      {/* The pronunciation dictionary claimed three specific overrides
+          were applied, from a hardcoded sentence, beside a button with no
+          handler. It belongs with synthesis and comes back with it. */}
     </div>
   );
 }
@@ -251,11 +255,26 @@ function BrandTab({
 /* ---------------------------------------------------------- output */
 
 function OutputTab({ project }: { project: Project }) {
+  // Meta read off the project rather than written into the source. "11
+  // steps" and "6 clips · 9:16" were constants shown against every project,
+  // including ones with no chapters and no clips.
   const outputs: { id: string; label: string; icon: IconName; meta: string; on: boolean }[] = [
-    { id: "video", label: "Demo video", icon: "play", meta: "4K60 · 16:9 + 9:16", on: project.outputs.includes("video") },
-    { id: "guide", label: "Step-by-step guide", icon: "doc", meta: "Unmetered · 11 steps", on: project.outputs.includes("guide") },
-    { id: "interactive", label: "Interactive tour", icon: "cursor", meta: "From captured DOM", on: project.outputs.includes("interactive") },
-    { id: "clips", label: "Social cuts", icon: "scissors", meta: "6 clips · 9:16", on: project.outputs.includes("clips") },
+    {
+      id: "video",
+      label: "Demo video",
+      icon: "play",
+      meta: `${project.segments.length} chapter${project.segments.length === 1 ? "" : "s"}`,
+      on: project.outputs.includes("video"),
+    },
+    {
+      id: "guide",
+      label: "Step-by-step guide",
+      icon: "doc",
+      meta: `Unmetered · ${project.segments.length} step${project.segments.length === 1 ? "" : "s"}`,
+      on: project.outputs.includes("guide"),
+    },
+    { id: "interactive", label: "Interactive tour", icon: "cursor", meta: "Not built yet", on: false },
+    { id: "clips", label: "Social cuts", icon: "scissors", meta: "Not built yet", on: false },
   ];
   return (
     <div className="space-y-5 p-4">
@@ -284,33 +303,36 @@ function OutputTab({ project }: { project: Project }) {
         </div>
       </Group>
 
+      {/*
+        The languages list was the global `localeMatrix` fixture rendered as
+        this project's render status — six rows saying "published" and
+        "rendering" about locales nobody had asked for. A project's real
+        locales are the ones it has, and a new project has one.
+      */}
       <Group label="Languages">
-        <div className="space-y-1.5">
-          {localeMatrix.slice(0, 6).map((l) => (
-            <div key={l.code} className="flex items-center gap-2.5">
-              <span className="w-12 font-mono text-2xs text-fg-faint">{l.code}</span>
-              <span className="flex-1 truncate text-[0.75rem] text-fg-muted">{l.label}</span>
-              <span
-                className={cn(
-                  "rounded px-1.5 py-0.5 font-mono text-[0.5625rem]",
-                  l.status === "published" && "bg-mint-500/15 text-mint-400",
-                  l.status === "rendering" && "bg-iris-500/15 text-iris-300",
-                  l.status === "stale" && "bg-amber-500/15 text-amber-400",
-                  (l.status === "queued" || l.status === "none") && "bg-white/6 text-fg-faint",
-                )}
-              >
-                {l.status}
-              </span>
-            </div>
-          ))}
-        </div>
-        <p className="mt-2 text-2xs text-fg-faint">Localized versions never consume video minutes.</p>
+        {project.locales.length > 0 ? (
+          <div className="space-y-1.5">
+            {project.locales.map((code) => (
+              <div key={code} className="flex items-center gap-2.5">
+                <span className="w-12 font-mono text-2xs text-fg-faint">{code}</span>
+                <span className="flex-1 truncate text-[0.75rem] text-fg-muted">
+                  {localeMatrix.find((l) => l.code === code)?.label ?? code}
+                </span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-[0.75rem] text-fg-faint">
+            Source language only. Other languages need a speech synthesis provider.
+          </p>
+        )}
       </Group>
 
       <Group label="Billing">
         <Readout label="This render" value={`${(project.durationSec / 60).toFixed(1)} minutes`} />
-        <Readout label="Derived assets" value="0 minutes" />
-        <Readout label="Re-render this period" value="Free" />
+        <p className="mt-2 text-2xs leading-relaxed text-fg-faint">
+          Billed from the encoded output when a render completes, not from this estimate.
+        </p>
       </Group>
     </div>
   );
@@ -318,35 +340,137 @@ function OutputTab({ project }: { project: Project }) {
 
 /* ---------------------------------------------------------- riff chat */
 
-const seededReplies = [
-  "Trimmed 31% of words, cut 4 dead-air regions totalling 38 seconds, and keyframed 7 zooms. The intro now reaches the first click at 0:06 instead of 0:41.",
-  "The retention curve on your last three demos drops hardest when configuration comes before outcome. I can reorder scene 3 ahead of scene 2 — want me to show a diff?",
-  "I can get this to 60 seconds by cutting scene 2 entirely and tightening the close. You would lose the reliability-score explanation, which two of your top accounts rewatched.",
-  "Rewritten for a technical buyer: adjectives removed, four claims replaced with the numbers behind them. Review the diff before I commit it.",
-];
+/**
+ * The Riff panel.
+ *
+ * It asks a model about the cut and shows what comes back. When the model
+ * proposes a change, the change arrives as data behind an Accept button
+ * rather than being applied — a suggestion and a decision are two events,
+ * and only one of them is the person's.
+ *
+ * What was here before answered "Cut to 60 seconds" with "Trimmed 31% of
+ * words, cut 4 dead-air regions totalling 38 seconds, and keyframed 7
+ * zooms", from an array of four strings, having changed nothing. The numbers
+ * were invented, the edit never happened, and the panel said it had.
+ */
 
-function RiffTab({ project }: { project: Project }) {
-  const [log, setLog] = useState<{ who: "you" | "riff"; text: string }[]>([
+interface RiffTurn {
+  who: "you" | "riff";
+  text: string;
+  proposal?: EditProposal;
+  proposalSummary?: string;
+  applied?: boolean;
+}
+
+/** The shape the endpoint returns. Mirrors `EditProposal` in lib/providers. */
+interface EditProposal {
+  removeFillers?: boolean;
+  deletedSegments?: number[];
+  captions?: boolean;
+  music?: boolean;
+  zoomEnabled?: boolean;
+}
+
+function RiffTab({
+  project,
+  onState,
+  ask,
+  onAsked,
+}: {
+  project: Project;
+  onState: (patch: Partial<EditState>) => void;
+  ask?: { text: string; at: number } | null;
+  onAsked?: () => void;
+}) {
+  const [log, setLog] = useState<RiffTurn[]>([
     {
       who: "riff",
-      text: `I auto-edited “${project.title}”. Source was ${Math.round(project.sourceDurationSec / 60)} minutes; the cut is ${Math.round(project.durationSec)} seconds. Ask me to change anything.`,
+      // Derived, and true. Every other sentence this panel used to open with
+      // was not.
+      text:
+        `“${project.title}” runs ${Math.round(project.durationSec)}s from a ` +
+        `${Math.round(project.sourceDurationSec)}s take, across ` +
+        `${project.segments.length} chapter${project.segments.length === 1 ? "" : "s"}. ` +
+        `Ask me about it, or tell me what to change.`,
     },
   ]);
   const [draft, setDraft] = useState("");
   const [thinking, setThinking] = useState(false);
+  const [offline, setOffline] = useState(false);
 
-  const send = (text: string) => {
-    if (!text.trim()) return;
-    setLog((l) => [...l, { who: "you", text }]);
+  const send = async (text: string) => {
+    const message = text.trim();
+    if (!message || thinking) return;
+
+    const history = log.map((turn) => ({
+      role: turn.who === "you" ? ("user" as const) : ("assistant" as const),
+      text: turn.text,
+    }));
+
+    setLog((l) => [...l, { who: "you", text: message }]);
     setDraft("");
     setThinking(true);
-    setTimeout(() => {
-      setThinking(false);
+
+    try {
+      const response = await fetch(`/api/projects/${project.id}/riff`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message, history }),
+      });
+      const body = (await response.json()) as {
+        reply?: string;
+        proposal?: EditProposal | null;
+        proposal_summary?: string | null;
+        provider?: string;
+        error?: string;
+      };
+      if (!response.ok) throw new Error(body.error ?? "Riff could not answer.");
+
+      setOffline(body.provider === "offline-assistant");
       setLog((l) => [
         ...l,
-        { who: "riff", text: seededReplies[l.filter((x) => x.who === "you").length % seededReplies.length] },
+        {
+          who: "riff",
+          text: body.reply ?? "",
+          proposal: body.proposal ?? undefined,
+          proposalSummary: body.proposal_summary ?? undefined,
+        },
       ]);
-    }, 900);
+    } catch (cause) {
+      setLog((l) => [
+        ...l,
+        { who: "riff", text: cause instanceof Error ? cause.message : String(cause) },
+      ]);
+    } finally {
+      setThinking(false);
+    }
+  };
+
+  // A chip pressed in the transcript arrives here. Keyed on `at` rather than
+  // the text so pressing the same chip twice asks twice.
+  const lastAsk = useRef<number>(0);
+  useEffect(() => {
+    if (!ask || ask.at === lastAsk.current) return;
+    lastAsk.current = ask.at;
+    void send(ask.text);
+    onAsked?.();
+    // `send` is recreated every render; depending on it would re-fire the
+    // question on each keystroke in the composer.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ask]);
+
+  const apply = (index: number, proposal: EditProposal) => {
+    const patch: Partial<EditState> = {};
+    if (proposal.removeFillers !== undefined) patch.removeFillers = proposal.removeFillers;
+    if (proposal.captions !== undefined) patch.captions = proposal.captions;
+    if (proposal.music !== undefined) patch.music = proposal.music;
+    if (proposal.zoomEnabled !== undefined) patch.zoomEnabled = proposal.zoomEnabled;
+    if (proposal.deletedSegments) patch.deletedSegments = new Set(proposal.deletedSegments);
+
+    // Through the same autosaving patch every switch in this panel uses, so
+    // an accepted proposal is an ordinary edit and undoes like one.
+    onState(patch);
+    setLog((l) => l.map((turn, i) => (i === index ? { ...turn, applied: true } : turn)));
   };
 
   return (
@@ -368,6 +492,29 @@ function RiffTab({ project }: { project: Project }) {
               )}
             >
               {m.text}
+
+              {m.proposal ? (
+                <span className="mt-2.5 block border-t border-[var(--line)] pt-2.5">
+                  <span className="block text-2xs text-fg-faint">
+                    {m.proposalSummary ?? "Apply this change"}
+                  </span>
+                  {m.applied ? (
+                    <span className="mt-1.5 inline-flex items-center gap-1 text-2xs text-mint-400">
+                      <Icon name="check" className="size-3" strokeWidth={3} />
+                      Applied
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => apply(i, m.proposal!)}
+                      className="mt-1.5 inline-flex items-center gap-1.5 rounded-lg border border-iris-500/45 bg-iris-500/12 px-2.5 py-1 text-2xs font-medium text-iris-200 transition-colors hover:bg-iris-500/20"
+                    >
+                      <Icon name="check" className="size-3" strokeWidth={2.6} />
+                      Accept
+                    </button>
+                  )}
+                </span>
+              ) : null}
             </span>
           </div>
         ))}
@@ -390,13 +537,20 @@ function RiffTab({ project }: { project: Project }) {
       </div>
 
       <div className="shrink-0 border-t border-[var(--line)] p-3">
+        {offline ? (
+          <p className="mb-2 rounded-lg border border-amber-500/25 bg-amber-500/[0.07] px-2.5 py-1.5 text-2xs leading-relaxed text-amber-200">
+            No language model is configured, so Riff can only report what it measures. Set
+            ANTHROPIC_API_KEY to have it read the transcript.
+          </p>
+        ) : null}
         <div className="mb-2 flex flex-wrap gap-1.5">
-          {["Cut to 60 seconds", "Rewrite for a technical buyer", "Add a callout on the price"].map((s) => (
+          {["What could I cut?", "Which chapter is weakest?", "Get this under a minute"].map((s) => (
             <button
               key={s}
               type="button"
-              onClick={() => send(s)}
-              className="rounded-lg border border-[var(--line)] px-2 py-1 text-2xs text-fg-subtle transition-colors hover:border-[var(--line-strong)] hover:text-fg"
+              disabled={thinking}
+              onClick={() => void send(s)}
+              className="rounded-lg border border-[var(--line)] px-2 py-1 text-2xs text-fg-subtle transition-colors hover:border-[var(--line-strong)] hover:text-fg disabled:opacity-50"
             >
               {s}
             </button>
@@ -405,7 +559,7 @@ function RiffTab({ project }: { project: Project }) {
         <form
           onSubmit={(e) => {
             e.preventDefault();
-            send(draft);
+            void send(draft);
           }}
           className="flex gap-2"
         >
@@ -415,7 +569,7 @@ function RiffTab({ project }: { project: Project }) {
             placeholder="Tell Riff what to change…"
             className="h-9 flex-1 rounded-xl border border-[var(--line)] bg-ink-900 px-3 text-[0.8125rem] text-fg placeholder:text-fg-faint focus:border-iris-500/50 focus:outline-none"
           />
-          <Button type="submit" size="sm" iconOnly aria-label="Send">
+          <Button type="submit" size="sm" iconOnly aria-label="Send" disabled={thinking}>
             <Icon name="arrowRight" className="size-4" strokeWidth={2.2} />
           </Button>
         </form>
