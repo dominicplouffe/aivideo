@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, isNull } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { getDb } from "../client";
 import * as s from "../schema";
 import type { Project, Segment, ProjectStatus, OutputKind } from "@/lib/app-data";
@@ -88,7 +88,7 @@ async function hydrate(rows: Row[]): Promise<Project[]> {
 
   const recordingIds = rows.map((r) => r.recordingId).filter((id): id is string => id !== null);
 
-  const [segs, locs, asts, kits, vcs, recs] = await Promise.all([
+  const [segs, locs, asts, kits, vcs, recs, stats] = await Promise.all([
     getDb().select().from(s.segments).where(inArray(s.segments.projectId, ids)),
     getDb().select().from(s.locales).where(inArray(s.locales.projectId, ids)),
     getDb().select().from(s.assets).where(inArray(s.assets.projectId, ids)),
@@ -101,6 +101,18 @@ async function hydrate(rows: Row[]): Promise<Project[]> {
           .from(s.recordings)
           .where(inArray(s.recordings.id, recordingIds))
       : Promise.resolve([] as { id: string; mediaKey: string | null }[]),
+    // Engagement, counted from the analytics store. One grouped query for
+    // every project being hydrated, not one per card.
+    getDb()
+      .select({
+        projectId: s.analyticsSessions.projectId,
+        views: sql<number>`count(*)::int`,
+        completed: sql<number>`count(*) FILTER (WHERE ${s.analyticsSessions.reachedEnd})::int`,
+        cta: sql<number>`count(*) FILTER (WHERE ${s.analyticsSessions.ctaClicked})::int`,
+      })
+      .from(s.analyticsSessions)
+      .where(inArray(s.analyticsSessions.projectId, ids))
+      .groupBy(s.analyticsSessions.projectId),
   ]);
 
   const withMedia = new Set(recs.filter((r) => r.mediaKey !== null).map((r) => r.id));
@@ -119,6 +131,19 @@ async function hydrate(rows: Row[]): Promise<Project[]> {
     set.add(a.kind as OutputKind);
     outBy.set(a.projectId, set);
   }
+  const statsBy = new Map(
+    stats.map((row) => {
+      const views = Number(row.views ?? 0);
+      return [
+        row.projectId,
+        {
+          views,
+          completion: views > 0 ? Number(row.completed ?? 0) / views : 0,
+          cta: Number(row.cta ?? 0),
+        },
+      ] as const;
+    }),
+  );
   const kitName = new Map(kits.map((k) => [k.id, k.name]));
   const voiceLabel = new Map(vcs.map((v) => [v.id, `${v.name} — ${v.descriptor ?? ""}`]));
 
@@ -129,11 +154,14 @@ async function hydrate(rows: Row[]): Promise<Project[]> {
       voiceLabel: r.voiceId ? (voiceLabel.get(r.voiceId) ?? "—") : "—",
       locales: locBy.get(r.id) ?? [],
       outputs: [...(outBy.get(r.id) ?? [])],
-      // Engagement lives in the analytics store, not the primary database.
-      // Zero here is honest: this row has no analytics attached yet.
-      views: 0,
-      completion: 0,
-      ctaClicks: 0,
+      // Engagement lives in `analytics_sessions`, which is in this same
+      // database — these three were hardcoded to 0 with a comment saying
+      // engagement lived elsewhere, so every project reported no views
+      // forever however many it had. The dashboard showed "Total views 0"
+      // beside a "Views this month 10" read from the very same table.
+      views: statsBy.get(r.id)?.views ?? 0,
+      completion: statsBy.get(r.id)?.completion ?? 0,
+      ctaClicks: statsBy.get(r.id)?.cta ?? 0,
       hasMedia: r.recordingId !== null && withMedia.has(r.recordingId),
     }),
   );
