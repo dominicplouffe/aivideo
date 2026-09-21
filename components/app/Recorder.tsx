@@ -82,6 +82,42 @@ interface TakeShape {
   height: number | null;
 }
 
+/**
+ * Below this peak (−80 dBFS), over a whole take, the audio track is digital
+ * silence: nothing reached the microphone. A working mic in a quiet room,
+ * even behind the browser's noise suppression, sits well above it; a
+ * microphone the OS refuses to feed delivers exact zeros.
+ */
+const SILENT_PEAK = 0.0001;
+
+/**
+ * One audio track for the recorder, mixed from however many we were given.
+ *
+ * `MediaRecorder` encodes the first audio track of a stream and ignores the
+ * rest. The take used to hand it the display's tracks followed by the
+ * microphone's, so wherever screen capture supplies audio the narration was
+ * dropped, and wherever it does not (a Mac) the microphone was recorded
+ * alone — and if nothing reached that microphone, the take came back with a
+ * track of zeros and no sign of why. Mixing in an AudioContext gives the
+ * recorder one track carrying everything and gives the level meter a tap.
+ */
+function mixAudio(videoTracks: MediaStreamTrack[], audioTracks: MediaStreamTrack[]) {
+  const ctx = new AudioContext();
+  const destination = ctx.createMediaStreamDestination();
+  const analyser = ctx.createAnalyser();
+  analyser.fftSize = 2048;
+  for (const track of audioTracks) {
+    const source = ctx.createMediaStreamSource(new MediaStream([track]));
+    source.connect(destination);
+    source.connect(analyser);
+  }
+  return {
+    ctx,
+    analyser,
+    stream: new MediaStream([...videoTracks, ...destination.stream.getAudioTracks()]),
+  };
+}
+
 async function measure(url: string | null): Promise<TakeShape> {
   const empty: TakeShape = { durationSec: null, width: null, height: null };
   if (!url) return empty;
@@ -134,6 +170,10 @@ function RecordFlow({
   // blob is what gets uploaded. Revoking one must not lose the other.
   const [blob, setBlob] = useState<Blob | null>(null);
   const [audioCaptured, setAudioCaptured] = useState<boolean | null>(null);
+  // Loudest sample in the last meter tick (0..1) and whether the take has
+  // stayed at digital zero for long enough to say so.
+  const [audioLevel, setAudioLevel] = useState(0);
+  const [audioSilent, setAudioSilent] = useState(false);
 
   const [withMic, setWithMic] = useState(true);
   const [withSystemAudio, setWithSystemAudio] = useState(true);
@@ -146,10 +186,18 @@ function RecordFlow({
   const chunksRef = useRef<BlobPart[]>([]);
   const videoRef = useRef<HTMLVideoElement>(null);
   const tickRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const meterRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Loudest sample heard across the whole take.
+  const peakRef = useRef(0);
 
   const stopTracks = useCallback(() => {
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
+    if (meterRef.current) clearInterval(meterRef.current);
+    meterRef.current = null;
+    void audioCtxRef.current?.close().catch(() => {});
+    audioCtxRef.current = null;
   }, []);
 
   useEffect(() => () => {
@@ -192,6 +240,34 @@ function RecordFlow({
         }
       }
       setAudioCaptured(gotAudio);
+      setAudioLevel(0);
+      setAudioSilent(false);
+      peakRef.current = 0;
+
+      let recorded = combined;
+      if (combined.getAudioTracks().length > 0) {
+        const mixed = mixAudio(display.getVideoTracks(), combined.getAudioTracks());
+        audioCtxRef.current = mixed.ctx;
+        recorded = mixed.stream;
+        void mixed.ctx.resume().catch(() => {});
+
+        const samples = new Float32Array(mixed.analyser.fftSize);
+        let ticks = 0;
+        meterRef.current = setInterval(() => {
+          mixed.analyser.getFloatTimeDomainData(samples);
+          let peak = 0;
+          for (let i = 0; i < samples.length; i++) {
+            const v = Math.abs(samples[i]);
+            if (v > peak) peak = v;
+          }
+          peakRef.current = Math.max(peakRef.current, peak);
+          setAudioLevel(peak);
+          // Four seconds is long enough to have said something; a peak
+          // that has not left zero by then is a microphone hearing nothing.
+          ticks += 1;
+          setAudioSilent(ticks >= 20 && peakRef.current < SILENT_PEAK);
+        }, 200);
+      }
 
       streamRef.current = combined;
       if (videoRef.current) {
@@ -203,7 +279,7 @@ function RecordFlow({
       const mime = MediaRecorder.isTypeSupported("video/webm;codecs=vp9")
         ? "video/webm;codecs=vp9"
         : "video/webm";
-      const rec = new MediaRecorder(combined, { mimeType: mime, videoBitsPerSecond: 8_000_000 });
+      const rec = new MediaRecorder(recorded, { mimeType: mime, videoBitsPerSecond: 8_000_000 });
       rec.ondataavailable = (e) => {
         if (e.data.size) {
           chunksRef.current.push(e.data);
@@ -252,6 +328,9 @@ function RecordFlow({
 
   const stop = () => {
     if (tickRef.current) clearInterval(tickRef.current);
+    // Settled here rather than left to the meter's timing: a take stopped
+    // in its first seconds should still be told its track was silent.
+    if (audioCtxRef.current) setAudioSilent(peakRef.current < SILENT_PEAK);
     recorderRef.current?.state === "recording" && recorderRef.current.stop();
     stopTracks();
   };
@@ -396,7 +475,7 @@ function RecordFlow({
             ) : null}
 
             <div className="mt-5 grid gap-2 sm:grid-cols-2">
-              <Toggle label="Microphone" hint="Recorded as its own track" icon="mic" on={withMic} onChange={setWithMic} />
+              <Toggle label="Microphone" hint="Your narration, mixed into the take" icon="mic" on={withMic} onChange={setWithMic} />
               <Toggle label="System audio" hint="Your app's own sound" icon="volume" on={withSystemAudio} onChange={setWithSystemAudio} />
               <Toggle label="Masking policy" hint="Enforced by your workspace" icon="shield" on={masking} onChange={setMasking} locked />
             </div>
@@ -436,10 +515,39 @@ function RecordFlow({
                 Stop recording
               </Button>
               <span className="font-mono text-2xs text-fg-faint">{formatBytes(bytes)} captured</span>
+              {audioCaptured ? (
+                <span
+                  className="inline-flex items-center gap-2"
+                  role="meter"
+                  aria-label="Microphone level"
+                  aria-valuemin={0}
+                  aria-valuemax={1}
+                  aria-valuenow={Math.round(audioLevel * 100) / 100}
+                >
+                  <Icon name="mic" className={cn("size-3.5", audioSilent ? "text-amber-400" : "text-fg-faint")} strokeWidth={1.9} />
+                  <span className="h-1.5 w-24 overflow-hidden rounded-full bg-ink-800">
+                    <span
+                      className={cn("block h-full rounded-full transition-[width] duration-100", audioSilent ? "bg-amber-400" : "bg-mint-400")}
+                      // Speech peaks around 0.1–0.4 of full scale; square-rooted
+                      // so a normal voice fills the bar rather than a sliver of it.
+                      style={{ width: `${Math.min(100, Math.sqrt(audioLevel) * 100)}%` }}
+                    />
+                  </span>
+                </span>
+              ) : null}
               <span className="ml-auto text-[0.75rem] text-fg-subtle">
                 Fumbled a line? Pause two seconds and say it again — the clean take wins.
               </span>
             </div>
+
+            {audioSilent ? (
+              <p role="alert" className="mt-4 flex items-start gap-2.5 rounded-xl border border-amber-500/30 bg-amber-500/[0.08] p-3.5 text-[0.8125rem] leading-relaxed text-amber-300">
+                <Icon name="alert" className="mt-0.5 size-4 shrink-0" strokeWidth={1.9} />
+                No sound is reaching the microphone. The browser has one, but it is delivering
+                silence — on a Mac, check System Settings → Privacy &amp; Security → Microphone
+                allows your browser, and System Settings → Sound → Input is the mic you expect.
+              </p>
+            ) : null}
           </div>
         </Panel>
 
@@ -499,6 +607,14 @@ function RecordFlow({
                 <Icon name="alert" className="mt-0.5 size-4 shrink-0" strokeWidth={1.9} />
                 This take has no audio track. Play it back before processing —
                 if you expected narration, the microphone was not captured.
+              </p>
+            ) : audioSilent ? (
+              <p className="mt-4 flex items-start gap-2.5 rounded-xl border border-amber-500/30 bg-amber-500/[0.08] p-3.5 text-[0.8125rem] leading-relaxed text-amber-300">
+                <Icon name="alert" className="mt-0.5 size-4 shrink-0" strokeWidth={1.9} />
+                This take&apos;s audio is silent. The microphone was connected but nothing reached
+                it, so there will be no transcript to edit. On a Mac, check System Settings →
+                Privacy &amp; Security → Microphone allows your browser, and that Sound → Input is
+                the mic you expect, then record again.
               </p>
             ) : null}
 
