@@ -88,7 +88,7 @@ too — not just the UI.
 npm run build           # production build (also builds the embed script)
 npm run start           # serve the production build
 npm run typecheck       # tsc --noEmit
-npm test                # 542 unit tests, with DATABASE_URL set
+npm test                # 566 unit tests, with DATABASE_URL set
 npm run test:all        # end-to-end: signup → publish → analytics (see below)
 npm run worker          # render + webhook + audit-stream worker (needs ffmpeg)
 npm run build:extension # the Chromium capture extension, into extension/dist
