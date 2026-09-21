@@ -284,10 +284,10 @@ infrastructure — or dismissed as a mock when it is not.
 
 **Real, and proven by tests that would fail if it broke:**
 
-- **Persistence.** Postgres with twenty-seven tables, fourteen migrations, and the
-  constraints that matter enforced in the schema. The app falls back to
-  seeded fixtures when `DATABASE_URL` is unset, which is what keeps a fresh
-  clone explorable.
+- **Persistence.** Postgres with twenty-seven tables, sixteen migrations, and
+  the constraints that matter enforced in the schema. There is no fixture
+  fallback: without `DATABASE_URL` the app renders empty states, and with one
+  it shows what that workspace holds, empty included.
 - **The job queue.** `FOR UPDATE SKIP LOCKED` claiming, lease recovery,
   backoff, dead-lettering, idempotency keys — exercised against a real
   database under concurrency.
@@ -340,6 +340,22 @@ infrastructure — or dismissed as a mock when it is not.
 
 **Not built:**
 
+- **Presenters / avatars.** The page was deleted rather than left as a shell.
+  There was no table, no route and no provider behind it — only a fixture
+  gallery and a "Train a presenter" button with no handler.
+- **Brand kits and localization, end to end.** Both tables were dead: the
+  pages rendered fixtures and nothing had ever written a row. Both now have a
+  repository and read real data, and localization has
+  `POST /api/projects/[id]/locales` to queue a language. What is still
+  missing is the worker that drains a queued locale into a translated cut,
+  and any way to create or edit a brand kit from the interface.
+- **Self-serve signup in production.** `POST /api/auth/signup` refuses with
+  501 unless `NODE_ENV` is not production, because nothing verifies that the
+  person typing an address owns it. Single sign-on is the production path and
+  needs `WORKOS_API_KEY` and `WORKOS_CLIENT_ID`. The three buttons on the
+  sign-in form — Google, Microsoft, SSO — all call the same endpoint, which
+  resolves a WorkOS connection from the email domain. There is no Google or
+  Microsoft OAuth behind the first two, and their labels promise one.
 - **Firefox and Safari extensions.** The Chromium extension is real. A
   Firefox port needs a different capture path — `chrome.offscreen` and
   `tabCapture` are Chromium-only — and Safari needs Xcode. Neither can be
@@ -349,6 +365,27 @@ infrastructure — or dismissed as a mock when it is not.
 
 **Fictional by design:**
 
-- **Customers and their numbers.** Northwind, Cardinal, Tessera, Foldr,
-  Halcyon and Meridian do not exist, and neither do their results. Every
-  figure on the marketing site is illustrative.
+- **Customers and their numbers, on the marketing site.** Northwind,
+  Cardinal, Tessera, Foldr, Halcyon and Meridian do not exist, and neither do
+  their results. Every figure under `/`, `/customers`, `/compare` and
+  `/pricing` is illustrative.
+
+  They are **not** in the application any more, and that distinction is the
+  point. Until recently every read in `lib/data.ts` fell back to the seeded
+  Meridian workspace — not only when `DATABASE_URL` was unset, but whenever a
+  real query came back empty. A person who had just created an account was
+  shown Meridian's projects, greeted as Renata, told 76 of their 240 video
+  minutes remained, and given an analytics page reporting 8,400 views, a 71%
+  completion rate, a retention curve with an annotated cliff and four named
+  traffic sources. Two of those were PRNGs seeded with a project id; two were
+  literal arrays. All of it sat beside genuine zeros with nothing on screen
+  distinguishing the two.
+
+  What holds now: the seeded data lives in `lib/db/scripts/fixtures.ts`,
+  reachable from the seed script and the tests and from nothing that renders.
+  `lib/no-fixtures.test.ts` fails the build if anything under `app/`,
+  `components/` or `lib/` imports it, if `lib/app-data.ts` exports a value
+  rather than a type, or if `Math.random()` appears in rendering code.
+  `tests/e2e/` drives signup through publishing to analytics on a workspace
+  it creates itself, and checks every figure on the page against a direct SQL
+  count.
