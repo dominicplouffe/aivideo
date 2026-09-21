@@ -89,8 +89,12 @@ const REPLY_SCHEMA: Record<string, unknown> = {
         remove_fillers: { type: "boolean" },
         deleted_segments: {
           type: "array",
-          items: { type: "integer", minimum: 0 },
-          description: "Chapter ordinals to drop. Replaces the current set entirely.",
+          // No `minimum`: structured outputs accept only a subset of JSON
+          // Schema, and numeric bounds are outside it — the API refused the
+          // whole request with a 400. Bounds are checked where the proposal
+          // is read instead.
+          items: { type: "integer" },
+          description: "Chapter ordinals to drop, zero-based. Replaces the current set entirely.",
         },
         captions: { type: "boolean" },
         music: { type: "boolean" },
