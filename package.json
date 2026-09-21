@@ -15,7 +15,9 @@
     "test": "tsx --test \"lib/**/*.test.ts\" \"extension/**/*.test.ts\"",
     "worker": "tsx lib/render/scripts/worker.ts",
     "build:extension": "node scripts/build-extension.mjs",
-    "build:embed": "node scripts/build-embed.mjs"
+    "build:embed": "node scripts/build-embed.mjs",
+    "test:e2e": "tsx --test \"tests/e2e/**/*.test.ts\"",
+    "test:all": "scripts/test-env.sh"
   },
   "dependencies": {
     "drizzle-orm": "^0.45.2",

@@ -123,7 +123,11 @@ export function AnalyticsView({
     return worst > 0 ? { at, pct: worst } : null;
   }, [curve]);
 
-  if (projects.length === 0) {
+  // The empty state belongs to a workspace with nothing published *and*
+  // nothing measured. Gating on the published list alone meant that
+  // unpublishing a demo hid every view it had ever received — the numbers
+  // were still in the table, and the page claimed there was nothing to show.
+  if (projects.length === 0 && workspace.views === 0) {
     return (
       <div className="px-4 py-6 md:px-8">
         <Panel title="Analytics">
@@ -160,16 +164,23 @@ export function AnalyticsView({
     <div className="space-y-4 px-4 py-6 md:px-8">
       {/* controls */}
       <div className="flex flex-wrap items-center gap-2">
-        <select
-          value={project?.id ?? ""}
-          onChange={(e) => setParam("project", e.target.value)}
-          aria-label="Project"
-          className="h-9 min-w-0 flex-1 rounded-xl border border-[var(--line)] bg-ink-900 px-3 text-[0.8125rem] text-fg focus:border-iris-500/50 focus:outline-none sm:max-w-xs"
-        >
-          {projects.map((p) => (
-            <option key={p.id} value={p.id}>{p.title}</option>
-          ))}
-        </select>
+        {projects.length > 0 ? (
+          <select
+            value={project?.id ?? ""}
+            onChange={(e) => setParam("project", e.target.value)}
+            aria-label="Project"
+            className="h-9 min-w-0 flex-1 rounded-xl border border-[var(--line)] bg-ink-900 px-3 text-[0.8125rem] text-fg focus:border-iris-500/50 focus:outline-none sm:max-w-xs"
+          >
+            {projects.map((p) => (
+              <option key={p.id} value={p.id}>{p.title}</option>
+            ))}
+          </select>
+        ) : (
+          <p className="flex-1 text-[0.8125rem] text-fg-subtle">
+            Nothing is published right now. The figures below cover what was measured while it
+            was.
+          </p>
+        )}
         <div className="inline-flex items-center gap-0.5 rounded-xl border border-[var(--line)] bg-ink-900 p-0.5">
           {periods.map((p) => (
             <button
@@ -221,11 +232,15 @@ export function AnalyticsView({
         title="Retention curve"
         description="Per-second watched, overlaid on the transcript so a cliff is attributable to a sentence"
       >
-        {curve.length === 0 ? (
+        {curve.length === 0 || !project ? (
           <EmptyState
             icon="chart"
-            title="No views of this project yet"
-            description="The curve is drawn from how long each viewer actually watched. There is nothing to draw until somebody opens it."
+            title={project ? "No views of this project yet" : "No project selected"}
+            description={
+              project
+                ? "The curve is drawn from how long each viewer actually watched. There is nothing to draw until somebody opens it."
+                : "Publish a project to read its per-second retention."
+            }
           />
         ) : (
           <div className="p-5">
