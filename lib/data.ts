@@ -85,10 +85,17 @@ export async function getProjects(): Promise<Project[]> {
   if (!isDatabaseConfigured()) return fixtures.projects;
   try {
     const { listProjects, listProjectsForWorkspace } = await import("@/lib/db/repositories/projects");
-    const rows = actor
-      ? await listProjectsForWorkspace(actor.workspaceId)
-      : await listProjects(FIXTURE_WORKSPACE);
-    // An empty database means it has not been seeded. Falling back beats
+    if (actor) {
+      // A signed-in person sees their workspace and nothing else, empty
+      // included. The fallback below used to apply here too, so the first
+      // thing somebody saw after creating an account was another company's
+      // demo projects presented as their own — and an empty workspace is a
+      // legitimate state now that anybody can make one.
+      return listProjectsForWorkspace(actor.workspaceId);
+    }
+
+    const rows = await listProjects(FIXTURE_WORKSPACE);
+    // No actor and no rows means an unseeded database. Falling back beats
     // rendering an empty product and leaving the reader to guess why.
     return rows.length > 0 ? rows : fixtures.projects;
   } catch (error) {
@@ -118,10 +125,17 @@ export async function getProject(idOrSlug: string): Promise<Project | null> {
     // check that fails silently, by returning the wrong customer's data.
     const byId =
       looksLikeUuid && actor ? await repo.getProjectById(actor.workspaceId, idOrSlug) : null;
-    return byId ?? fixtures.getProject(idOrSlug) ?? null;
+    if (byId) return byId;
+
+    // No fixture fallback once somebody is signed in. Falling through to the
+    // seeded demos meant a member of a brand-new workspace could open
+    // `/app/studio/prj_4b91de` and be shown another company's project as
+    // though it were theirs.
+    if (actor) return null;
+    return fixtures.getProject(idOrSlug) ?? null;
   } catch (error) {
     console.error("[data] project read failed, serving fixtures:", error);
-    return fixtures.getProject(idOrSlug) ?? null;
+    return actor ? null : (fixtures.getProject(idOrSlug) ?? null);
   }
 }
 
@@ -291,4 +305,73 @@ function toViewRun(row: {
     createdAt: row.createdAt.toISOString(),
     actions: [],
   };
+}
+
+/**
+ * The workspace's real metered usage, for the sidebar meter.
+ *
+ * Returns null when there is nothing measured to show, and the meter renders
+ * nothing rather than a number. It used to display `164/240` from the
+ * fixtures on every page of the application — beside a project list served
+ * from Postgres — plus "resets in 10 days", which was a constant string.
+ */
+export async function getUsage(): Promise<{
+  usedSeconds: number;
+  allowanceSeconds: number;
+  fractionUsed: number;
+  periodStartsAt: string;
+  plan: string;
+} | null> {
+  const { allowed: may, actor } = await guard("billing.view");
+  if (!may || !actor || !isDatabaseConfigured()) return null;
+
+  try {
+    const { usage } = await import("@/lib/billing/metering");
+    const snapshot = await usage(actor.workspaceId);
+    return {
+      usedSeconds: snapshot.usedSeconds,
+      allowanceSeconds: snapshot.limitSeconds + snapshot.topupSeconds,
+      fractionUsed: snapshot.fractionUsed,
+      periodStartsAt: snapshot.periodStartsAt.toISOString(),
+      plan: snapshot.plan,
+    };
+  } catch (error) {
+    console.error("[data] usage read failed:", error);
+    return null;
+  }
+}
+
+/** The signed-in member, for the shell's avatar and workspace name. */
+export async function getViewer(): Promise<{
+  name: string;
+  email: string;
+  role: string;
+  workspaceName: string;
+  workspaceSlug: string;
+  plan: string;
+  region: string;
+} | null> {
+  if (!isDatabaseConfigured()) return null;
+  const actor = await getCurrentActor();
+  if (!actor) return null;
+
+  try {
+    const { getWorkspaceById } = await import("@/lib/db/repositories/workspace");
+    const ws = await getWorkspaceById(actor.workspaceId);
+    if (!ws) return null;
+    return {
+      // The Actor carries identity, not a display name — the shell falls
+      // back to the address rather than inventing one.
+      name: actor.email.split("@")[0],
+      email: actor.email,
+      role: actor.role,
+      workspaceName: ws.name,
+      workspaceSlug: ws.slug,
+      plan: ws.plan,
+      region: ws.region,
+    };
+  } catch (error) {
+    console.error("[data] viewer read failed:", error);
+    return null;
+  }
 }

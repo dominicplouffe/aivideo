@@ -20,8 +20,9 @@ const sizes = ["1–10", "11–50", "51–200", "201–1,000", "1,000+"];
 export function ContactForm() {
   const [topic, setTopic] = useState("demo");
   const [size, setSize] = useState("51–200");
-  const [sent, setSent] = useState(false);
+  const [sent, setSent] = useState<{ stored: boolean; slaHours: number } | null>(null);
   const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   if (sent) {
     return (
@@ -29,17 +30,29 @@ export function ContactForm() {
         <span className="inline-flex size-11 items-center justify-center rounded-xl bg-mint-500/15 text-mint-400">
           <Icon name="check" className="size-5" strokeWidth={2.4} />
         </span>
-        <h2 className="text-[1.375rem]">Got it — we will be in touch today</h2>
+        <h2 className="text-[1.375rem]">
+          {sent.stored ? "Got it — your message is with us" : "Thanks — but nothing was recorded"}
+        </h2>
         <p className="max-w-lg text-[0.9375rem] leading-relaxed text-fg-muted">
-          Someone from the team will reply within one business day, usually sooner. If it is
-          urgent, reply to the confirmation email and it will jump the queue.
+          {sent.stored ? (
+            <>
+              We aim to reply within {sent.slaHours} hours. What we promise is what this
+              deployment can actually do: your message is stored and somebody reads it.
+            </>
+          ) : (
+            <>
+              This deployment has no database configured, so there was nowhere to put your
+              message. Nothing was sent. Please email us directly rather than waiting on a
+              reply that is not coming.
+            </>
+          )}
         </p>
         <p className="text-[0.8125rem] text-fg-subtle">
           In the meantime, you can start recording without waiting for us.
         </p>
         <div className="mt-2 flex gap-3">
           <Button href="/signup" size="md">Start free now</Button>
-          <Button variant="outline" size="md" onClick={() => setSent(false)}>
+          <Button variant="outline" size="md" onClick={() => setSent(null)}>
             Send another
           </Button>
         </div>
@@ -50,14 +63,49 @@ export function ContactForm() {
   return (
     <Card className="p-6 md:p-8">
       <form
-        onSubmit={(e) => {
-          e.preventDefault();
+        onSubmit={async (event) => {
+          event.preventDefault();
           setPending(true);
-          // Wired to POST /api/contact in production; simulated here.
-          setTimeout(() => {
+          setError(null);
+
+          // A real request. The previous version waited 700ms and then told
+          // a stranger somebody would reply within one business day, having
+          // sent their message precisely nowhere.
+          const data = new FormData(event.currentTarget);
+          try {
+            const response = await fetch("/api/contact", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                email: String(data.get("email") ?? ""),
+                name: String(data.get("name") ?? ""),
+                company: String(data.get("company") ?? ""),
+                role: String(data.get("role") ?? ""),
+                message: String(data.get("message") ?? ""),
+                topic,
+                size,
+              }),
+            });
+            const body = (await response.json()) as {
+              ok?: boolean;
+              stored?: boolean;
+              slaHours?: number;
+              error?: string;
+              fields?: Record<string, string>;
+            };
+
+            if (!response.ok) {
+              // Field errors are more use than a generic failure, and the
+              // endpoint already returns them.
+              const fields = body.fields ? Object.values(body.fields).join(" ") : "";
+              throw new Error(fields || body.error || "That did not send.");
+            }
+            setSent({ stored: Boolean(body.stored), slaHours: body.slaHours ?? 8 });
+          } catch (cause) {
+            setError(cause instanceof Error ? cause.message : String(cause));
+          } finally {
             setPending(false);
-            setSent(true);
-          }, 700);
+          }
         }}
         className="flex flex-col gap-6"
       >
@@ -122,6 +170,15 @@ export function ContactForm() {
             className="mt-2 w-full resize-y rounded-xl border border-[var(--line)] bg-ink-900 px-4 py-3 text-[0.875rem] text-fg placeholder:text-fg-faint focus:border-iris-500/50 focus:outline-none"
           />
         </div>
+
+        {error ? (
+          <p
+            role="alert"
+            className="rounded-xl border border-rose-500/30 bg-rose-500/[0.07] px-4 py-3 text-[0.8125rem] text-rose-200"
+          >
+            {error}
+          </p>
+        ) : null}
 
         <div className="flex flex-col gap-3 border-t border-[var(--line)] pt-5 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-2xs text-fg-faint">

@@ -16,6 +16,7 @@ export async function getWorkspaceById(id: string) {
 function shape(ws: typeof s.workspaces.$inferSelect) {
   return {
     id: ws.id,
+    slug: ws.slug,
     name: ws.name,
     plan: ws.plan,
     region: ws.region.toUpperCase(),

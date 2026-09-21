@@ -174,7 +174,25 @@ export function ProjectLibrary({ projects }: { projects: Project[] }) {
 
       {/* results */}
       <div className="px-4 py-6 md:px-8">
-        {filtered.length === 0 ? (
+        {/*
+          An empty workspace and an over-filtered one are different problems
+          and want different answers. A new account used to be told "Nothing
+          matches those filters" and offered a Clear filters button that
+          changed nothing, because there was nothing to filter.
+        */}
+        {projects.length === 0 ? (
+          <EmptyState
+            icon="play"
+            title="Record your first walkthrough"
+            description="Capture a tab or a window, and DemoRiff transcribes it, cuts the dead air and turns it into a video and a written guide you can edit as text."
+            action={
+              <Button href="/app/new" size="sm">
+                <Icon name="plus" className="size-3.5" strokeWidth={2.4} />
+                New recording
+              </Button>
+            }
+          />
+        ) : filtered.length === 0 ? (
           <EmptyState
             icon="search"
             title="Nothing matches those filters"

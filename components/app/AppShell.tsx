@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
-import { cn } from "@/lib/utils";
+import { cn, relativeTime } from "@/lib/utils";
 import { LogoMark } from "@/components/brand/Logo";
 import { Icon, type IconName } from "@/components/ui/Icon";
 import { Button } from "@/components/ui/Button";
@@ -39,12 +39,54 @@ const admin: NavEntry[] = [
   { label: "Settings", href: "/app/settings", icon: "settings" },
 ];
 
-export function AppShell({ children }: { children: React.ReactNode }) {
+export interface ShellUsage {
+  usedSeconds: number;
+  allowanceSeconds: number;
+  fractionUsed: number;
+  periodStartsAt: string;
+  plan: string;
+}
+
+export interface ShellViewer {
+  name: string;
+  email: string;
+  role: string;
+  workspaceName: string;
+  workspaceSlug: string;
+  plan: string;
+  region: string;
+}
+
+export function AppShell({
+  children,
+  usage = null,
+  viewer = null,
+}: {
+  children: React.ReactNode;
+  /** Real metered usage, or null when there is nothing measured to show. */
+  usage?: ShellUsage | null;
+  /** The signed-in member, or null in fixture mode. */
+  viewer?: ShellViewer | null;
+}) {
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
 
   useEffect(() => setMobileOpen(false), [pathname]);
+
+  // Initials and a hue from the signed-in address, so two people do not get
+  // the same badge. Falls back to the fixture identity when nobody is signed
+  // in, which is the state the app runs in with no database.
+  const label = viewer?.name ?? currentUser.name;
+  const initials = label
+    .split(/[\s.]+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase() ?? "")
+    .join("");
+  const hue = viewer
+    ? [...viewer.email].reduce((n, c) => (n * 31 + c.charCodeAt(0)) % 360, 7)
+    : currentUser.hue;
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -83,23 +125,28 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </button>
         </div>
 
-        {/* workspace switcher */}
+        {/*
+          The workspace you are in.
+
+          A card, not a button. It was a button with a chevron-down — the
+          universal promise of a menu — and no `onClick`, because an account
+          belongs to exactly one workspace in this build. An affordance for
+          something that cannot happen is a worse lie than a plain label.
+        */}
         <div className="border-b border-[var(--line)] p-3">
-          <button
-            type="button"
-            className="flex w-full items-center gap-2.5 rounded-xl border border-[var(--line)] bg-ink-900 px-3 py-2.5 text-left transition-colors hover:border-[var(--line-strong)]"
-          >
+          <div className="flex w-full items-center gap-2.5 rounded-xl border border-[var(--line)] bg-ink-900 px-3 py-2.5 text-left">
             <span className="inline-flex size-7 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-cyan-400 to-iris-500 text-[0.6875rem] font-bold text-white">
-              M
+              {(viewer?.workspaceName ?? workspace.name).charAt(0).toUpperCase()}
             </span>
             <span className="min-w-0 flex-1">
               <span className="block truncate text-[0.8125rem] font-medium text-fg-strong">
-                {workspace.name}
+                {viewer?.workspaceName ?? workspace.name}
               </span>
-              <span className="block text-2xs text-fg-faint">{workspace.plan} · {workspace.region}</span>
+              <span className="block text-2xs text-fg-faint">
+                {viewer ? `${viewer.plan} · ${viewer.region.toUpperCase()}` : `${workspace.plan} · ${workspace.region}`}
+              </span>
             </span>
-            <Icon name="chevronDown" className="size-3.5 shrink-0 text-fg-faint" strokeWidth={2} />
-          </button>
+          </div>
         </div>
 
         {/* new project */}
@@ -116,24 +163,39 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <NavGroup label="Workspace" entries={admin} pathname={pathname} />
         </nav>
 
-        {/* usage */}
+        {/*
+          Metered usage, read from the workspace row.
+
+          This used to show 164/240 and "resets in 10 days" from the fixtures
+          — on every page, for every account, beside a project list served
+          from Postgres. Now it renders the real figures, or, when there is
+          nothing measured to show, only the link.
+        */}
         <div className="border-t border-[var(--line)] p-3">
           <div className="rounded-xl border border-[var(--line)] bg-ink-900 p-3">
-            <div className="flex items-center justify-between">
-              <span className="text-2xs text-fg-subtle">Video minutes</span>
-              <span className="font-mono text-2xs text-fg">
-                {workspace.minutes.used}/{workspace.minutes.total}
-              </span>
-            </div>
-            <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-ink-750">
-              <div
-                className="h-full rounded-full bg-[linear-gradient(90deg,var(--color-iris-500),var(--color-cyan-400))]"
-                style={{ width: `${(workspace.minutes.used / workspace.minutes.total) * 100}%` }}
-              />
-            </div>
-            <p className="mt-2 text-2xs text-fg-faint">
-              Guides unlimited · resets in 10 days
-            </p>
+            {usage ? (
+              <>
+                <div className="flex items-center justify-between">
+                  <span className="text-2xs text-fg-subtle">Video minutes</span>
+                  <span className="font-mono text-2xs text-fg">
+                    {Math.round(usage.usedSeconds / 60)}/{Math.round(usage.allowanceSeconds / 60)}
+                  </span>
+                </div>
+                <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-ink-750">
+                  <div
+                    className="h-full rounded-full bg-[linear-gradient(90deg,var(--color-iris-500),var(--color-cyan-400))]"
+                    style={{ width: `${Math.min(100, usage.fractionUsed * 100)}%` }}
+                  />
+                </div>
+                <p className="mt-2 text-2xs text-fg-faint">
+                  {usage.plan} plan · period began {relativeTime(usage.periodStartsAt)}
+                </p>
+              </>
+            ) : (
+              <p className="text-2xs text-fg-faint">
+                Usage is metered once a render completes.
+              </p>
+            )}
             <Link
               href="/app/billing"
               className="mt-2.5 inline-flex items-center gap-1 text-2xs font-medium text-iris-300 hover:text-iris-400"
@@ -187,23 +249,22 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             >
               <Icon name="lifebuoy" className="size-4.5" strokeWidth={1.7} />
             </Link>
-            <button
-              type="button"
-              className="relative inline-flex size-9 items-center justify-center rounded-lg text-fg-subtle transition-colors hover:bg-ink-850 hover:text-fg"
-              aria-label="Notifications"
-            >
-              <Icon name="bell" className="size-4.5" strokeWidth={1.7} />
-              <span className="absolute top-2 right-2 size-1.5 rounded-full bg-iris-400" />
-            </button>
+            {/*
+              The notification bell is gone rather than disabled. It had no
+              `onClick` and a permanent unread dot — a badge claiming unread
+              news that could never be opened, on every page.
+            */}
             <Link
               href="/app/settings"
               className="ml-1 inline-flex items-center gap-2 rounded-lg p-1 transition-colors hover:bg-ink-850"
+              aria-label={viewer ? `Signed in as ${viewer.email}` : "Settings"}
+              title={viewer?.email}
             >
               <span
                 className="inline-flex size-7 items-center justify-center rounded-full text-[0.6875rem] font-semibold text-white"
-                style={{ background: `linear-gradient(135deg, hsl(${currentUser.hue} 70% 55%), hsl(${currentUser.hue + 40} 70% 45%))` }}
+                style={{ background: `linear-gradient(135deg, hsl(${hue} 70% 55%), hsl(${hue + 40} 70% 45%))` }}
               >
-                {currentUser.name.split(" ").map((p) => p[0]).join("")}
+                {initials}
               </span>
             </Link>
           </div>

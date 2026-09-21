@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { AppShell } from "@/components/app/AppShell";
 import { authRequired, getCurrentActor } from "@/lib/auth/current";
+import { getUsage, getViewer } from "@/lib/data";
 
 export const metadata: Metadata = {
   title: { default: "Workspace", template: "%s · DemoRiff" },
@@ -30,5 +31,14 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     if (!actor) redirect("/signin?next=/app");
   }
 
-  return <AppShell>{children}</AppShell>;
+  // Read here rather than fetched by the shell: both are server reads the
+  // layout is already awaiting, and a usage meter that arrives a beat after
+  // the page is a number people watch change.
+  const [usage, viewer] = await Promise.all([getUsage(), getViewer()]);
+
+  return (
+    <AppShell usage={usage} viewer={viewer}>
+      {children}
+    </AppShell>
+  );
 }

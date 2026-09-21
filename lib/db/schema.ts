@@ -1051,3 +1051,35 @@ export const localeRelations = relations(locales, ({ one }) => ({
   project: one(projects, { fields: [locales.projectId], references: [projects.id] }),
   reviewer: one(members, { fields: [locales.reviewerId], references: [members.id] }),
 }));
+
+/**
+ * Enquiries from the public contact form.
+ *
+ * The form used to `setTimeout` for 700ms and then tell a stranger that
+ * somebody would reply within one business day. Nothing was sent, stored, or
+ * routed anywhere — which is a promise the product had no means of keeping.
+ * A row here is the smallest honest version of that promise: the message
+ * exists, and somebody can read it.
+ *
+ * Not workspace-scoped, because the sender does not have one yet. That is
+ * the entire point of the form.
+ */
+export const contactRequests = pgTable(
+  "contact_requests",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    email: text("email").notNull(),
+    name: text("name").notNull(),
+    company: text("company").notNull(),
+    role: text("role"),
+    topic: text("topic").notNull().default("demo"),
+    companySize: text("company_size"),
+    message: text("message"),
+    // Where this would be routed, recorded at submission so a later change
+    // to the routing table does not rewrite history.
+    routedTo: text("routed_to").notNull(),
+    handledAt: timestamp("handled_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("contact_requests_created_idx").on(t.createdAt)],
+);

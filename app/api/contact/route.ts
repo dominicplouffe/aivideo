@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+import { getDb, isDatabaseConfigured } from "@/lib/db/client";
+import { contactRequests } from "@/lib/db/schema";
 
 interface ContactPayload {
   email?: string;
@@ -33,17 +35,47 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Validation failed", fields: errors }, { status: 422 });
   }
 
-  // Delivery is intentionally not wired to a vendor in this repository.
-  // In production this enqueues to the CRM and the notification channel.
+  const topic = body.topic ?? "demo";
+  const routedTo = topic === "security" ? "security@demoriff.com" : "sales@demoriff.com";
+
+  // Stored, not just validated. There is still no mail vendor wired up here
+  // — that belongs to a deployment, not to this repository — but a message
+  // that lands in a table is a message somebody can answer, and that is the
+  // difference between a queue and a promise nobody can keep.
+  let stored = false;
+  if (isDatabaseConfigured()) {
+    try {
+      await getDb().insert(contactRequests).values({
+        email: body.email!.trim().toLowerCase(),
+        name: body.name!.trim(),
+        company: body.company!.trim(),
+        role: body.role?.trim() || null,
+        topic,
+        companySize: body.size?.trim() || null,
+        message: body.message?.trim() || null,
+        routedTo,
+      });
+      stored = true;
+    } catch (error) {
+      // Reported rather than swallowed. A form that says "sent" over a
+      // failed write is the bug this whole endpoint was rewritten to stop.
+      console.error("[contact] could not store the enquiry:", error);
+      return NextResponse.json(
+        { error: "We could not record that message. Please email us directly." },
+        { status: 503 },
+      );
+    }
+  }
+
   return NextResponse.json(
     {
       ok: true,
-      received: {
-        email: body.email,
-        topic: body.topic ?? "demo",
-        routedTo: body.topic === "security" ? "security@demoriff.com" : "sales@demoriff.com",
-      },
-      slaHours: body.topic === "security" ? 72 : 8,
+      // False when the deployment has no database. The form says something
+      // different in that case, because "we have your message" would not be
+      // true.
+      stored,
+      received: { email: body.email, topic, routedTo },
+      slaHours: topic === "security" ? 72 : 8,
     },
     { status: 202 },
   );

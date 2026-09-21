@@ -67,7 +67,6 @@ export function AuthForm({
 }) {
   const router = useRouter();
   const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
   const [name, setName] = useState("");
   const [pending, setPending] = useState(false);
   const [message, setMessage] = useState<string | null>(explain(error));
@@ -139,10 +138,17 @@ export function AuthForm({
           setPending(true);
           setMessage(null);
           try {
-            const response = await fetch("/api/auth", {
+            // Signup creates a workspace; sign-in looks one up. These used
+            // to be the same request, which is why "Create workspace"
+            // answered "No active account for that address."
+            const response = await fetch(isSignup ? "/api/auth/signup" : "/api/auth", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ email: email.trim().toLowerCase() }),
+              body: JSON.stringify(
+                isSignup
+                  ? { email: email.trim().toLowerCase(), name: name.trim() }
+                  : { email: email.trim().toLowerCase() },
+              ),
             });
             if (response.ok) {
               router.push(next ?? "/app");
@@ -172,28 +178,22 @@ export function AuthForm({
           autoComplete="email"
           required
         />
-        {isSignup ? (
-        <Input
-          label="Password"
-          type="password"
-          value={password}
-          onChange={setPassword}
-          placeholder="At least 12 characters"
-          autoComplete="new-password"
-          required
-        />
-        ) : null}
 
         <Button type="submit" size="lg" className="w-full" disabled={pending}>
           {pending ? "One moment…" : isSignup ? "Create workspace" : "Sign in"}
           {pending ? null : <Icon name="arrowRight" className="size-4" strokeWidth={2} />}
         </Button>
-        {isSignup ? null : (
-          <p className="text-2xs leading-relaxed text-fg-faint">
-            Email sign-in is a development convenience and is refused on
-            production deployments. Single sign-on is the way in.
-          </p>
-        )}
+        <p className="text-2xs leading-relaxed text-fg-faint">
+          {/*
+            No password field, and that is deliberate rather than unfinished.
+            This build authenticates by single sign-on, with email-only entry
+            as a development convenience — so a password box would take a
+            credential nothing here can check, and leave somebody believing
+            it was protecting their account.
+          */}
+          This build signs you in with single sign-on. Email-only entry is a development
+          convenience and is refused on production deployments — there is no password to set.
+        </p>
       </form>
 
       {isSignup ? (
