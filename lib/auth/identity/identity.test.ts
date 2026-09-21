@@ -110,7 +110,7 @@ describe("the nonce cookie", () => {
   });
 
   it("is read back from a request, and cleared with a zero Max-Age", () => {
-    const request = new Request("https://demoriff.com/api/auth/sso/callback", {
+    const request = new Request("https://demoriff.com/api/auth/authkit/callback", {
       headers: { cookie: `other=1; ${serializeNonceCookie("xyz").split(";")[0]}` },
     });
     assert.equal(readNonceCookie(request), "xyz");

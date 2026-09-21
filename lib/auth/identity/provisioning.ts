@@ -388,6 +388,11 @@ async function provisionSelfServe(profile: AuthProfile): Promise<ProvisionResult
     .orderBy(desc(s.members.lastActiveAt), s.members.createdAt, s.members.id);
 
   if (memberships.length === 0) {
+    // Including somebody whose only membership was deactivated. That is
+    // deliberate and is not the same as the enterprise path's refusal: an
+    // offboarding removes a person from *that workspace*, not from the
+    // product, and giving them a workspace of their own undoes none of it.
+    // The old row stays deactivated and they cannot reach it.
     return signUp(profile);
   }
 
