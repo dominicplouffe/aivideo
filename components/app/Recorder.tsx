@@ -520,7 +520,7 @@ function RecordFlow({
                 id="take-name"
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
-                placeholder="Shipments walkthrough"
+                placeholder="Name this recording"
                 className="h-11 w-full rounded-xl border border-[var(--line)] bg-ink-900 px-3.5 text-[0.875rem] text-fg placeholder:text-fg-faint focus:border-iris-500/50 focus:outline-none"
               />
             </div>
@@ -761,7 +761,7 @@ function ImportFlow({ onDone }: { onDone: (id: string) => void }) {
               id="import-name"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="Shipments walkthrough"
+              placeholder="Name this recording"
               className="mt-1.5 h-11 w-full rounded-xl border border-[var(--line)] bg-ink-900 px-3.5 text-[0.875rem] text-fg placeholder:text-fg-faint focus:border-iris-500/50 focus:outline-none"
             />
           </div>
@@ -1023,7 +1023,7 @@ function SetupSidebar({
           <input
             value={title}
             onChange={(e) => setTitle(e.target.value)}
-            placeholder="Rate shopping — create a shipment"
+            placeholder="What this recording shows"
             className="h-10 w-full rounded-xl border border-[var(--line)] bg-ink-900 px-3.5 text-[0.8125rem] text-fg placeholder:text-fg-faint focus:border-iris-500/50 focus:outline-none"
           />
         </Field>

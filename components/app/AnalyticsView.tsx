@@ -6,6 +6,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { cn, formatNumber, formatDuration } from "@/lib/utils";
 import { Icon } from "@/components/ui/Icon";
 import { Panel, StatTile, Sparkline, EmptyState } from "./Shared";
+import { periods } from "@/lib/analytics/periods";
 
 /**
  * The analytics screen.
@@ -21,14 +22,6 @@ import { Panel, StatTile, Sparkline, EmptyState } from "./Shared";
  * The component no longer has a source of data of its own, which is the
  * property that keeps it honest: there is nothing here to fall back to.
  */
-
-/** Label and the number of days it covers, so the switcher can mean it. */
-export const periods = [
-  { label: "7 days", days: 7 },
-  { label: "30 days", days: 30 },
-  { label: "90 days", days: 90 },
-  { label: "12 months", days: 365 },
-] as const;
 
 export interface AnalyticsProject {
   id: string;

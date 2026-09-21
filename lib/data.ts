@@ -328,12 +328,25 @@ export async function getViewer(): Promise<{
 
   try {
     const { getWorkspaceById } = await import("@/lib/db/repositories/workspace");
-    const ws = await getWorkspaceById(actor.workspaceId);
+    const { getDb } = await import("@/lib/db/client");
+    const schema = await import("@/lib/db/schema");
+    const { eq } = await import("drizzle-orm");
+
+    const [ws, [member]] = await Promise.all([
+      getWorkspaceById(actor.workspaceId),
+      getDb()
+        .select({ name: schema.members.name })
+        .from(schema.members)
+        .where(eq(schema.members.id, actor.memberId))
+        .limit(1),
+    ]);
     if (!ws) return null;
     return {
-      // The Actor carries identity, not a display name — the shell falls
-      // back to the address rather than inventing one.
-      name: actor.email.split("@")[0],
+      // The name they gave at signup. The Actor carries identity rather than
+      // a display name, so this used to read the address's local part — and
+      // somebody who signed up as "Dominic Plouffe" was greeted as
+      // "dominic". The address stays the fallback when a row has no name.
+      name: member?.name?.trim() || actor.email.split("@")[0],
       email: actor.email,
       role: actor.role,
       workspaceName: ws.name,

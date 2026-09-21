@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/Button";
 import { LogoMark } from "@/components/brand/Logo";
 import { MockApp } from "@/components/marketing/MockApp";
 import type { Project } from "@/lib/app-data";
+import { WatchTracker } from "./WatchTracker";
 
 export function SharePage({
   project,
@@ -83,7 +84,7 @@ export function SharePage({
                 else: no content on the page was localised by it and nothing
                 was requested. It returns when a translated render exists to
                 switch to. */}
-            <Button href="/contact" size="sm">Book a demo</Button>
+            <Button href="/contact" size="sm" data-cta>Book a demo</Button>
           </div>
         </div>
       </header>
@@ -138,6 +139,12 @@ export function SharePage({
                     className="absolute inset-0 size-full bg-black"
                     onTimeUpdate={(e) => setTime(e.currentTarget.currentTime)}
                   />
+                ) : null}
+                {/* Measurement, once the viewer leaves. Nothing recorded a
+                    view of this page before: somebody could publish a demo,
+                    watch it, and find zero views on their analytics. */}
+                {videoUrl ? (
+                  <WatchTracker projectId={project.id} videoRef={video} />
                 ) : (
                   <div
                     className="absolute inset-0 transition-transform duration-700"
@@ -272,7 +279,7 @@ export function SharePage({
               <p className="mt-1.5 text-[0.8125rem] leading-relaxed text-fg-subtle">
                 Twenty minutes with a solutions engineer, priced against your actual volume.
               </p>
-              <Button href="/contact" size="md" className="mt-4 w-full">
+              <Button href="/contact" size="md" className="mt-4 w-full" data-cta>
                 Book a demo
               </Button>
               <Button href="/signup" variant="outline" size="md" className="mt-2 w-full">

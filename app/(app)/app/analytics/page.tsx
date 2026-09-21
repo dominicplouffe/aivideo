@@ -6,15 +6,10 @@ import {
   getIdentifiedAccounts,
 } from "@/lib/data";
 import { PageHeader } from "@/components/app/Shared";
-import { AnalyticsView, periods } from "@/components/app/AnalyticsView";
+import { AnalyticsView } from "@/components/app/AnalyticsView";
+import { windowDays } from "@/lib/analytics/periods";
 
 export const metadata: Metadata = { title: "Analytics" };
-
-/** The window, from the URL, so the switcher survives a reload and a share. */
-function windowDays(raw: string | undefined): number {
-  const n = Number(raw);
-  return periods.some((p) => p.days === n) ? n : 30;
-}
 
 export default async function AnalyticsPage({
   searchParams,
