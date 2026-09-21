@@ -19,7 +19,14 @@ import type { AuthProfile, AuthorizationRequest, IdentityProvider } from "./type
 export class MockIdentity implements IdentityProvider {
   readonly name = "mock";
 
-  constructor(private readonly organizationId?: string) {
+  private readonly organizationId?: string;
+
+  constructor(organizationId?: string) {
+    // `DEMORIFF_SSO_MOCK_ORGANIZATION=` in an env file is an empty string,
+    // not an absent one, and an empty organization is no organization. Left
+    // as-is it rides along in every mock claim and reads like an enterprise
+    // login that happens to be falsy everywhere it is checked.
+    this.organizationId = organizationId?.trim() || undefined;
     if (process.env.NODE_ENV === "production") {
       throw new Error("The mock identity provider must never run in production.");
     }
