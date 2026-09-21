@@ -134,6 +134,24 @@ export class LocalStorage implements StorageAdapter {
     return new Uint8Array(await fs.readFile(this.abs(key)));
   }
 
+  /**
+   * Reads only the requested bytes off disk.
+   *
+   * A file handle rather than `readFile(...).slice(...)`: the point of a
+   * range request is to avoid holding a gigabyte in memory to answer it.
+   */
+  async getRange(key: StorageKey, start: number, end: number): Promise<Uint8Array> {
+    const handle = await fs.open(this.abs(key), "r");
+    try {
+      const length = Math.max(0, end - start + 1);
+      const buffer = Buffer.allocUnsafe(length);
+      const { bytesRead } = await handle.read(buffer, 0, length, start);
+      return new Uint8Array(buffer.subarray(0, bytesRead));
+    } finally {
+      await handle.close();
+    }
+  }
+
   async signedReadUrl(key: StorageKey, ttlSeconds = 900): Promise<SignedUrl> {
     const resolved = resolveKey(key);
     const expiresAt = new Date(Date.now() + ttlSeconds * 1000);

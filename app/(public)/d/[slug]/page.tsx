@@ -1,11 +1,18 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { projects, getProject } from "@/lib/app-data";
+import { resolveShare } from "@/lib/share/resolve";
 import { SharePage } from "@/components/app/SharePage";
 
-export function generateStaticParams() {
-  return projects.filter((p) => p.status === "published").map((p) => ({ slug: p.slug }));
-}
+/**
+ * A public share page.
+ *
+ * Dynamic rather than statically generated. It used to pre-render from the
+ * fixtures at build time, which meant a project somebody published after the
+ * deploy had no page at all — and a project they *un*published still did.
+ * The published flag has to be read when the page is served, because that is
+ * the only moment at which it is current.
+ */
+export const dynamic = "force-dynamic";
 
 export async function generateMetadata({
   params,
@@ -13,19 +20,27 @@ export async function generateMetadata({
   params: Promise<{ slug: string }>;
 }): Promise<Metadata> {
   const { slug } = await params;
-  const p = getProject(slug);
-  if (!p) return {};
+  const share = await resolveShare(slug);
+  if (!share) return {};
+
   return {
-    title: p.title,
-    description: p.description,
-    openGraph: { type: "video.other", title: p.title, description: p.description },
+    title: share.project.title,
+    description: share.project.description,
+    openGraph: {
+      type: "video.other",
+      title: share.project.title,
+      description: share.project.description,
+    },
     robots: { index: true, follow: true },
   };
 }
 
 export default async function PublicSharePage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
-  const project = getProject(slug);
-  if (!project) notFound();
-  return <SharePage project={project} />;
+  const share = await resolveShare(slug);
+  // The same answer for "never existed" and "not published": a different one
+  // tells a stranger which slugs a company is sitting on.
+  if (!share) notFound();
+
+  return <SharePage project={share.project} videoUrl={share.videoUrl} />;
 }

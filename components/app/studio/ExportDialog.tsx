@@ -46,6 +46,8 @@ export function ExportDialog({
   const [progress, setProgress] = useState(0);
   const [copied, setCopied] = useState(false);
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
+  const [published, setPublished] = useState(project.status === "published");
+  const [publishing, setPublishing] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
   const [stalled, setStalled] = useState(false);
 
@@ -120,6 +122,32 @@ export function ExportDialog({
     };
 
     timer.current = window.setTimeout(poll, 1200);
+  };
+
+  /**
+   * Puts the rendered video on its public URL, or takes it back down.
+   *
+   * A separate action from rendering, and reversible in one click. The
+   * dialog used to announce that outputs were "published" the moment an
+   * encode finished, which is both untrue and the wrong default: finishing
+   * a file is not a decision to put somebody's product on the internet.
+   */
+  const togglePublish = async () => {
+    setPublishing(true);
+    try {
+      const response = await fetch(`/api/projects/${project.id}/publish`, {
+        method: published ? "DELETE" : "POST",
+      });
+      if (!response.ok) {
+        const body = (await response.json().catch(() => ({}))) as { error?: string };
+        throw new Error(body.error ?? "That did not work.");
+      }
+      setPublished(!published);
+    } catch (cause) {
+      setFailure(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setPublishing(false);
+    }
   };
 
   const timer = useRef<number | null>(null);
@@ -310,11 +338,34 @@ export function ExportDialog({
               ) : null}
 
               <Section label="Share link">
+                <div className="mb-2.5 flex items-center gap-3 rounded-xl border border-[var(--line)] bg-ink-950 px-3.5 py-2.5">
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-[0.8125rem] text-fg">
+                      {published ? "This demo is live" : "Not shared yet"}
+                    </span>
+                    <span className="block text-2xs text-fg-faint">
+                      {published
+                        ? "Anyone with the link can watch it."
+                        : "The link below returns a 404 until you publish."}
+                    </span>
+                  </span>
+                  <Button
+                    variant={published ? "outline" : "primary"}
+                    size="sm"
+                    disabled={publishing}
+                    onClick={togglePublish}
+                  >
+                    {publishing ? "Working…" : published ? "Unpublish" : "Publish"}
+                  </Button>
+                </div>
                 <div className="flex gap-2">
                   <input
                     readOnly
                     value={shareUrl}
-                    className="h-10 flex-1 rounded-xl border border-[var(--line)] bg-ink-950 px-3.5 font-mono text-[0.75rem] text-fg"
+                    className={cn(
+                      "h-10 flex-1 rounded-xl border border-[var(--line)] bg-ink-950 px-3.5 font-mono text-[0.75rem]",
+                      published ? "text-fg" : "text-fg-faint",
+                    )}
                   />
                   <Button
                     variant="secondary"
@@ -333,10 +384,17 @@ export function ExportDialog({
 
               <Section label="Embed">
                 <pre className="overflow-x-auto rounded-xl border border-[var(--line)] bg-ink-950 p-3.5 font-mono text-[0.6875rem] leading-relaxed text-fg-muted">
-{`<div data-demoriff="${project.id}" data-aspect="16:9"></div>
-<script src="https://embed.demoriff.com/v1.js" async></script>`}
+{`<iframe src="${site.url}/embed/${project.slug}"
+        width="100%" style="aspect-ratio:16/9;border:0"
+        allowfullscreen title="${project.title}"></iframe>`}
                 </pre>
               </Section>
+
+              {failure ? (
+                <p className="rounded-xl border border-rose-500/30 bg-rose-500/[0.07] px-3.5 py-2.5 text-2xs text-rose-200">
+                  {failure}
+                </p>
+              ) : null}
 
               {videoUrl ? (
                 <Section label="File">

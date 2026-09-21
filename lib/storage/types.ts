@@ -72,6 +72,15 @@ export interface StorageAdapter {
   /** Reads a whole object. For small derived assets. */
   get(key: StorageKey): Promise<Uint8Array>;
 
+  /**
+   * Reads a byte range, inclusive of both ends, as HTTP defines it.
+   *
+   * Optional because not every adapter needs it, but a video route that
+   * lacks it has to hold a whole file in memory to serve the first frame —
+   * and without range replies a browser cannot seek at all.
+   */
+  getRange?(key: StorageKey, start: number, end: number): Promise<Uint8Array>;
+
   /** A time-limited read URL. Never returns a permanent public URL. */
   signedReadUrl(key: StorageKey, ttlSeconds?: number): Promise<SignedUrl>;
 

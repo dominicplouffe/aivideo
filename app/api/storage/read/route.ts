@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getStorage, LocalStorage, resolveKey } from "@/lib/storage";
+import { mediaResponse } from "@/lib/api/media";
 
 /**
  * Serves a signed read URL minted by the local storage adapter.
@@ -45,12 +46,15 @@ export async function GET(request: Request) {
   // The key is signed, so it cannot be tampered with — but it is still run
   // through the same resolver every other path takes, because a signature
   // proves who wrote a path, not that the path is safe.
-  let bytes: Uint8Array;
+  const [workspaceId, ...rest] = key.split("/");
+  const parsed = { workspaceId, path: rest.join("/") };
+
+  let totalBytes: number;
   try {
-    const [workspaceId, ...rest] = key.split("/");
-    const parsed = { workspaceId, path: rest.join("/") };
     resolveKey(parsed);
-    bytes = await storage.get(parsed);
+    const stat = await storage.head(parsed);
+    if (!stat) return NextResponse.json({ error: "Not found." }, { status: 404 });
+    totalBytes = stat.bytes;
   } catch {
     return NextResponse.json({ error: "Not found." }, { status: 404 });
   }
@@ -64,14 +68,15 @@ export async function GET(request: Request) {
     : extension === "mp3" ? "audio/mpeg"
     : "application/octet-stream";
 
-  return new NextResponse(new Uint8Array(bytes) as unknown as BodyInit, {
-    headers: {
-      "Content-Type": contentType,
-      "Content-Length": String(bytes.byteLength),
-      // Cacheable only until the signature expires, and never by a shared
-      // cache: the URL is the credential.
-      "Cache-Control": `private, max-age=${Math.max(0, Math.floor((exp - Date.now()) / 1000))}`,
-      "Content-Disposition": `inline; filename="${key.split("/").pop() ?? "download"}"`,
-    },
+  return mediaResponse({
+    storage,
+    key: parsed,
+    totalBytes,
+    contentType,
+    request,
+    // Cacheable only until the signature expires, and never by a shared
+    // cache: the URL is the credential.
+    cacheControl: `private, max-age=${Math.max(0, Math.floor((exp - Date.now()) / 1000))}`,
+    filename: key.split("/").pop() ?? "download",
   });
 }

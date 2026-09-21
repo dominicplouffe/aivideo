@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { cn, formatDuration } from "@/lib/utils";
 import { Icon } from "@/components/ui/Icon";
@@ -9,14 +9,63 @@ import { LogoMark } from "@/components/brand/Logo";
 import { MockApp } from "@/components/marketing/MockApp";
 import { localeMatrix, type Project } from "@/lib/app-data";
 
-export function SharePage({ project }: { project: Project }) {
+export function SharePage({
+  project,
+  videoUrl = null,
+}: {
+  project: Project;
+  /**
+   * The rendered file, when one has been published.
+   *
+   * Null for the seeded demo projects, which have no footage behind them —
+   * those keep the illustrated player. Everything else gets a real one.
+   */
+  videoUrl?: string | null;
+}) {
   const [tab, setTab] = useState<"video" | "guide" | "tour">("video");
   const [locale, setLocale] = useState("en-US");
   const [chapter, setChapter] = useState(0);
   const [copied, setCopied] = useState(false);
+  const [time, setTime] = useState(0);
+  const video = useRef<HTMLVideoElement>(null);
 
   const available = localeMatrix.filter((l) => project.locales.includes(l.code));
   const seg = project.segments[chapter];
+
+  /**
+   * Chapter starts on the *finished* timeline.
+   *
+   * `segment.start` is a source timestamp, and the published video has had
+   * the cuts taken out of it — seeking to a source timestamp would land
+   * further and further past the intended chapter as the video goes on.
+   */
+  const chapterStarts = (() => {
+    const starts: number[] = [];
+    let t = 0;
+    for (const segment of project.segments) {
+      starts.push(t);
+      t += segment.words.filter((w) => !w.cut).reduce((n, w) => n + w.d, 0) + 0.35;
+    }
+    return starts;
+  })();
+
+  // Following the video rather than a timer: the chapter list highlights
+  // where the viewer actually is, including after they drag the scrubber.
+  useEffect(() => {
+    if (!videoUrl) return;
+    let next = 0;
+    for (let i = 0; i < chapterStarts.length; i++) if (time >= chapterStarts[i]) next = i;
+    setChapter(next);
+  });
+
+  const seekToChapter = (index: number) => {
+    setChapter(index);
+    const el = video.current;
+    if (el && chapterStarts[index] !== undefined) {
+      el.currentTime = chapterStarts[index];
+      void el.play().catch(() => {});
+    }
+  };
 
   return (
     <div className="min-h-dvh bg-ink-1000">
@@ -86,17 +135,32 @@ export function SharePage({ project }: { project: Project }) {
             {/* player */}
             <div className="mt-4 overflow-hidden rounded-2xl border border-[var(--line-strong)] bg-[#0B0D14] shadow-[0_24px_70px_-30px_rgba(0,0,0,0.9)]">
               <div className="relative aspect-video">
-                <div
-                  className="absolute inset-0 transition-transform duration-700"
-                  style={{
-                    transform: `scale(${seg?.zoom?.scale ?? 1})`,
-                    transformOrigin: `${seg?.zoom?.x ?? 50}% ${seg?.zoom?.y ?? 50}%`,
-                  }}
-                >
-                  <MockApp highlight={Boolean(seg?.zoom && seg.zoom.scale > 1.6)} />
-                </div>
+                {videoUrl ? (
+                  // The published file, with the browser's own controls. The
+                  // zoom and the cuts are already encoded into it — this is
+                  // the finished video, not a re-creation of one.
+                  <video
+                    ref={video}
+                    src={videoUrl}
+                    controls
+                    playsInline
+                    preload="metadata"
+                    className="absolute inset-0 size-full bg-black"
+                    onTimeUpdate={(e) => setTime(e.currentTarget.currentTime)}
+                  />
+                ) : (
+                  <div
+                    className="absolute inset-0 transition-transform duration-700"
+                    style={{
+                      transform: `scale(${seg?.zoom?.scale ?? 1})`,
+                      transformOrigin: `${seg?.zoom?.x ?? 50}% ${seg?.zoom?.y ?? 50}%`,
+                    }}
+                  >
+                    <MockApp highlight={Boolean(seg?.zoom && seg.zoom.scale > 1.6)} />
+                  </div>
+                )}
 
-                {tab === "tour" ? (
+                {tab === "tour" && !videoUrl ? (
                   <>
                     <div className="absolute inset-0 bg-ink-1000/45" />
                     <div
@@ -111,40 +175,50 @@ export function SharePage({ project }: { project: Project }) {
                   </>
                 ) : null}
 
-                <div className="absolute top-3 left-3 flex items-center gap-1.5 rounded-md bg-black/45 px-2 py-1 backdrop-blur-sm">
-                  <span className="size-3 rounded-[4px] bg-gradient-to-br from-cyan-400 to-iris-500" />
-                  <span className="text-[0.5rem] font-semibold text-white/85">Meridian</span>
-                </div>
+                {/*
+                  Everything below is the illustrated player, and it only
+                  runs when there is no real one. Captions and a brand badge
+                  are burned into a rendered file; drawing a second copy of
+                  them over the top would double them.
+                */}
+                {!videoUrl ? (
+                  <>
+                    <div className="absolute top-3 left-3 flex items-center gap-1.5 rounded-md bg-black/45 px-2 py-1 backdrop-blur-sm">
+                      <span className="size-3 rounded-[4px] bg-gradient-to-br from-cyan-400 to-iris-500" />
+                      <span className="text-[0.5rem] font-semibold text-white/85">Meridian</span>
+                    </div>
 
-                <div className="absolute inset-x-0 bottom-9 flex justify-center px-6">
-                  <span className="max-w-[80%] rounded-lg bg-black/65 px-3 py-1.5 text-center text-[0.75rem] leading-snug font-medium text-white/92 backdrop-blur-sm">
-                    {seg?.words.filter((w) => !w.cut).slice(0, 12).map((w) => w.w).join(" ")}
-                  </span>
-                </div>
+                    <div className="absolute inset-x-0 bottom-9 flex justify-center px-6">
+                      <span className="max-w-[80%] rounded-lg bg-black/65 px-3 py-1.5 text-center text-[0.75rem] leading-snug font-medium text-white/92 backdrop-blur-sm">
+                        {seg?.words.filter((w) => !w.cut).slice(0, 12).map((w) => w.w).join(" ")}
+                      </span>
+                    </div>
 
-                <button
-                  type="button"
-                  className="absolute inset-0 flex items-center justify-center bg-black/15 transition-colors hover:bg-black/25"
-                  aria-label="Play"
-                >
-                  <span className="inline-flex size-14 items-center justify-center rounded-full bg-black/55 backdrop-blur-sm">
-                    <Icon name="play" className="size-5 text-white/92" />
-                  </span>
-                </button>
+                    <button
+                      type="button"
+                      className="absolute inset-0 flex items-center justify-center bg-black/15 transition-colors hover:bg-black/25"
+                      aria-label="Play"
+                    >
+                      <span className="inline-flex size-14 items-center justify-center rounded-full bg-black/55 backdrop-blur-sm">
+                        <Icon name="play" className="size-5 text-white/92" />
+                      </span>
+                    </button>
 
-                <div className="absolute inset-x-0 bottom-0 flex items-center gap-2.5 bg-gradient-to-t from-black/80 to-transparent px-3 pt-6 pb-2.5">
-                  <Icon name="play" className="size-3.5 text-white/85" />
-                  <span className="h-[3px] flex-1 overflow-hidden rounded-full bg-white/18">
-                    <span
-                      className="block h-full rounded-full bg-gradient-to-r from-iris-400 to-cyan-400 transition-[width] duration-500"
-                      style={{ width: `${((chapter + 1) / project.segments.length) * 100}%` }}
-                    />
-                  </span>
-                  <span className="font-mono text-[0.5625rem] text-white/65">
-                    {formatDuration((project.durationSec * (chapter + 1)) / project.segments.length)} /{" "}
-                    {formatDuration(project.durationSec)}
-                  </span>
-                </div>
+                    <div className="absolute inset-x-0 bottom-0 flex items-center gap-2.5 bg-gradient-to-t from-black/80 to-transparent px-3 pt-6 pb-2.5">
+                      <Icon name="play" className="size-3.5 text-white/85" />
+                      <span className="h-[3px] flex-1 overflow-hidden rounded-full bg-white/18">
+                        <span
+                          className="block h-full rounded-full bg-gradient-to-r from-iris-400 to-cyan-400 transition-[width] duration-500"
+                          style={{ width: `${((chapter + 1) / project.segments.length) * 100}%` }}
+                        />
+                      </span>
+                      <span className="font-mono text-[0.5625rem] text-white/65">
+                        {formatDuration((project.durationSec * (chapter + 1)) / project.segments.length)} /{" "}
+                        {formatDuration(project.durationSec)}
+                      </span>
+                    </div>
+                  </>
+                ) : null}
               </div>
             </div>
 
@@ -158,7 +232,7 @@ export function SharePage({ project }: { project: Project }) {
                   <li key={s.id}>
                     <button
                       type="button"
-                      onClick={() => setChapter(i)}
+                      onClick={() => seekToChapter(i)}
                       className={cn(
                         "flex w-full items-center gap-2.5 rounded-xl border px-3 py-2.5 text-left transition-colors",
                         chapter === i

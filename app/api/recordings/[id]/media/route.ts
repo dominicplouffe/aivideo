@@ -3,6 +3,7 @@ import { isDatabaseConfigured } from "@/lib/db/client";
 import { needsDatabase, requireActor } from "@/lib/api/guard";
 import { attachMedia, getRecording, mediaKeyFor } from "@/lib/db/repositories/recordings";
 import { getStorage } from "@/lib/storage";
+import { mediaResponse } from "@/lib/api/media";
 import { recordQuietly } from "@/lib/audit/log";
 
 /**
@@ -108,27 +109,25 @@ export async function GET(request: Request, context: Context) {
     return NextResponse.json({ error: "No such recording." }, { status: 404 });
   }
 
-  let media: Uint8Array;
-  try {
-    media = await getStorage().get({
-      workspaceId: guard.actor.workspaceId,
-      path: recording.mediaKey,
-    });
-  } catch {
+  const storage = getStorage();
+  const key = { workspaceId: guard.actor.workspaceId, path: recording.mediaKey };
+
+  const stat = await storage.head(key).catch(() => null);
+  if (!stat) {
     // The row says there are bytes and there are not. Reported as a 404
     // rather than a 500: from the caller's side the media is missing either
     // way, and a stack trace tells them nothing they can act on.
     return NextResponse.json({ error: "That recording's media is missing." }, { status: 404 });
   }
 
-  return new NextResponse(new Uint8Array(media), {
-    headers: {
-      "Content-Type": "video/webm",
-      "Content-Length": String(media.byteLength),
-      // Private: this is a recording of a customer's product, and a shared
-      // cache is somewhere it must never sit.
-      "Cache-Control": "private, max-age=3600",
-      "Accept-Ranges": "none",
-    },
+  return mediaResponse({
+    storage,
+    key,
+    totalBytes: stat.bytes,
+    contentType: "video/webm",
+    request,
+    // Private: this is a recording of a customer's product, and a shared
+    // cache is somewhere it must never sit.
+    cacheControl: "private, max-age=3600",
   });
 }
