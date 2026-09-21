@@ -22,10 +22,26 @@ export interface TranscriptionResult {
   words: TranscriptWordResult[];
 }
 
+/**
+ * Where the audio comes from.
+ *
+ * A URL only works when the vendor can reach it, and ours usually cannot be:
+ * a recording lives in workspace-scoped storage behind a session cookie, or
+ * on a laptop running `next dev`. Posting the bytes is the path that works
+ * everywhere, so it is the one the pipeline uses; the URL form stays for the
+ * vendors that prefer to fetch, and for media that is genuinely public.
+ */
+export type TranscriptionSource =
+  | { url: string }
+  | { bytes: Uint8Array; contentType: string };
+
 export interface TranscriptionProvider {
   readonly name: string;
   /** Word-level alignment is required — segment-level is not sufficient. */
-  transcribe(input: { mediaUrl: string; languageHint?: string }): Promise<TranscriptionResult>;
+  transcribe(input: {
+    media: TranscriptionSource;
+    languageHint?: string;
+  }): Promise<TranscriptionResult>;
 }
 
 export interface SynthesisRequest {

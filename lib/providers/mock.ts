@@ -2,7 +2,7 @@ import { seeded } from "@/lib/utils";
 import { heuristicDirection } from "./direction";
 import type {
   DirectionProvider, MaskingProvider, ProviderSet, RenderJob, RenderProvider,
-  SynthesisProvider, TranscriptionProvider, TranslationProvider,
+  SynthesisProvider, TranscriptionProvider, TranscriptionSource, TranslationProvider,
 } from "./types";
 
 /**
@@ -11,10 +11,19 @@ import type {
  * network — which is what makes the app runnable with no credentials.
  */
 
+/** A stable seed for either shape of source, so a take always mocks the same. */
+function seedFor(media: TranscriptionSource): string {
+  if ("url" in media) return media.url;
+  // Length plus a sample of the head: enough that two different takes get
+  // two different transcripts, cheap enough that a 500MB blob is not hashed.
+  const head = Array.from(media.bytes.slice(0, 64)).join(",");
+  return `${media.bytes.byteLength}:${head}`;
+}
+
 export const mockTranscription: TranscriptionProvider = {
   name: "mock-transcription",
-  async transcribe({ mediaUrl, languageHint = "en-US" }) {
-    const rand = seeded(mediaUrl);
+  async transcribe({ media, languageHint = "en-US" }) {
+    const rand = seeded(seedFor(media));
     const source =
       "So um let me show you how this works. You click the primary action here and the result " +
       "appears immediately, which is basically the whole feature.";

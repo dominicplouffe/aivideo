@@ -11,24 +11,36 @@ import { Canvas, TimelineStrip } from "./Canvas";
 import { Transcript } from "./Transcript";
 import { Inspector } from "./Inspector";
 import { ExportDialog } from "./ExportDialog";
-import { buildTimeline, timelineDuration, wordAt, type EditState } from "./types";
+import {
+  buildTimeline,
+  hydrateEditState,
+  serializeEditState,
+  sourceTimeAt,
+  timelineDuration,
+  wordAt,
+  type EditState,
+} from "./types";
 
-export function Studio({ project }: { project: Project }) {
-  const [state, setState] = useState<EditState>({
-    removeFillers: true,
-    deletedSegments: new Set<number>(),
-    studioSound: true,
-    captions: true,
-    music: true,
-    presenter: false,
-    zoomEnabled: true,
-  });
+export function Studio({
+  project,
+  transcriptionLive = true,
+  transcriptionMissing = [],
+}: {
+  project: Project;
+  /** False when these words came from the mock rather than a microphone. */
+  transcriptionLive?: boolean;
+  transcriptionMissing?: string[];
+}) {
+  // Seeded from what was saved last time. The editor used to start from the
+  // defaults on every load, so a person who deleted three chapters and came
+  // back the next morning found all three restored and no explanation.
+  const [state, setState] = useState<EditState>(() => hydrateEditState(project.editState));
 
   const [time, setTime] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [selected, setSelected] = useState<number | null>(0);
   const [exportOpen, setExportOpen] = useState(false);
-  const [saved, setSaved] = useState<"idle" | "saving" | "saved">("idle");
+  const [saved, setSaved] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const raf = useRef<number | null>(null);
   const last = useRef<number>(0);
 
@@ -70,14 +82,36 @@ export function Studio({ project }: { project: Project }) {
   /* ---------------- edits ---------------- */
   const patch = useCallback((p: Partial<EditState>) => {
     setState((s) => ({ ...s, ...p }));
-    setSaved("saving");
+    setDirty(true);
   }, []);
 
+  /* ---------------- autosave ---------------- */
+  // `dirty` rather than a save on every render: the first render must not
+  // write, or opening a project you never edit would stamp its row.
+  const [dirty, setDirty] = useState(false);
+
   useEffect(() => {
-    if (saved !== "saving") return;
-    const id = setTimeout(() => setSaved("saved"), 650);
+    if (!dirty) return;
+    setSaved("saving");
+
+    // Coalesced. Ticking four checkboxes in a row is one write, not four,
+    // and the last one wins — which is the only ordering that is correct
+    // when the requests can overtake each other.
+    const id = setTimeout(async () => {
+      try {
+        const response = await fetch(`/api/projects/${project.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ edit_state: serializeEditState(state) }),
+        });
+        setSaved(response.ok ? "saved" : "error");
+      } catch {
+        setSaved("error");
+      }
+    }, 600);
+
     return () => clearTimeout(id);
-  }, [saved]);
+  }, [dirty, state, project.id]);
 
   const toggleSegment = useCallback(
     (i: number) => {
@@ -86,7 +120,7 @@ export function Studio({ project }: { project: Project }) {
         next.has(i) ? next.delete(i) : next.add(i);
         return { ...s, deletedSegments: next };
       });
-      setSaved("saving");
+      setDirty(true);
     },
     [],
   );
@@ -118,6 +152,12 @@ export function Studio({ project }: { project: Project }) {
   }, [active, timeline]);
 
   const savedMinutes = ((project.sourceDurationSec - duration) / 60).toFixed(1);
+
+  // Where the source file should be, for the frame the playhead is over.
+  const sourceTime = useMemo(() => sourceTimeAt(timeline, time), [timeline, time]);
+  const mediaUrl = project.recordingId
+    ? `/api/recordings/${project.recordingId}/media`
+    : null;
 
   return (
     <div className="flex h-[calc(100dvh-3.5rem)] flex-col">
@@ -153,16 +193,24 @@ export function Studio({ project }: { project: Project }) {
 
         <div className="ml-auto flex items-center gap-2">
           <span
+            aria-live="polite"
             className={cn(
               "hidden items-center gap-1.5 font-mono text-2xs transition-opacity sm:inline-flex",
               saved === "idle" ? "opacity-0" : "opacity-100",
-              saved === "saved" ? "text-mint-400" : "text-fg-faint",
+              saved === "saved" && "text-mint-400",
+              saved === "error" && "text-rose-300",
+              (saved === "idle" || saved === "saving") && "text-fg-faint",
             )}
           >
             {saved === "saving" ? (
               <>
                 <span className="size-1.5 rounded-full bg-current animate-pulse" />
                 Saving
+              </>
+            ) : saved === "error" ? (
+              <>
+                <Icon name="alert" className="size-3" strokeWidth={2.4} />
+                Not saved
               </>
             ) : (
               <>
@@ -185,6 +233,31 @@ export function Studio({ project }: { project: Project }) {
           </Button>
         </div>
       </header>
+
+      {/* ---------------- placeholder-transcript warning ---------------- */}
+      {/*
+        The mock providers are what make this app explorable with no
+        credentials, and they are worth keeping. But a person who records
+        themselves and reads back words they never said deserves to be told
+        why before they spend an hour editing them — not after.
+      */}
+      {!transcriptionLive && project.segments.length > 0 ? (
+        <div className="flex shrink-0 flex-wrap items-center gap-x-2 gap-y-1 border-b border-amber-500/25 bg-amber-500/10 px-4 py-2 text-2xs text-amber-200">
+          <Icon name="alert" className="size-3.5 shrink-0" strokeWidth={2.2} />
+          <span className="font-medium">This transcript is a placeholder.</span>
+          <span className="text-amber-200/80">
+            No speech-to-text provider is configured, so these words were generated rather than
+            heard.
+            {transcriptionMissing.length > 0 ? (
+              <>
+                {" "}
+                Set <code className="font-mono">{transcriptionMissing.join(", ")}</code> and
+                reprocess the take to transcribe it for real.
+              </>
+            ) : null}
+          </span>
+        </div>
+      ) : null}
 
       {/* ---------------- body ---------------- */}
       <div className="grid min-h-0 flex-1 grid-cols-1 xl:grid-cols-[19rem_1fr_19rem] 2xl:grid-cols-[22rem_1fr_21rem]">
@@ -211,6 +284,8 @@ export function Studio({ project }: { project: Project }) {
             duration={duration}
             playing={playing}
             state={state}
+            mediaUrl={mediaUrl}
+            sourceTime={sourceTime}
             onScrub={seek}
             onTogglePlay={() => setPlaying((p) => !p)}
           />

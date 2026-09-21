@@ -17,96 +17,166 @@ export { createAnthropicTranslation } from "./anthropic";
 export { createDeepgramTranscription } from "./deepgram";
 export { createElevenLabsSynthesis } from "./elevenlabs";
 
-let cached: ProviderSet | null = null;
-
-/** Reads an environment variable, recording it if absent. */
-function needEnv(name: string, missing: string[]): string {
-  const value = process.env[name];
-  if (!value) {
-    missing.push(name);
-    return "";
-  }
-  return value;
-}
-
 /**
- * Builds the live provider set.
+ * Which vendor stands behind each capability.
  *
- * Every credential is checked before anything is constructed, and one error
- * names all of them. A deployment that is missing two keys should learn that
- * at boot, not discover the second one forty minutes into a render.
+ * Selection is **per capability**, not all-or-nothing. The previous version
+ * demanded every credential before it would use any of them, which meant a
+ * person who had signed up for one vendor got the mock for all of them and no
+ * explanation — their key was set, the transcript was still invented, and
+ * nothing anywhere said why. Each capability now decides for itself, and the
+ * report below says what it decided so the answer is never a mystery.
  */
-function liveProviders(): ProviderSet {
-  const missing: string[] = [];
-  const deepgramKey = needEnv("DEEPGRAM_API_KEY", missing);
-  const elevenLabsKey = needEnv("ELEVENLABS_API_KEY", missing);
-  const anthropicKey = needEnv("ANTHROPIC_API_KEY", missing);
-  const workspaceId = needEnv("DEMORIFF_WORKSPACE_ID", missing);
-  needEnv("DATABASE_URL", missing);
+export type Capability = "transcription" | "synthesis" | "translation" | "masking" | "render";
 
-  if (missing.length > 0) {
-    throw new Error(
-      `DEMORIFF_PROVIDERS=live is missing ${missing.join(", ")}. Set them or use ` +
-        `DEMORIFF_PROVIDERS=mock, which runs the whole product with no credentials.`,
-    );
+export interface CapabilityStatus {
+  capability: Capability;
+  /** The adapter actually in use. */
+  provider: string;
+  live: boolean;
+  /** Empty when live. What to set, otherwise. */
+  missing: string[];
+}
+
+export type ProviderReport = CapabilityStatus[];
+
+/** Modes: `auto` picks per capability, `live` demands all, `mock` refuses all. */
+function mode(): "auto" | "live" | "mock" {
+  const raw = (process.env.DEMORIFF_PROVIDERS ?? "auto").trim().toLowerCase();
+  return raw === "live" || raw === "mock" ? raw : "auto";
+}
+
+function env(name: string): string {
+  return process.env[name]?.trim() ?? "";
+}
+
+/** The credentials each capability needs before it can be anything but a mock. */
+const CREDENTIALS: Record<Capability, string[]> = {
+  transcription: ["DEEPGRAM_API_KEY"],
+  synthesis: ["ELEVENLABS_API_KEY", "DEMORIFF_WORKSPACE_ID"],
+  translation: ["ANTHROPIC_API_KEY"],
+  masking: ["ANTHROPIC_API_KEY"],
+  // Not a vendor: the durable queue, which needs somewhere to keep the jobs.
+  render: ["DATABASE_URL", "DEMORIFF_WORKSPACE_ID"],
+};
+
+function missingFor(capability: Capability): string[] {
+  return CREDENTIALS[capability].filter((name) => !env(name));
+}
+
+interface Resolved {
+  providers: ProviderSet;
+  report: ProviderReport;
+}
+
+function resolve(): Resolved {
+  const selected = mode();
+  const report: ProviderReport = [];
+
+  // `live` is the production setting, and its job is to fail loudly rather
+  // than degrade quietly. A deployment that silently transcribes with a mock
+  // ships invented words to a customer, which is worse than not starting.
+  if (selected === "live") {
+    const absent = [...new Set((Object.keys(CREDENTIALS) as Capability[]).flatMap(missingFor))];
+    if (absent.length > 0) {
+      throw new Error(
+        `DEMORIFF_PROVIDERS=live is missing ${absent.join(", ")}. Set them, or use ` +
+          `DEMORIFF_PROVIDERS=auto, which uses each vendor you have a key for and ` +
+          `mocks the rest.`,
+      );
+    }
   }
 
-  return {
-    transcription: createDeepgramTranscription({ apiKey: deepgramKey }),
-    synthesis: createElevenLabsSynthesis({ apiKey: elevenLabsKey, workspaceId }),
-    translation: createAnthropicTranslation({ apiKey: anthropicKey }),
-    // Direction is ours; there is no vendor to swap in, which is why it
-    // looks the same in both sets.
-    direction: heuristicDirection,
-    // Masking in live mode can honour rules over frame contents, because a
-    // text locator is available. Mock mode keeps `ruleMasking`, which
-    // refuses those rules out loud rather than returning an empty region
-    // list that reads as "nothing to hide".
-    masking: frameMasking({
-      locator: new VisionLocator({ apiKey: anthropicKey }),
-      // Two a second catches a page a viewer could read. Faster costs a
-      // model call per frame of every recording, for text that would have
-      // to appear and vanish inside 250ms to be missed.
-      fps: 2,
-    }),
-    // Rendering goes through the durable queue in both modes; in live mode it
-    // is the only option, because a lost render is a lost customer hour.
-    render: new QueuedRenderProvider(workspaceId),
+  const wants = (capability: Capability): boolean =>
+    selected !== "mock" && missingFor(capability).length === 0;
+
+  const note = (capability: Capability, provider: string, live: boolean) => {
+    report.push({
+      capability,
+      provider,
+      live,
+      missing: live ? [] : selected === "mock" ? ["DEMORIFF_PROVIDERS=auto"] : missingFor(capability),
+    });
   };
+
+  const providers: ProviderSet = { ...mockProviders };
+
+  if (wants("transcription")) {
+    providers.transcription = createDeepgramTranscription({ apiKey: env("DEEPGRAM_API_KEY") });
+  }
+  note("transcription", providers.transcription.name, providers.transcription !== mockProviders.transcription);
+
+  if (wants("synthesis")) {
+    providers.synthesis = createElevenLabsSynthesis({
+      apiKey: env("ELEVENLABS_API_KEY"),
+      workspaceId: env("DEMORIFF_WORKSPACE_ID"),
+    });
+  }
+  note("synthesis", providers.synthesis.name, providers.synthesis !== mockProviders.synthesis);
+
+  if (wants("translation")) {
+    providers.translation = createAnthropicTranslation({ apiKey: env("ANTHROPIC_API_KEY") });
+  }
+  note("translation", providers.translation.name, providers.translation !== mockProviders.translation);
+
+  if (wants("masking")) {
+    // With a text locator available, masking can honour rules over frame
+    // contents. Without one it stays `ruleMasking`, which refuses those rules
+    // out loud rather than returning an empty region list — an empty list
+    // reads as "nothing sensitive here", which is the wrong thing to say.
+    providers.masking = frameMasking({
+      locator: new VisionLocator({ apiKey: env("ANTHROPIC_API_KEY") }),
+      // Two a second catches a page a viewer could read. Faster costs a model
+      // call per frame of every recording, for text that would have to appear
+      // and vanish inside 250ms to be missed.
+      fps: 2,
+    });
+  } else {
+    providers.masking = ruleMasking;
+  }
+  note("masking", providers.masking.name, providers.masking !== ruleMasking);
+
+  // The queue is preferred even in mock mode: losing a render on restart is
+  // the one mock behaviour that is not a fair stand-in for the real thing.
+  if (missingFor("render").length === 0) {
+    providers.render = new QueuedRenderProvider(env("DEMORIFF_WORKSPACE_ID"));
+  }
+  note("render", providers.render.name, providers.render !== mockProviders.render);
+
+  // Direction is ours. There is no vendor to swap in, which is why it does
+  // not appear in the report at all.
+  providers.direction = heuristicDirection;
+
+  return { providers, report };
 }
+
+let cached: Resolved | null = null;
+let overridden: ProviderSet | null = null;
 
 /**
  * Resolves the provider set for the current environment.
  *
- * The mock set is the default so the application runs with no credentials —
- * that is what makes the whole product explorable from a fresh clone.
+ * Mocks are the fallback rather than the default, so the application runs
+ * with no credentials at all — that is what makes the product explorable
+ * from a fresh clone — while any key that *is* set gets used.
  */
 export function getProviders(): ProviderSet {
-  if (cached) return cached;
+  if (overridden) return overridden;
+  cached ??= resolve();
+  return cached.providers;
+}
 
-  const mode = process.env.DEMORIFF_PROVIDERS ?? "mock";
-
-  if (mode === "live") {
-    cached = liveProviders();
-    return cached;
+/** What each capability resolved to, and what is missing where it did not. */
+export function providerReport(): ProviderReport {
+  if (overridden) {
+    return [];
   }
-
-  // Even in mock mode, prefer the durable queue when a database exists.
-  // Losing a render on restart is the one mock behaviour that is not a fair
-  // stand-in for the real thing.
-  if (process.env.DATABASE_URL && process.env.DEMORIFF_WORKSPACE_ID) {
-    cached = {
-      ...mockProviders,
-      render: new QueuedRenderProvider(process.env.DEMORIFF_WORKSPACE_ID),
-    };
-    return cached;
-  }
-
-  cached = mockProviders;
-  return cached;
+  cached ??= resolve();
+  return cached.report;
 }
 
 /** Test seam, and the way a worker process swaps in a partial set. */
 export function setProviders(providers: ProviderSet | null) {
-  cached = providers;
+  overridden = providers;
+  if (providers === null) cached = null;
 }

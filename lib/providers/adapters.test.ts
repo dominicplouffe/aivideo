@@ -82,7 +82,7 @@ test("deepgram asks for filler words and diarization — the editor depends on b
     },
   });
 
-  await provider.transcribe({ mediaUrl: "https://media.example/a.webm" });
+  await provider.transcribe({ media: { url: "https://media.example/a.webm" } });
 
   const params = requested!.searchParams;
   assert.equal(params.get("filler_words"), "true");
@@ -96,7 +96,7 @@ test("deepgram keeps punctuation and per-word timings", async () => {
     fetchImpl: async () => jsonResponse(DEEPGRAM_BODY),
   });
 
-  const result = await provider.transcribe({ mediaUrl: "https://media.example/a.webm" });
+  const result = await provider.transcribe({ media: { url: "https://media.example/a.webm" } });
 
   assert.equal(result.language, "en");
   assert.equal(result.durationSec, 12.5);
@@ -116,7 +116,7 @@ test("deepgram treats silent footage as a valid empty transcript", async () => {
       jsonResponse({ metadata: { duration: 9 }, results: { channels: [{ alternatives: [{ words: [] }] }] } }),
   });
 
-  const result = await provider.transcribe({ mediaUrl: "https://media.example/silent.webm" });
+  const result = await provider.transcribe({ media: { url: "https://media.example/silent.webm" } });
   assert.deepEqual(result.words, []);
   assert.equal(result.durationSec, 9);
 });
@@ -127,7 +127,7 @@ test("deepgram separates retryable failures from permanent ones", async () => {
     fetchImpl: async () => new Response("slow down", { status: 429 }),
   });
   await assert.rejects(
-    () => rateLimited.transcribe({ mediaUrl: "https://media.example/a.webm" }),
+    () => rateLimited.transcribe({ media: { url: "https://media.example/a.webm" } }),
     (error: unknown) => error instanceof ProviderError && error.retryable,
   );
 
@@ -136,7 +136,7 @@ test("deepgram separates retryable failures from permanent ones", async () => {
     fetchImpl: async () => new Response("nope", { status: 401 }),
   });
   await assert.rejects(
-    () => badKey.transcribe({ mediaUrl: "https://media.example/a.webm" }),
+    () => badKey.transcribe({ media: { url: "https://media.example/a.webm" } }),
     (error: unknown) => error instanceof ProviderError && !error.retryable,
   );
 });
@@ -427,4 +427,29 @@ test("masking rejects a selector rule that never got resolved bounds", async () 
       }),
     (error: unknown) => error instanceof ProviderError && /resolved bounds/.test(error.message),
   );
+});
+
+test("Deepgram is handed the bytes, not a URL it cannot reach", async () => {
+  // The recording sits behind a session cookie on someone's laptop. A URL
+  // would mean publishing it; this is the request that does not.
+  let seen: { contentType?: string; body?: unknown } = {};
+  const provider = new DeepgramTranscription({
+    apiKey: "k",
+    fetchImpl: (async (_url: string, init: RequestInit) => {
+      seen = {
+        contentType: new Headers(init.headers).get("content-type") ?? undefined,
+        body: init.body,
+      };
+      return new Response(JSON.stringify({ metadata: { duration: 1 }, results: {} }), {
+        status: 200,
+      });
+    }) as unknown as typeof fetch,
+  });
+
+  const bytes = new Uint8Array([0x1a, 0x45, 0xdf, 0xa3]); // an EBML header
+  await provider.transcribe({ media: { bytes, contentType: "video/webm" } });
+
+  assert.equal(seen.contentType, "video/webm");
+  assert.ok(seen.body instanceof ArrayBuffer, "the media is sent as the request body");
+  assert.deepEqual([...new Uint8Array(seen.body as ArrayBuffer)], [...bytes]);
 });

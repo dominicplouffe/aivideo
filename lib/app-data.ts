@@ -5,7 +5,7 @@ import { seeded } from "./utils";
    render identically, and so the demo never looks random.
    ========================================================= */
 
-export type ProjectStatus = "draft" | "processing" | "ready" | "published" | "stale";
+export type ProjectStatus = "draft" | "processing" | "ready" | "published" | "stale" | "failed";
 export type OutputKind = "video" | "guide" | "interactive" | "clips";
 
 export interface Member {
@@ -59,6 +59,14 @@ export interface Project {
   ctaClicks: number;
   collection: string;
   segments: Segment[];
+  /**
+   * The take this project was cut from, when there is one. Fixture projects
+   * have none, which is why the Studio has to keep a fallback for a canvas
+   * with no footage behind it.
+   */
+  recordingId?: string | null;
+  /** The Studio's saved decisions. Absent means "nobody has edited this yet". */
+  editState?: Record<string, unknown> | null;
 }
 
 export const workspace = {

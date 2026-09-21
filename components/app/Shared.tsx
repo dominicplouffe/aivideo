@@ -57,6 +57,7 @@ const statusMeta: Record<ProjectStatus, { label: string; cls: string; dot: strin
   ready: { label: "Ready", cls: "text-cyan-300 border-cyan-500/35 bg-cyan-500/10", dot: "bg-cyan-400" },
   published: { label: "Published", cls: "text-mint-400 border-mint-500/35 bg-mint-500/10", dot: "bg-mint-400" },
   stale: { label: "Stale", cls: "text-amber-400 border-amber-500/35 bg-amber-500/10", dot: "bg-amber-400" },
+  failed: { label: "Failed", cls: "text-rose-300 border-rose-500/35 bg-rose-500/10", dot: "bg-rose-400" },
 };
 
 export function StatusPill({ status, className }: { status: ProjectStatus; className?: string }) {

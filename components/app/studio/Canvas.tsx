@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useRef } from "react";
 import { cn, formatDuration, stablePercent } from "@/lib/utils";
 import { Icon } from "@/components/ui/Icon";
 import { MockApp } from "@/components/marketing/MockApp";
@@ -14,6 +15,8 @@ export function Canvas({
   duration,
   playing,
   state,
+  mediaUrl,
+  sourceTime,
   onScrub,
   onTogglePlay,
 }: {
@@ -24,12 +27,51 @@ export function Canvas({
   duration: number;
   playing: boolean;
   state: EditState;
+  /** The take behind this project, when there is one. */
+  mediaUrl?: string | null;
+  /** Where the playhead points in the *source* file, not the edited one. */
+  sourceTime?: number | null;
   onScrub: (t: number) => void;
   onTogglePlay: () => void;
 }) {
   const zoom = state.zoomEnabled ? segment?.zoom : undefined;
   const scale = zoom?.scale ?? 1;
   const origin = zoom ? `${zoom.x}% ${zoom.y}%` : "50% 50%";
+
+  const video = useRef<HTMLVideoElement>(null);
+
+  // Play and pause follow the Studio's transport rather than the video's own
+  // controls, so the spacebar means one thing everywhere in the editor.
+  useEffect(() => {
+    const el = video.current;
+    if (!el) return;
+    if (playing) void el.play().catch(() => {});
+    else el.pause();
+  }, [playing, mediaUrl]);
+
+  // Seek only when the file has drifted from where the edit says it should
+  // be. Writing `currentTime` on every frame would re-decode continuously
+  // and stutter; the threshold lets a run of uncut words play at native
+  // speed and jumps only at an actual cut.
+  useEffect(() => {
+    const el = video.current;
+    if (!el || sourceTime == null || !Number.isFinite(sourceTime)) return;
+    if (Math.abs(el.currentTime - sourceTime) > 0.32) {
+      try {
+        el.currentTime = sourceTime;
+      } catch {
+        // Seeking before metadata has loaded throws in some browsers. The
+        // next frame's effect will do it once the file is ready.
+      }
+    }
+  }, [sourceTime]);
+
+  // `studioSound` is the Studio's mute, and a preview that ignores it is a
+  // preview of a different video than the one being exported.
+  useEffect(() => {
+    const el = video.current;
+    if (el) el.muted = !state.studioSound;
+  }, [state.studioSound]);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -41,7 +83,22 @@ export function Canvas({
               className="absolute inset-0 transition-transform duration-[900ms] ease-[cubic-bezier(0.16,1,0.3,1)]"
               style={{ transform: `scale(${scale})`, transformOrigin: origin }}
             >
-              <MockApp highlight={Boolean(zoom && zoom.scale > 1.6)} />
+              {mediaUrl ? (
+                <video
+                  ref={video}
+                  src={mediaUrl}
+                  className="size-full object-contain"
+                  playsInline
+                  preload="metadata"
+                  // The transport lives in the Studio header; a second set of
+                  // controls inside the frame is two things to disagree.
+                  controls={false}
+                />
+              ) : (
+                // Fixture projects have no footage behind them. Showing the
+                // sample interface is honest for those and nothing else.
+                <MockApp highlight={Boolean(zoom && zoom.scale > 1.6)} />
+              )}
             </div>
 
             {/* brand frame */}

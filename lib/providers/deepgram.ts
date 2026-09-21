@@ -1,5 +1,10 @@
 import { ProviderError, isRetryableStatus } from "./errors";
-import type { TranscriptionProvider, TranscriptionResult, TranscriptWordResult } from "./types";
+import type {
+  TranscriptionProvider,
+  TranscriptionResult,
+  TranscriptionSource,
+  TranscriptWordResult,
+} from "./types";
 
 /**
  * Deepgram-backed transcription.
@@ -52,6 +57,18 @@ interface DeepgramResponse {
   };
 }
 
+/**
+ * `fetch` accepts a `Uint8Array` as a body, but the types disagree depending
+ * on which DOM lib is in scope, and a stray `SharedArrayBuffer` in the union
+ * is the sort of thing that only fails on somebody else's TypeScript version.
+ * One copy into a plain `ArrayBuffer` settles it.
+ */
+function bodyFrom(bytes: Uint8Array): ArrayBuffer {
+  const copy = new ArrayBuffer(bytes.byteLength);
+  new Uint8Array(copy).set(bytes);
+  return copy;
+}
+
 export class DeepgramTranscription implements TranscriptionProvider {
   readonly name = "deepgram-transcription";
 
@@ -61,7 +78,10 @@ export class DeepgramTranscription implements TranscriptionProvider {
     }
   }
 
-  async transcribe(input: { mediaUrl: string; languageHint?: string }): Promise<TranscriptionResult> {
+  async transcribe(input: {
+    media: TranscriptionSource;
+    languageHint?: string;
+  }): Promise<TranscriptionResult> {
     const fetchImpl = this.config.fetchImpl ?? fetch;
     const base = this.config.baseUrl ?? "https://api.deepgram.com";
 
@@ -81,15 +101,23 @@ export class DeepgramTranscription implements TranscriptionProvider {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.config.timeoutMs ?? 300_000);
 
+    // Bytes when we have them, a URL when the media is somewhere Deepgram
+    // can reach. Sending bytes is what lets a recording stay private: the
+    // alternative is a publicly fetchable URL for every customer's screen.
+    const { contentType, body } =
+      "bytes" in input.media
+        ? { contentType: input.media.contentType, body: bodyFrom(input.media.bytes) }
+        : { contentType: "application/json", body: JSON.stringify({ url: input.media.url }) };
+
     let response: Response;
     try {
       response = await fetchImpl(`${base}/v1/listen?${query}`, {
         method: "POST",
         headers: {
           Authorization: `Token ${this.config.apiKey}`,
-          "Content-Type": "application/json",
+          "Content-Type": contentType,
         },
-        body: JSON.stringify({ url: input.mediaUrl }),
+        body,
         signal: controller.signal,
       });
     } catch (error) {

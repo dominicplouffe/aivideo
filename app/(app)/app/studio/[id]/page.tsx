@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { getProject } from "@/lib/data";
 import { Studio } from "@/components/app/studio/Studio";
+import { providerReport } from "@/lib/providers";
 
 /**
  * Read through the data access layer, not from the fixtures.
@@ -29,5 +30,18 @@ export default async function StudioPage({ params }: { params: Promise<{ id: str
   const { id } = await params;
   const project = await getProject(id);
   if (!project) notFound();
-  return <Studio project={project} />;
+
+  // Whether the words on screen were heard or invented. Read here rather
+  // than fetched by the editor: it is a property of the deployment, it never
+  // changes while somebody is editing, and a banner that appears a second
+  // after the transcript does is a banner people learn to ignore.
+  const transcription = providerReport().find((entry) => entry.capability === "transcription");
+
+  return (
+    <Studio
+      project={project}
+      transcriptionLive={transcription?.live ?? true}
+      transcriptionMissing={transcription?.missing ?? []}
+    />
+  );
 }

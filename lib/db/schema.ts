@@ -11,7 +11,7 @@ import { relations, sql } from "drizzle-orm";
 export const planEnum = pgEnum("plan", ["free", "starter", "team", "scale", "enterprise"]);
 export const regionEnum = pgEnum("region", ["us", "eu", "au"]);
 export const roleEnum = pgEnum("member_role", ["owner", "admin", "creator", "reviewer", "viewer"]);
-export const projectStatusEnum = pgEnum("project_status", ["draft", "processing", "ready", "published", "stale"]);
+export const projectStatusEnum = pgEnum("project_status", ["draft", "processing", "ready", "published", "stale", "failed"]);
 export const recordingSourceEnum = pgEnum("recording_source", ["extension", "desktop", "upload", "connector", "agent"]);
 export const recordingStatusEnum = pgEnum("recording_status", ["awaiting_upload", "uploaded", "transcribing", "ready", "failed"]);
 export const outputKindEnum = pgEnum("output_kind", ["video", "guide", "interactive", "clips"]);

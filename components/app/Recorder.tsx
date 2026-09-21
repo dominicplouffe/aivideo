@@ -291,7 +291,7 @@ function RecordFlow({ onDone }: { onDone: (projectId: string) => void }) {
       );
       if (!uploaded.ok) throw new Error(await messageFrom(uploaded));
 
-      setProgress(0.75);
+      setProgress(0.6);
       setStage("Creating the project…");
 
       const project = await fetch("/api/projects", {
@@ -301,6 +301,26 @@ function RecordFlow({ onDone }: { onDone: (projectId: string) => void }) {
       });
       if (!project.ok) throw new Error(await messageFrom(project));
       const body = (await project.json()) as { project: { id: string } };
+
+      setProgress(0.72);
+      setStage("Transcribing…");
+
+      // Deliberately not fire-and-forget. The Studio is unusable without a
+      // transcript — it is a text editor for video — so arriving there
+      // before one exists is arriving at an empty room. The project row
+      // already exists either way, which is what makes the failure below
+      // recoverable rather than terminal.
+      const processed = await fetch(`/api/projects/${body.project.id}/process`, {
+        method: "POST",
+      });
+
+      if (!processed.ok) {
+        const reason = await messageFrom(processed);
+        throw new Error(
+          `The take uploaded, but transcription failed: ${reason} It is saved in ` +
+            `your projects, and you can retry it from there.`,
+        );
+      }
 
       setProgress(1);
       setStage("Done");
@@ -588,7 +608,7 @@ function ImportFlow({ onDone }: { onDone: (id: string) => void }) {
       });
       if (!uploaded.ok) throw new Error(await messageFrom(uploaded));
 
-      setProgress(0.8);
+      setProgress(0.65);
       const project = await fetch("/api/projects", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -596,6 +616,17 @@ function ImportFlow({ onDone }: { onDone: (id: string) => void }) {
       });
       if (!project.ok) throw new Error(await messageFrom(project));
       const body = (await project.json()) as { project: { id: string } };
+
+      setProgress(0.75);
+      const processed = await fetch(`/api/projects/${body.project.id}/process`, {
+        method: "POST",
+      });
+      if (!processed.ok) {
+        throw new Error(
+          `The file uploaded, but transcription failed: ${await messageFrom(processed)} ` +
+            `It is saved in your projects, and you can retry it from there.`,
+        );
+      }
 
       setProgress(1);
       onDone(body.project.id);

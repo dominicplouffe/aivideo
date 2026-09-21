@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { cn, formatDuration, formatNumber, relativeTime } from "@/lib/utils";
 import { Icon } from "@/components/ui/Icon";
@@ -8,7 +9,59 @@ import { Button } from "@/components/ui/Button";
 import { StatusPill, Avatar, EmptyState } from "./Shared";
 import { collections, members, currentUser, type Project, type ProjectStatus } from "@/lib/app-data";
 
-const statuses: (ProjectStatus | "all")[] = ["all", "published", "ready", "processing", "stale", "draft"];
+const statuses: (ProjectStatus | "all")[] = [
+  "all", "published", "ready", "processing", "stale", "draft", "failed",
+];
+
+/**
+ * A take whose transcription died, offered back to the person who made it.
+ *
+ * Without this a failed import is a dead row: the library shows "Failed" and
+ * the only way out is to record the whole thing again. The pipeline replaces
+ * a project's segments rather than appending to them, so pressing this twice
+ * is harmless — which is the property that lets it be one click and no
+ * confirmation.
+ */
+function RetryButton({ projectId }: { projectId: string }) {
+  const router = useRouter();
+  const [state, setState] = useState<"idle" | "working" | "error">("idle");
+
+  return (
+    <button
+      type="button"
+      disabled={state === "working"}
+      onClick={async (event) => {
+        // The card is a link to the Studio, and the Studio is the one place
+        // this project cannot usefully be opened yet.
+        event.preventDefault();
+        event.stopPropagation();
+        setState("working");
+        try {
+          const response = await fetch(`/api/projects/${projectId}/process`, { method: "POST" });
+          if (!response.ok) throw new Error("retry failed");
+          setState("idle");
+          router.refresh();
+        } catch {
+          setState("error");
+        }
+      }}
+      className={cn(
+        "inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-2xs font-medium transition-colors",
+        state === "error"
+          ? "border-rose-500/40 bg-rose-500/15 text-rose-200"
+          : "border-white/15 bg-black/60 text-white/90 backdrop-blur-sm hover:bg-black/75",
+        state === "working" && "cursor-wait opacity-70",
+      )}
+    >
+      <Icon
+        name={state === "error" ? "alert" : "refresh"}
+        className={cn("size-3", state === "working" && "animate-spin")}
+        strokeWidth={2.2}
+      />
+      {state === "working" ? "Processing…" : state === "error" ? "Retry failed" : "Retry"}
+    </button>
+  );
+}
 
 export function ProjectLibrary({ projects }: { projects: Project[] }) {
   const [query, setQuery] = useState("");
@@ -140,8 +193,26 @@ export function ProjectLibrary({ projects }: { projects: Project[] }) {
                 <Link key={p.id} href={`/app/studio/${p.id}`} className="group block">
                   <article className="flex h-full flex-col overflow-hidden rounded-2xl border border-[var(--line)] bg-ink-950 transition-colors hover:border-[var(--line-strong)]">
                     <div className="relative aspect-video overflow-hidden border-b border-[var(--line)] bg-[#0B0D14]">
-                      <span className="absolute inset-0 bg-[radial-gradient(circle_at_70%_28%,color-mix(in_oklab,var(--color-iris-500)_40%,transparent),transparent_62%)]" />
-                      <span className="absolute inset-0 grid-bg opacity-35" />
+                      {p.recordingId ? (
+                        // A frame from the take itself. `#t=1` asks the
+                        // browser for the frame one second in — the first
+                        // frame of a screen recording is usually the moment
+                        // before anything has been drawn.
+                        <video
+                          src={`/api/recordings/${p.recordingId}/media#t=1`}
+                          className="absolute inset-0 size-full object-cover"
+                          preload="metadata"
+                          muted
+                          playsInline
+                          tabIndex={-1}
+                          aria-hidden
+                        />
+                      ) : (
+                        <>
+                          <span className="absolute inset-0 bg-[radial-gradient(circle_at_70%_28%,color-mix(in_oklab,var(--color-iris-500)_40%,transparent),transparent_62%)]" />
+                          <span className="absolute inset-0 grid-bg opacity-35" />
+                        </>
+                      )}
                       <span className="absolute inset-0 flex items-center justify-center">
                         <span className="inline-flex size-11 items-center justify-center rounded-full bg-black/45 backdrop-blur-sm transition-transform duration-300 group-hover:scale-110">
                           <Icon name="play" className="size-4 text-white/90" />
@@ -150,7 +221,12 @@ export function ProjectLibrary({ projects }: { projects: Project[] }) {
                       <span className="absolute top-2.5 left-2.5">
                         <StatusPill status={p.status} />
                       </span>
-                      {p.durationSec ? (
+                      {p.status === "failed" ? (
+                        <span className="absolute right-2.5 bottom-2.5">
+                          <RetryButton projectId={p.id} />
+                        </span>
+                      ) : null}
+                      {p.durationSec && p.status !== "failed" ? (
                         <span className="absolute right-2.5 bottom-2.5 rounded bg-black/70 px-1.5 py-0.5 font-mono text-2xs text-white/85">
                           {formatDuration(p.durationSec)}
                         </span>
@@ -209,8 +285,12 @@ export function ProjectLibrary({ projects }: { projects: Project[] }) {
                       <span className="block truncate text-[0.875rem] font-medium text-fg-strong">{p.title}</span>
                       <span className="block truncate text-[0.75rem] text-fg-subtle">{p.description}</span>
                     </span>
-                    <span className="w-24"><StatusPill status={p.status} /></span>
-                    <span className="w-28 text-[0.75rem] text-fg-subtle">{p.collection}</span>
+                    <span className="flex w-24 items-center gap-1.5">
+                      <StatusPill status={p.status} />
+                    </span>
+                    <span className="w-28 text-[0.75rem] text-fg-subtle">
+                      {p.status === "failed" ? <RetryButton projectId={p.id} /> : p.collection}
+                    </span>
                     <span className="w-20 text-right font-mono text-[0.75rem] text-fg-muted">
                       {p.views ? formatNumber(p.views) : "—"}
                     </span>

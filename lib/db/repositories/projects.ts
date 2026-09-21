@@ -75,6 +75,8 @@ function toProject(
     ctaClicks: extras.ctaClicks,
     collection: r.collection ?? "",
     segments: segs.sort((a, b) => a.ordinal - b.ordinal).map(toSegment),
+    recordingId: r.recordingId ?? null,
+    editState: (r.editState as Record<string, unknown> | null) ?? null,
   };
 }
 
