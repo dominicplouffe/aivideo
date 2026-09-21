@@ -211,7 +211,7 @@ export function ProjectLibrary({ projects }: { projects: Project[] }) {
                 <Link key={p.id} href={`/app/studio/${p.id}`} className="group block">
                   <article className="flex h-full flex-col overflow-hidden rounded-2xl border border-[var(--line)] bg-ink-950 transition-colors hover:border-[var(--line-strong)]">
                     <div className="relative aspect-video overflow-hidden border-b border-[var(--line)] bg-[#0B0D14]">
-                      {p.recordingId ? (
+                      {p.recordingId && p.hasMedia ? (
                         // A frame from the take itself. `#t=1` asks the
                         // browser for the frame one second in — the first
                         // frame of a screen recording is usually the moment

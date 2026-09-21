@@ -157,9 +157,13 @@ export function Studio({
 
   // Where the source file should be, for the frame the playhead is over.
   const sourceTime = useMemo(() => sourceTimeAt(timeline, time), [timeline, time]);
-  const mediaUrl = project.recordingId
-    ? `/api/recordings/${project.recordingId}/media`
-    : null;
+  // Only when the bytes arrived. A recording row exists from the moment
+  // somebody presses record, so pointing a <video> at one that never
+  // finished uploading is a guaranteed 404.
+  const mediaUrl =
+    project.recordingId && project.hasMedia !== false
+      ? `/api/recordings/${project.recordingId}/media`
+      : null;
 
   return (
     <div className="flex h-[calc(100dvh-3.5rem)] flex-col">

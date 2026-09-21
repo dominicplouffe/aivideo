@@ -25,25 +25,26 @@ export default async function GuidesPage() {
         title="Guides"
         description="Step-by-step articles generated from the same recording as your videos, with annotated screenshots that update when the flow changes. Unmetered on every plan."
         actions={
-          <>
-            <Button variant="outline" size="sm">
-              <Icon name="external" className="size-4" strokeWidth={1.8} />
-              Sync destinations
-            </Button>
-            <Button href="/app/new" size="sm">
-              <Icon name="plus" className="size-4" strokeWidth={2.2} />
-              New guide
-            </Button>
-          </>
+          /* "Sync destinations" had no handler. */
+          <Button href="/app/new" size="sm">
+            <Icon name="plus" className="size-4" strokeWidth={2.2} />
+            New guide
+          </Button>
         }
       />
 
       <div className="space-y-4 px-4 py-6 md:px-8">
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <StatTile label="Published guides" value={String(withGuides.length)} icon="doc" sub="unmetered" />
-          <StatTile label="Total reads" value={formatNumber(withGuides.reduce((n, p) => n + Math.round(p.views * 0.4), 0))} delta="+31%" icon="eye" />
-          <StatTile label="Screenshots current" value="94%" delta="+12pt" icon="refresh" sub="after last re-render" />
-          <StatTile label="Languages" value="6" icon="globe" sub="per guide, on average" />
+          {/* "Total reads" was views × 0.4; "Screenshots current 94%" and
+              "Languages 6 per guide" were constants. Guides are not read
+              through this deployment, so nothing counts a read. */}
+          <StatTile
+            label="Steps"
+            value={String(withGuides.reduce((n, p) => n + p.segments.length, 0))}
+            icon="layers"
+            sub="across every guide"
+          />
         </div>
 
         <Panel title="All guides" action={
@@ -70,7 +71,7 @@ export default async function GuidesPage() {
                       {p.title}
                     </span>
                     <span className="mt-0.5 flex flex-wrap items-center gap-x-3 text-[0.75rem] text-fg-subtle">
-                      <span>{p.segments.length * 2 - 1} steps</span>
+                      <span>{p.segments.length} steps</span>
                       <span>{p.locales.length || 1} languages</span>
                       <span>{relativeTime(p.updatedAt)}</span>
                     </span>
@@ -84,7 +85,7 @@ export default async function GuidesPage() {
                     {p.status === "stale" ? "screenshots stale" : "current"}
                   </span>
                   <span className="hidden w-24 shrink-0 text-right font-mono text-[0.75rem] text-fg-muted sm:block">
-                    {formatNumber(Math.round(p.views * 0.4))} reads
+                    {p.segments.length} steps
                   </span>
                   <Icon
                     name="chevronRight"

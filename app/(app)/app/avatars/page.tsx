@@ -15,7 +15,7 @@ export default function AvatarsPage() {
     <>
       <PageHeader
         title="Presenters"
-        description="180 licensed presenters for unlimited commercial use, plus custom presenters trained on your own team. Every presenter speaks 34 languages with matched lip movement."
+        description="Presenters overlay a speaking figure on a recording. This needs a synthesis provider; the gallery below is the seeded sample."
         actions={
           <Button size="sm">
             <Icon name="avatar" className="size-4" strokeWidth={1.8} />
@@ -62,7 +62,8 @@ export default function AvatarsPage() {
           </div>
           <div className="border-t border-[var(--line)] px-5 py-4 text-center">
             <p className="text-[0.8125rem] text-fg-subtle">
-              Showing 6 of 180. Every presenter is licensed for unlimited commercial use worldwide,
+              A sample of the presenter library. The full catalogue comes from your synthesis
+              provider once one is configured. Every presenter is licensed for commercial use,
               with no per-video royalty.
             </p>
           </div>

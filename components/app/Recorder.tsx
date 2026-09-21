@@ -53,7 +53,7 @@ export function Recorder() {
 
         {mode === "record" ? <RecordFlow onDone={(id) => router.push(`/app/studio/${id}`)} /> : null}
         {mode === "import" ? <ImportFlow onDone={(id) => router.push(`/app/studio/${id}`)} /> : null}
-        {mode === "agent" ? <AgentFlow onDone={(id) => router.push(`/app/studio/${id}`)} /> : null}
+        {mode === "agent" ? <AgentFlow /> : null}
       </div>
     </div>
   );
@@ -777,14 +777,57 @@ function ImportFlow({ onDone }: { onDone: (id: string) => void }) {
 
 /* ============================================================ agent */
 
-function AgentFlow({ onDone }: { onDone: (id: string) => void }) {
+/**
+ * Brief the agent.
+ *
+ * This tab used to run a 70-tick `setInterval` and then navigate to
+ * `projects[2].id` — a hardcoded fixture project with no relationship to
+ * anything the person had typed. While the timer ran it reported eight named
+ * stages ("Driving your app", "Rendering video, guide, tour and clips") as
+ * though each had happened. The brief, the origin, the audience and the
+ * length were all discarded.
+ *
+ * It posts to `/api/agent/runs` now, which is the same endpoint the agent
+ * page's own form has always used. This was a second front door onto a
+ * feature that already had a working one.
+ */
+function AgentFlow() {
+  const router = useRouter();
   const [brief, setBrief] = useState("");
-  const [env, setEnv] = useState("staging.meridian.app");
-  const [audience, setAudience] = useState("Logistics operations buyers");
-  const [length, setLength] = useState(90);
-  const [progress, setProgress] = useState<number | null>(null);
+  const [origins, setOrigins] = useState("");
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  if (progress !== null) return <Processing progress={progress} label="Riff Agent is recording your product" />;
+  const start = async () => {
+    setPending(true);
+    setError(null);
+    try {
+      const response = await fetch("/api/agent/runs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          brief: brief.trim(),
+          allowed_origins: origins
+            .split(/[\s,]+/)
+            .map((entry) => entry.trim())
+            .filter(Boolean),
+        }),
+      });
+      const body = (await response.json().catch(() => ({}))) as {
+        run?: { id: string };
+        error?: string;
+      };
+      if (!response.ok || !body.run) throw new Error(body.error ?? "That run could not be planned.");
+
+      // To the run, not to a project: a run produces an outline first, and
+      // the outline is the thing waiting for a decision.
+      router.push(`/app/agent/${body.run.id}`);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setPending(false);
+    }
+  };
 
   return (
     <div className="grid gap-4 lg:grid-cols-[1fr_20rem]">
@@ -804,77 +847,54 @@ function AgentFlow({ onDone }: { onDone: (id: string) => void }) {
             />
           </div>
 
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div>
-              <label htmlFor="env" className="text-[0.8125rem] font-medium text-fg">Environment</label>
-              <select
-                id="env"
-                value={env}
-                onChange={(e) => setEnv(e.target.value)}
-                className="mt-2 h-10 w-full rounded-xl border border-[var(--line)] bg-ink-900 px-3 text-[0.8125rem] text-fg focus:border-iris-500/50 focus:outline-none"
-              >
-                <option>staging.meridian.app</option>
-                <option>demo.meridian.app</option>
-              </select>
-              <p className="mt-1.5 text-2xs text-fg-faint">Allowlisted environments only.</p>
-            </div>
-            <div>
-              <label htmlFor="audience" className="text-[0.8125rem] font-medium text-fg">Audience</label>
-              <input
-                id="audience"
-                value={audience}
-                onChange={(e) => setAudience(e.target.value)}
-                className="mt-2 h-10 w-full rounded-xl border border-[var(--line)] bg-ink-900 px-3.5 text-[0.8125rem] text-fg focus:border-iris-500/50 focus:outline-none"
-              />
-            </div>
-          </div>
-
           <div>
-            <div className="flex items-baseline justify-between">
-              <label htmlFor="length" className="text-[0.8125rem] font-medium text-fg">Target length</label>
-              <span className="font-mono text-[0.8125rem] text-iris-300">{length}s</span>
-            </div>
-            <input
-              id="length"
-              type="range"
-              min={30}
-              max={300}
-              step={15}
-              value={length}
-              onChange={(e) => setLength(Number(e.target.value))}
-              className="mt-3 h-1.5 w-full cursor-pointer appearance-none rounded-full outline-none [&::-webkit-slider-thumb]:size-4 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white"
-              style={{
-                background: `linear-gradient(90deg, var(--color-iris-500) ${((length - 30) / 270) * 100}%, color-mix(in oklab, var(--color-fg) 12%, transparent) ${((length - 30) / 270) * 100}%)`,
-              }}
+            <label htmlFor="origins" className="text-[0.8125rem] font-medium text-fg">
+              Where the agent may go
+            </label>
+            <textarea
+              id="origins"
+              rows={2}
+              value={origins}
+              onChange={(e) => setOrigins(e.target.value)}
+              placeholder={"https://staging.example.com\nhttps://demo.example.com"}
+              className="mt-2 w-full resize-y rounded-xl border border-[var(--line)] bg-ink-900 px-3.5 py-3 font-mono text-[0.75rem] leading-relaxed text-fg placeholder:text-fg-faint focus:border-iris-500/50 focus:outline-none"
             />
+            {/*
+              A real allowlist, typed by the person, sent to the server and
+              enforced by the driver. The dropdown this replaced offered two
+              hardcoded hostnames under the words "Allowlisted environments
+              only" and sent neither anywhere.
+            */}
+            <p className="mt-1.5 text-2xs leading-relaxed text-fg-faint">
+              One origin per line. The agent cannot reach anything else — not a link on the page,
+              not a script, not a redirect.
+            </p>
           </div>
 
           <div className="flex items-start gap-2.5 rounded-xl border border-[var(--line)] bg-ink-900 p-3.5">
             <Icon name="shield" className="mt-0.5 size-4 shrink-0 text-mint-400" strokeWidth={1.9} />
             <p className="text-[0.8125rem] leading-relaxed text-fg-subtle">
-              Output lands in your review queue. Nothing the agent produces can publish to a
-              customer-facing surface without a human approval.
+              The run plans an outline and stops. Nothing is recorded, and nothing is published,
+              until you approve it on the run page.
             </p>
           </div>
 
+          {error ? (
+            <p
+              role="alert"
+              className="rounded-xl border border-rose-500/30 bg-rose-500/[0.07] px-3.5 py-2.5 text-[0.8125rem] text-rose-200"
+            >
+              {error}
+            </p>
+          ) : null}
+
           <Button
             size="md"
-            disabled={brief.trim().length < 12}
-            onClick={() => {
-              setProgress(0);
-              let i = 0;
-              const id = setInterval(() => {
-                i += 1;
-                setProgress(i / 70);
-                if (i >= 70) {
-                  clearInterval(id);
-                  onDone(projects[2].id);
-                }
-              }, 50);
-            }}
+            disabled={pending || brief.trim().length < 10 || origins.trim() === ""}
+            onClick={() => void start()}
           >
             <Icon name="sparkles" className="size-4" strokeWidth={2} />
-            Draft the outline
+            {pending ? "Planning…" : "Draft the outline"}
           </Button>
         </div>
       </Panel>
@@ -1010,18 +1030,32 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
+/**
+ * The four things that actually happen between "stop recording" and "there
+ * is something to edit".
+ *
+ * This list used to name eight, including "Synthesising narration and
+ * restoring audio", "Applying your brand system" and "Rendering video,
+ * guide, tour and clips" — none of which happen at this point, and the last
+ * of which happens only when somebody presses Export. Each was ticked off
+ * as a function of a progress bar, so the list read as a report of work
+ * completed.
+ *
+ * The thresholds match the progress values the flows actually set.
+ */
+const PROCESSING_STEPS: { label: string; at: number }[] = [
+  { label: "Reserving the take", at: 0 },
+  { label: "Uploading the recording", at: 0.1 },
+  { label: "Creating the project", at: 0.6 },
+  { label: "Transcribing with word-level alignment", at: 0.72 },
+];
+
 function Processing({ progress, label = "Producing your demo" }: { progress: number; label?: string }) {
-  const steps = [
-    "Uploading and validating the take",
-    "Transcribing with word-level alignment",
-    "Detecting interactions and narrative beats",
-    "Removing fillers, silence and wrong turns",
-    "Keyframing zooms to each interaction",
-    "Synthesising narration and restoring audio",
-    "Applying your brand system",
-    "Rendering video, guide, tour and clips",
-  ];
-  const activeStep = Math.min(steps.length - 1, Math.floor(progress * steps.length));
+  const steps = PROCESSING_STEPS.map((step) => step.label);
+  const activeStep = Math.max(
+    0,
+    PROCESSING_STEPS.filter((step) => progress >= step.at).length - 1,
+  );
 
   return (
     <Panel title={label}>

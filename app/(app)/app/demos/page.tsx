@@ -33,9 +33,19 @@ export default async function DemosPage() {
       <div className="space-y-4 px-4 py-6 md:px-8">
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <StatTile label="Live demos" value={String(demos.length)} icon="cursor" />
-          <StatTile label="Tour starts" value={formatNumber(demos.reduce((n, p) => n + Math.round(p.views * 0.62), 0))} delta="+41%" icon="play" />
-          <StatTile label="Completion" value="58%" delta="+6pt" icon="target" sub="vs. 31% on video" />
-          <StatTile label="Leads captured" value="847" delta="+19%" icon="users" sub="from in-tour forms" />
+          {/*
+            "Tour starts" multiplied real view counts by 0.62, and
+            "Completion 58%" and "Leads captured 847" were constants — which
+            made all three read as measured, because the first one was
+            derived from something real. Nothing measures a tour: the
+            renderer does not produce interactive output yet.
+          */}
+          <StatTile
+            label="Chapters"
+            value={String(demos.reduce((n, p) => n + p.segments.length, 0))}
+            icon="layers"
+            sub="across every demo"
+          />
         </div>
 
         {demos.length === 0 ? (
@@ -80,8 +90,7 @@ export default async function DemosPage() {
                     </p>
                     <div className="mt-4 flex flex-wrap gap-2">
                       {[
-                        { l: `${formatNumber(Math.round(p.views * 0.62))} starts`, i: "play" as const },
-                        { l: "58% complete", i: "target" as const },
+                        { l: `${p.segments.length} steps`, i: "layers" as const },
                         { l: "Embedded ×3", i: "code" as const },
                       ].map((s) => (
                         <span

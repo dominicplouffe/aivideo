@@ -2,7 +2,8 @@ import type { Metadata } from "next";
 import { PageHeader, Panel, StatTile, Avatar } from "@/components/app/Shared";
 import { Button } from "@/components/ui/Button";
 import { Icon } from "@/components/ui/Icon";
-import { members, workspace, activity } from "@/lib/app-data";
+import { members as fixtureMembers, workspace, activity } from "@/lib/app-data";
+import { getTeam } from "@/lib/data";
 import { relativeTime, cn } from "@/lib/utils";
 
 export const metadata: Metadata = { title: "Team" };
@@ -23,40 +24,52 @@ const roleTone: Record<string, string> = {
   Viewer: "bg-white/6 text-fg-subtle border-[var(--line)]",
 };
 
-export default function TeamPage() {
+export default async function TeamPage() {
+  // Real members, with a real project count each. The page listed the
+  // fixture roster and took counts from a literal array indexed by row, so
+  // the fourth person in any workspace owned exactly 24 projects.
+  const team = await getTeam();
+  const members = team.length > 0 ? team : fixtureMembers.map((m, i) => ({
+    id: m.id,
+    name: m.name,
+    email: m.email,
+    role: m.role,
+    lastActiveAt: null as string | null,
+    projects: 0,
+    hue: m.hue,
+    lastActive: m.lastActive,
+    index: i,
+  }));
+
   return (
     <>
       <PageHeader
         title="Team"
-        description={`${members.length} members across ${workspace.seats.total} seats. Roles are scoped per workspace, and SCIM keeps them in sync with your directory.`}
-        actions={
-          <>
-            <Button variant="outline" size="sm">
-              <Icon name="key" className="size-4" strokeWidth={1.8} />
-              SSO settings
-            </Button>
-            <Button size="sm">
-              <Icon name="plus" className="size-4" strokeWidth={2.2} />
-              Invite members
-            </Button>
-          </>
-        }
+        description={`${members.length} member${members.length === 1 ? "" : "s"} in this workspace. Roles are enforced on every read and write, not only in this table.`}
       />
+      {/* "SSO settings" and "Invite members" had no handlers. Inviting needs
+          an invitation route, which does not exist; SCIM provisioning does,
+          under /api/scim/v2. */}
 
       <div className="space-y-4 px-4 py-6 md:px-8">
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          <StatTile label="Seats used" value={`${workspace.seats.used} / ${workspace.seats.total}`} icon="users" sub="3 available" />
-          <StatTile label="Videos this month" value="41" delta="+12" icon="play" />
-          <StatTile label="Pending invites" value="2" icon="mail" sub="sent 2 days ago" />
-          <StatTile label="SSO enforced" value="Yes" icon="lock" sub="Okta · SAML 2.0" />
+          {/* "Videos this month 41 (+12)", "Pending invites 2 · sent 2 days
+              ago" and "SSO enforced — Yes · Okta · SAML 2.0" were four
+              constants describing things nothing had checked. */}
+          <StatTile label="Members" value={`${members.length}`} icon="users" />
+          <StatTile
+            label="Projects owned"
+            value={`${members.reduce((n, m) => n + m.projects, 0)}`}
+            icon="play"
+          />
         </div>
 
-        <Panel title="Members" description="Directory-synced via SCIM">
+        <Panel title="Members">
           <div className="overflow-x-auto">
             <table className="w-full min-w-[44rem] border-collapse text-left">
               <thead>
                 <tr>
-                  {["Member", "Role", "Last active", "Projects", ""].map((h) => (
+                  {["Member", "Role", "Last active", "Projects"].map((h) => (
                     <th key={h} className="border-b border-[var(--line)] px-5 py-2.5 text-2xs font-medium text-fg-faint">
                       {h}
                     </th>
@@ -68,7 +81,15 @@ export default function TeamPage() {
                   <tr key={m.id}>
                     <td className="border-b border-[var(--line)] px-5 py-3">
                       <span className="flex items-center gap-3">
-                        <Avatar name={m.name} hue={m.hue} size={32} />
+                        <Avatar
+                          name={m.name}
+                          hue={
+                            "hue" in m
+                              ? (m.hue as number)
+                              : [...m.email].reduce((n, c) => (n * 31 + c.charCodeAt(0)) % 360, 7)
+                          }
+                          size={32}
+                        />
                         <span className="min-w-0">
                           <span className="block truncate text-[0.875rem] font-medium text-fg-strong">
                             {m.name}
@@ -79,26 +100,29 @@ export default function TeamPage() {
                       </span>
                     </td>
                     <td className="border-b border-[var(--line)] px-5 py-3">
-                      <span className={cn("inline-block rounded-md border px-2 py-0.5 text-2xs", roleTone[m.role])}>
+                      <span
+                        className={cn(
+                          "inline-block rounded-md border px-2 py-0.5 text-2xs capitalize",
+                          roleTone[m.role.charAt(0).toUpperCase() + m.role.slice(1)] ??
+                            "bg-white/6 text-fg-subtle border-[var(--line)]",
+                        )}
+                      >
                         {m.role}
                       </span>
                     </td>
                     <td className="border-b border-[var(--line)] px-5 py-3">
-                      <span className="text-[0.8125rem] text-fg-subtle">{m.lastActive}</span>
-                    </td>
-                    <td className="border-b border-[var(--line)] px-5 py-3">
-                      <span className="font-mono text-[0.8125rem] text-fg-muted">
-                        {[12, 8, 19, 24, 6, 0, 0][i] ?? 0}
+                      <span className="text-[0.8125rem] text-fg-subtle">
+                        {m.lastActiveAt
+                          ? relativeTime(m.lastActiveAt)
+                          : "lastActive" in m
+                            ? (m.lastActive as string)
+                            : "never"}
                       </span>
                     </td>
-                    <td className="border-b border-[var(--line)] px-5 py-3 text-right">
-                      <button
-                        aria-label={`Manage ${m.name}`}
-                        className="inline-flex size-7 items-center justify-center rounded-lg text-fg-faint transition-colors hover:bg-ink-850 hover:text-fg"
-                      >
-                        <Icon name="dragHandle" className="size-4" strokeWidth={2} />
-                      </button>
+                    <td className="border-b border-[var(--line)] px-5 py-3">
+                      <span className="font-mono text-[0.8125rem] text-fg-muted">{m.projects}</span>
                     </td>
+                    {/* The per-member "Manage" button had no handler. */}
                   </tr>
                 ))}
               </tbody>
@@ -120,7 +144,11 @@ export default function TeamPage() {
             </ul>
           </Panel>
 
-          <Panel title="Recent activity" description="Streamable to your SIEM on Enterprise">
+          {/* The activity feed is the `activity` fixture — seven invented
+              events with names and timestamps. The real audit log is in
+              `audit_events`, hash-chained and append-only, and wants its own
+              page rather than a fixture wearing its clothes. */}
+          <Panel title="Recent activity" description="Sample data — the real audit log is not wired to this panel yet">
             <ul className="divide-y divide-[var(--line)]">
               {activity.map((a) => (
                 <li key={a.id} className="flex gap-3 px-5 py-3">

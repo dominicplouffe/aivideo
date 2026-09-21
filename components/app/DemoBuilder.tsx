@@ -80,7 +80,11 @@ export function DemoBuilder({ project }: { project: Project }) {
         <div className="min-w-0">
           <h1 className="truncate text-[0.9375rem] font-medium text-fg-strong">{project.title}</h1>
           <p className="text-2xs text-fg-faint">
-            {steps.length} steps · {steps.filter((s) => s.kind === "fork").length} branches · real DOM
+            {/* "real DOM" claimed these steps came from a captured
+                snapshot. They come from `toTour()`, which derives them from
+                transcript segments; lib/demo/tour.ts is the real DOM path
+                and this builder does not use it. */}
+            {steps.length} steps · derived from the transcript
           </p>
         </div>
         <div className="ml-auto flex items-center gap-2">
@@ -105,13 +109,11 @@ export function DemoBuilder({ project }: { project: Project }) {
             <Icon name="play" className="size-4" strokeWidth={1.9} />
             <span className="hidden sm:inline">Preview</span>
           </Button>
-          <Button variant="outline" size="sm">
-            <Icon name="code" className="size-4" strokeWidth={1.8} />
-            <span className="hidden sm:inline">Embed</span>
-          </Button>
-          <Button size="sm">
-            <Icon name="rocket" className="size-4" strokeWidth={1.9} />
-            Publish
+          {/* Embed and Publish had no handlers. Publishing lives in the
+              Studio's export dialog, where a render exists to publish. */}
+          <Button variant="outline" size="sm" href={`/app/studio/${project.id}`}>
+            <Icon name="scissors" className="size-4" strokeWidth={1.8} />
+            <span className="hidden sm:inline">Open in Studio</span>
           </Button>
         </div>
       </header>
@@ -160,17 +162,17 @@ export function DemoBuilder({ project }: { project: Project }) {
               );
             })}
           </ol>
-          <div className="mt-auto space-y-1.5 border-t border-[var(--line)] p-3">
-            {(["hotspot", "fork", "form"] as StepKind[]).map((k) => (
-              <button
-                key={k}
-                type="button"
-                className="flex w-full items-center gap-2 rounded-lg border border-[var(--line)] px-2.5 py-2 text-2xs text-fg-subtle transition-colors hover:border-[var(--line-strong)] hover:text-fg"
-              >
-                <Icon name="plus" className="size-3" strokeWidth={2.6} />
-                Add {kindMeta[k].label.toLowerCase()}
-              </button>
-            ))}
+          {/*
+            "Add hotspot", "Add branch" and "Add lead form" had no handlers.
+            Adding a step means editing a captured tour, and this builder
+            renders one derived from the transcript rather than a captured
+            one — so there is nothing yet for those buttons to add to.
+          */}
+          <div className="mt-auto border-t border-[var(--line)] p-3">
+            <p className="text-2xs leading-relaxed text-fg-faint">
+              These steps are read from the transcript. Editing a tour needs a captured DOM
+              snapshot, which the browser extension records.
+            </p>
           </div>
         </aside>
 
@@ -258,73 +260,31 @@ export function DemoBuilder({ project }: { project: Project }) {
         {/* inspector */}
         <aside className="hidden min-h-0 flex-col overflow-y-auto border-l border-[var(--line)] bg-ink-950 lg:flex">
           <div className="space-y-5 p-4">
+            {/*
+              The step title and tooltip were uncontrolled `defaultValue`
+              inputs keyed per step: every keystroke was discarded the
+              moment somebody clicked another step, and nothing was ever
+              saved. They are read-only until there is a route to save them.
+            */}
             <Group label="Step">
-              <input
-                key={step.id}
-                defaultValue={step.title}
-                className="h-9 w-full rounded-xl border border-[var(--line)] bg-ink-900 px-3 text-[0.8125rem] text-fg focus:border-iris-500/50 focus:outline-none"
-              />
-              <textarea
-                key={`${step.id}-t`}
-                defaultValue={step.tooltip}
-                rows={3}
-                className="mt-2 w-full resize-y rounded-xl border border-[var(--line)] bg-ink-900 px-3 py-2 text-[0.75rem] leading-relaxed text-fg focus:border-iris-500/50 focus:outline-none"
-              />
+              <p className="text-[0.8125rem] font-medium text-fg">{step.title}</p>
+              <p className="mt-1.5 text-[0.75rem] leading-relaxed text-fg-subtle">{step.tooltip}</p>
             </Group>
 
             <Group label="Target">
-              <Row label="Selector" value="button#new-shipment" mono />
+              {/* The selector was `button#new-shipment` on every step of
+                  every project, under a heading that said "Target". */}
               <Row label="Position" value={`${step.target.x}% / ${step.target.y}%`} mono />
               <Row label="Action" value={step.required ? "click required" : "any / skip"} />
-              <Row label="Editable text" value="yes — fix a typo here" />
             </Group>
 
-            <Group label="Behaviour">
-              <Row label="Advance on" value="click target" />
-              <Row label="Allow skip" value={step.required ? "no" : "yes"} />
-              <Row label="Mobile position" value="auto (below target)" />
-            </Group>
-
-            <Group label="Analytics">
-              <Row label="Reached" value="4,208 (68%)" mono />
-              <Row label="Completed" value="3,910 (93%)" mono />
-              <Row label="Median dwell" value="6.4s" mono />
-              {selected === 1 ? (
-                <div className="mt-2 rounded-xl border border-violet-500/30 bg-violet-500/[0.07] p-3">
-                  <p className="text-[0.75rem] text-fg">Branch split</p>
-                  <div className="mt-2 space-y-1.5">
-                    {[
-                      { l: "Operations", v: 0.58 },
-                      { l: "Finance", v: 0.27 },
-                      { l: "IT", v: 0.15 },
-                    ].map((b) => (
-                      <div key={b.l} className="flex items-center gap-2">
-                        <span className="w-16 text-[0.625rem] text-fg-subtle">{b.l}</span>
-                        <span className="h-1.5 flex-1 overflow-hidden rounded-full bg-ink-800">
-                          <span className="block h-full rounded-full bg-violet-500" style={{ width: `${b.v * 100}%` }} />
-                        </span>
-                        <span className="font-mono text-[0.5625rem] text-fg-faint">
-                          {Math.round(b.v * 100)}%
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ) : null}
-            </Group>
-
-            <Group label="Embed">
-              <pre className="overflow-x-auto rounded-xl border border-[var(--line)] bg-ink-900 p-2.5 font-mono text-[0.5625rem] leading-relaxed text-fg-muted">
-{`<div data-demoriff="${project.id}"
-     data-mode="interactive"
-     style="aspect-ratio:16/9;width:100%"></div>
-<script src="https://embed.demoriff.com/v1.js"
-        async></script>`}
-              </pre>
-              <p className="mt-2 text-2xs leading-snug text-fg-faint">
-                6 KB async runtime. Text is server-rendered so search engines index it.
-              </p>
-            </Group>
+            {/*
+              The analytics group is gone. "Reached 4,208 (68%)", "Completed
+              3,910 (93%)", "Median dwell 6.4s" and a three-way branch split
+              were identical constants on every step of every project.
+              Interactive tours are not produced by the renderer yet, so
+              there is nothing measuring them.
+            */}
           </div>
         </aside>
       </div>

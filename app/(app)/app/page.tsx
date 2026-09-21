@@ -7,7 +7,7 @@ import {
   activity, workspace, currentUser, members,
   viewsSeries, localeMatrix,
 } from "@/lib/app-data";
-import { getProjects } from "@/lib/data";
+import { getProjects, getUsage } from "@/lib/data";
 import { relativeTime, formatDuration, formatNumber, cn } from "@/lib/utils";
 
 export const metadata: Metadata = { title: "Home" };
@@ -23,6 +23,7 @@ export default async function DashboardPage() {
   // From the data access layer, so every card on this page links to a page
   // that can find what it names.
   const projects = await getProjects();
+  const usage = await getUsage();
 
   const recent = [...projects].sort(
     (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
@@ -56,16 +57,32 @@ export default async function DashboardPage() {
       <div className="px-4 py-6 md:px-8 md:py-8">
         {/* stats */}
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          <StatTile label="Total views" value={formatNumber(totalViews)} delta="+18.4%" icon="eye" sub="vs. last 30 days" />
-          <StatTile label="Avg. completion" value={`${Math.round(avgCompletion * 100)}%`} delta="+3.1pt" icon="play" sub="across published" />
-          <StatTile label="CTA clicks" value={formatNumber(totalCta)} delta="+24.9%" icon="target" sub="12.3% conversion" />
+          {/* The three deltas here were string literals, and "12.3%
+              conversion" was one too — beside three totals that are real,
+              which is what made them read as measured. */}
+          <StatTile label="Total views" value={formatNumber(totalViews)} icon="eye" />
+          <StatTile
+            label="Avg. completion"
+            value={`${Math.round(avgCompletion * 100)}%`}
+            icon="play"
+            sub="across published"
+          />
+          <StatTile
+            label="CTA clicks"
+            value={formatNumber(totalCta)}
+            icon="target"
+            sub={`${((totalCta / Math.max(1, totalViews)) * 100).toFixed(1)}% conversion`}
+          />
           <StatTile
             label="Minutes used"
-            value={`${workspace.minutes.used}`}
-            delta={`${workspace.minutes.total - workspace.minutes.used} left`}
+            value={`${usage ? Math.round(usage.usedSeconds / 60) : 0}`}
+            delta={
+              usage
+                ? `${Math.max(0, Math.round((usage.allowanceSeconds - usage.usedSeconds) / 60))} left`
+                : undefined
+            }
             deltaTone="flat"
             icon="clock"
-            sub="resets in 10 days"
           />
         </div>
 
@@ -187,10 +204,7 @@ export default async function DashboardPage() {
               <p className="text-[1.75rem] leading-none font-semibold tracking-[-0.03em] text-fg-strong tabular-nums">
                 {formatNumber(viewsSeries("dash").reduce((a, b) => a + b, 0))}
               </p>
-              <p className="mt-1.5 flex items-center gap-1 text-[0.75rem] text-mint-400">
-                <Icon name="trending" className="size-3.5" strokeWidth={2} />
-                +18.4% vs. previous 30 days
-              </p>
+              {/* "+18.4% vs. previous 30 days", hardcoded, under a real sum. */}
               <Sparkline data={viewsSeries("dash")} className="mt-4 h-14" />
             </Panel>
 

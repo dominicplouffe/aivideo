@@ -50,7 +50,8 @@ export default async function LocalizationPage() {
       <div className="space-y-4 px-4 py-6 md:px-8">
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <StatTile label="Languages published" value={String(published)} icon="globe" sub="of 34 available" />
-          <StatTile label="Localized assets" value={String(localized.length * 4)} icon="layers" sub="across all projects" />
+          {/* `localized.length * 4` presented a multiplication as a count. */}
+          <StatTile label="Languages configured" value={String(localized.length)} icon="layers" />
           <StatTile label="Stale translations" value={String(stale)} deltaTone="down" delta="needs review" icon="alert" />
           <StatTile label="Minutes billed" value="0" icon="creditCard" sub="translations are never re-billed" />
         </div>

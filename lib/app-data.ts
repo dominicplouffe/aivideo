@@ -65,6 +65,14 @@ export interface Project {
    * with no footage behind it.
    */
   recordingId?: string | null;
+  /**
+   * Whether that take's bytes actually arrived.
+   *
+   * Separate from `recordingId` because a recording row exists from the
+   * moment somebody presses record, and a `<video>` pointed at one that
+   * never finished uploading is a 404 per thumbnail.
+   */
+  hasMedia?: boolean;
   /** The Studio's saved decisions. Absent means "nobody has edited this yet". */
   editState?: Record<string, unknown> | null;
 }

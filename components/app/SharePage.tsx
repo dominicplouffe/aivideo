@@ -23,13 +23,11 @@ export function SharePage({
   videoUrl?: string | null;
 }) {
   const [tab, setTab] = useState<"video" | "guide" | "tour">("video");
-  const [locale, setLocale] = useState("en-US");
   const [chapter, setChapter] = useState(0);
   const [copied, setCopied] = useState(false);
   const [time, setTime] = useState(0);
   const video = useRef<HTMLVideoElement>(null);
 
-  const available = localeMatrix.filter((l) => project.locales.includes(l.code));
   const seg = project.segments[chapter];
 
   /**
@@ -81,18 +79,10 @@ export function SharePage({
             </span>
           </div>
           <div className="flex items-center gap-2">
-            {available.length > 1 ? (
-              <select
-                value={locale}
-                onChange={(e) => setLocale(e.target.value)}
-                aria-label="Language"
-                className="h-8 rounded-lg border border-[var(--line)] bg-ink-900 px-2.5 text-2xs text-fg focus:border-iris-500/50 focus:outline-none"
-              >
-                {available.map((l) => (
-                  <option key={l.code} value={l.code}>{l.label}</option>
-                ))}
-              </select>
-            ) : null}
+            {/* The language switcher changed a state variable and nothing
+                else: no content on the page was localised by it and nothing
+                was requested. It returns when a translated render exists to
+                switch to. */}
             <Button href="/contact" size="sm">Book a demo</Button>
           </div>
         </div>
@@ -194,15 +184,13 @@ export function SharePage({
                       </span>
                     </div>
 
-                    <button
-                      type="button"
-                      className="absolute inset-0 flex items-center justify-center bg-black/15 transition-colors hover:bg-black/25"
-                      aria-label="Play"
-                    >
-                      <span className="inline-flex size-14 items-center justify-center rounded-full bg-black/55 backdrop-blur-sm">
-                        <Icon name="play" className="size-5 text-white/92" />
-                      </span>
-                    </button>
+                    {/* The play button had no handler, and it only ever
+                        rendered when there was no video to play — so it was
+                        an invitation to press something that could not
+                        work. A caption replaces it. */}
+                    <span className="absolute inset-x-0 top-1/2 -translate-y-1/2 px-6 text-center text-[0.75rem] text-white/70">
+                      This demo has no rendered video yet.
+                    </span>
 
                     <div className="absolute inset-x-0 bottom-0 flex items-center gap-2.5 bg-gradient-to-t from-black/80 to-transparent px-3 pt-6 pb-2.5">
                       <Icon name="play" className="size-3.5 text-white/85" />
@@ -314,30 +302,8 @@ export function SharePage({
                   <Icon name={copied ? "check" : "copy"} className="size-3.5" strokeWidth={2} />
                 </Button>
               </div>
-              {available.length > 1 ? (
-                <>
-                  <p className="mt-4 font-mono text-2xs tracking-[0.14em] text-fg-faint uppercase">
-                    Also available in
-                  </p>
-                  <div className="mt-2 flex flex-wrap gap-1.5">
-                    {available.map((l) => (
-                      <button
-                        key={l.code}
-                        type="button"
-                        onClick={() => setLocale(l.code)}
-                        className={cn(
-                          "rounded-md border px-2 py-0.5 text-2xs transition-colors",
-                          locale === l.code
-                            ? "border-iris-500/45 bg-iris-500/12 text-iris-300"
-                            : "border-[var(--line)] text-fg-subtle hover:text-fg",
-                        )}
-                      >
-                        {l.label}
-                      </button>
-                    ))}
-                  </div>
-                </>
-              ) : null}
+              {/* The second copy of the language switcher, which changed
+                  the same unused state variable as the first. */}
             </div>
           </aside>
         </div>

@@ -121,7 +121,9 @@ export default function BrandPage() {
           <div className="flex flex-wrap items-center gap-3 border-t border-[var(--line)] bg-ink-900 px-5 py-4">
             <Icon name="alert" className="size-4 shrink-0 text-amber-400" strokeWidth={1.9} />
             <p className="min-w-0 flex-1 text-[0.8125rem] text-fg-muted">
-              <span className="text-fg">14 videos</span> are running an older version of Meridian —
+              {/* "14 videos" was a constant beside a "Re-render all"
+                  button with no handler. */}
+              <span className="text-fg">Some videos</span> may be running an older version of a kit —
               Primary after last week's outro change.
             </p>
             <Button size="sm" className={cn("shrink-0")}>Re-render all</Button>

@@ -153,7 +153,10 @@ async function main() {
       createdBy: id("member", p.owner),
       source: "extension",
       status: "ready",
-      mediaKey: `${workspaceId}/recordings/${p.id}/source.webm`,
+      // No `mediaKey`. The seed writes rows, not files — claiming a storage
+      // key it never wrote meant every thumbnail in the library pointed at
+      // a 404, and the Studio opened a player with nothing behind it.
+      mediaKey: null,
       durationSec: p.sourceDurationSec,
       width: 3840,
       height: 2160,

@@ -375,3 +375,67 @@ export async function getViewer(): Promise<{
     return null;
   }
 }
+
+/**
+ * The workspace's members, with how many projects each one owns.
+ *
+ * The team page listed the fixture roster and took project counts from a
+ * literal array indexed by row — `[12, 8, 19, 24, 6, 0, 0]` — so the fourth
+ * person in any workspace owned 24 projects.
+ */
+export async function getTeam(): Promise<
+  {
+    id: string;
+    name: string;
+    email: string;
+    role: string;
+    lastActiveAt: string | null;
+    projects: number;
+    deactivated: boolean;
+  }[]
+> {
+  const { allowed: may, actor } = await guard("project.view");
+  if (!may || !actor || !isDatabaseConfigured()) return [];
+
+  try {
+    const { getDb } = await import("@/lib/db/client");
+    const schema = await import("@/lib/db/schema");
+    const { eq, and, isNull, sql } = await import("drizzle-orm");
+
+    const rows = await getDb()
+      .select({
+        id: schema.members.id,
+        name: schema.members.name,
+        email: schema.members.email,
+        role: schema.members.role,
+        lastActiveAt: schema.members.lastActiveAt,
+        deactivatedAt: schema.members.deactivatedAt,
+        // Counted in the query rather than by loading every project and
+        // grouping in JavaScript, which is the same answer at ten members
+        // and a different one at ten thousand.
+        projects: sql<number>`(
+          select count(*) from ${schema.projects}
+          where ${schema.projects.ownerId} = ${schema.members.id}
+            and ${schema.projects.deletedAt} is null
+        )`,
+      })
+      .from(schema.members)
+      .where(
+        and(eq(schema.members.workspaceId, actor.workspaceId), isNull(schema.members.deactivatedAt)),
+      )
+      .orderBy(schema.members.createdAt);
+
+    return rows.map((row) => ({
+      id: row.id,
+      name: row.name,
+      email: row.email,
+      role: row.role,
+      lastActiveAt: row.lastActiveAt?.toISOString() ?? null,
+      projects: Number(row.projects ?? 0),
+      deactivated: row.deactivatedAt !== null,
+    }));
+  } catch (error) {
+    console.error("[data] team read failed:", error);
+    return [];
+  }
+}

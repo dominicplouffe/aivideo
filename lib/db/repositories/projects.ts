@@ -39,6 +39,7 @@ function toProject(
     views: number;
     completion: number;
     ctaClicks: number;
+    hasMedia: boolean;
   },
 ): Project {
   // Finished duration is derived from the segments that survive the edit,
@@ -76,6 +77,7 @@ function toProject(
     collection: r.collection ?? "",
     segments: segs.sort((a, b) => a.ordinal - b.ordinal).map(toSegment),
     recordingId: r.recordingId ?? null,
+    hasMedia: extras.hasMedia,
     editState: (r.editState as Record<string, unknown> | null) ?? null,
   };
 }
@@ -84,13 +86,24 @@ async function hydrate(rows: Row[]): Promise<Project[]> {
   if (rows.length === 0) return [];
   const ids = rows.map((r) => r.id);
 
-  const [segs, locs, asts, kits, vcs] = await Promise.all([
+  const recordingIds = rows.map((r) => r.recordingId).filter((id): id is string => id !== null);
+
+  const [segs, locs, asts, kits, vcs, recs] = await Promise.all([
     getDb().select().from(s.segments).where(inArray(s.segments.projectId, ids)),
     getDb().select().from(s.locales).where(inArray(s.locales.projectId, ids)),
     getDb().select().from(s.assets).where(inArray(s.assets.projectId, ids)),
     getDb().select().from(s.brandKits),
     getDb().select().from(s.voices),
+    // Which takes have bytes. One query rather than one per card.
+    recordingIds.length > 0
+      ? getDb()
+          .select({ id: s.recordings.id, mediaKey: s.recordings.mediaKey })
+          .from(s.recordings)
+          .where(inArray(s.recordings.id, recordingIds))
+      : Promise.resolve([] as { id: string; mediaKey: string | null }[]),
   ]);
+
+  const withMedia = new Set(recs.filter((r) => r.mediaKey !== null).map((r) => r.id));
 
   const segsBy = new Map<string, SegRow[]>();
   for (const seg of segs) {
@@ -121,6 +134,7 @@ async function hydrate(rows: Row[]): Promise<Project[]> {
       views: 0,
       completion: 0,
       ctaClicks: 0,
+      hasMedia: r.recordingId !== null && withMedia.has(r.recordingId),
     }),
   );
 }
