@@ -76,25 +76,41 @@ async function messageFrom(response: Response): Promise<string> {
  * not: a wrong duration is worse than none, because everything downstream
  * treats it as fact.
  */
-async function durationOf(url: string | null): Promise<number | null> {
-  if (!url) return null;
+interface TakeShape {
+  durationSec: number | null;
+  width: number | null;
+  height: number | null;
+}
+
+async function measure(url: string | null): Promise<TakeShape> {
+  const empty: TakeShape = { durationSec: null, width: null, height: null };
+  if (!url) return empty;
+
   return new Promise((resolve) => {
     const probe = document.createElement("video");
-    const done = (value: number | null) => {
+    // Frame size, read off the same probe rather than a mounted element:
+    // the live preview is unmounted by the time this runs, so reading a ref
+    // here returned null and the recording row never learned its own size.
+    const shape = (durationSec: number | null): TakeShape => ({
+      durationSec,
+      width: probe.videoWidth || null,
+      height: probe.videoHeight || null,
+    });
+    const done = (value: TakeShape) => {
       probe.src = "";
       resolve(value);
     };
     probe.preload = "metadata";
     probe.onloadedmetadata = () => {
-      if (Number.isFinite(probe.duration) && probe.duration > 0) return done(probe.duration);
+      if (Number.isFinite(probe.duration) && probe.duration > 0) return done(shape(probe.duration));
       probe.currentTime = 1e101;
       probe.ontimeupdate = () => {
         probe.ontimeupdate = null;
-        done(Number.isFinite(probe.duration) && probe.duration > 0 ? probe.duration : null);
+        done(shape(Number.isFinite(probe.duration) && probe.duration > 0 ? probe.duration : null));
       };
     };
-    probe.onerror = () => done(null);
-    setTimeout(() => done(null), 5000);
+    probe.onerror = () => done(empty);
+    setTimeout(() => done(empty), 5000);
     probe.src = url;
   });
 }
@@ -279,11 +295,14 @@ function RecordFlow({ onDone }: { onDone: (projectId: string) => void }) {
       setProgress(0.1);
       setStage(`Uploading ${formatBytes(blob.size)}…`);
 
-      // The duration comes from the element that just played it back; the
-      // server would otherwise have to probe the file to learn it.
-      const duration = await durationOf(blobUrl);
+      // Duration and frame size, measured off the blob. A MediaRecorder
+      // WebM carries no duration in its header, so `measure` seeks past the
+      // end to make the browser work it out.
+      const take = await measure(blobUrl);
       const query = new URLSearchParams();
-      if (duration) query.set("duration", String(duration));
+      if (take.durationSec) query.set("duration", String(take.durationSec));
+      if (take.width) query.set("width", String(take.width));
+      if (take.height) query.set("height", String(take.height));
 
       const uploaded = await fetch(
         `/api/recordings/${recordingId}/media?${query.toString()}`,
