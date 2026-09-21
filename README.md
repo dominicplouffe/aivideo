@@ -2,12 +2,19 @@
 
 **Studio-grade product demos from a rough screen recording.**
 
-DemoRiff turns one raw screen recording into a directed demo video, a clickable
-interactive tour, a step-by-step written guide with annotated screenshots, and a
-set of vertical social cuts — on brand, in 34 languages.
+DemoRiff turns one raw screen recording into a directed demo video and a
+step-by-step written guide with screenshots taken from the footage — cut by
+editing the transcript, so deleting a word removes those milliseconds of
+video.
 
 This repository contains the complete public marketing site and the full
 application, built as a single Next.js project.
+
+**What works end to end today:** record or import → transcribe → edit as
+text → render an MP4 with FFmpeg → publish it to a share page and an embed.
+Interactive tours and social cuts are designed and not built; the export
+dialog says so rather than offering them. Anything the app cannot measure,
+it declines to display.
 
 ---
 
@@ -38,16 +45,20 @@ log and everything else that needs to persist.
 createdb demoriff
 echo 'DATABASE_URL=postgres://localhost:5432/demoriff' > .env.local
 
-npm run db:migrate   # fourteen migrations
+npm run db:migrate   # sixteen migrations
 npm run db:seed      # one workspace, seven members, eight projects
 npm run dev
 ```
 
+You can also create your own workspace at `/signup`, which needs no seed at
+all — it makes a workspace and signs you in as its owner.
+
 **Then sign in, because `/app` now redirects to `/signin`.** Use any seeded
 address — `daniel@meridian.app` (owner), `sofia@meridian.app` (reviewer),
-`jonas@meridian.app` (viewer). The password field is not shown: email
-sign-in is a development convenience and is refused outright in production,
-where single sign-on is the only way in.
+`jonas@meridian.app` (viewer). There is no password field anywhere, and that
+is deliberate rather than unfinished: email sign-in is a development
+convenience refused outright in production, where single sign-on is the only
+way in, so a password box would take a credential nothing can check.
 
 Signing in as different roles is the quickest way to see the permission
 model: a reviewer can approve an agent run and cannot start one, a creator
@@ -59,15 +70,35 @@ the reverse.
 npm run build           # production build (also builds the embed script)
 npm run start           # serve the production build
 npm run typecheck       # tsc --noEmit
-npm test                # 319 tests; 495 with DATABASE_URL set
+npm test                # 539 tests with DATABASE_URL set
 npm run worker          # render + webhook + audit-stream worker (needs ffmpeg)
 npm run build:extension # the Chromium capture extension, into extension/dist
 npm run db:studio       # browse the database
 ```
 
-`npm run worker` needs `ffmpeg` and `ffprobe` on the PATH. The extension
-loads into Chromium via `chrome://extensions` → Developer mode → Load
-unpacked → `extension/dist`.
+**Run the worker to export anything.** Rendering happens in a separate
+process, so `npm run worker` has to be running alongside `npm run dev` for
+the export dialog to produce a file. It needs `ffmpeg` and `ffprobe` on the
+PATH. If you forget, the dialog says so and names the command rather than
+spinning.
+
+The extension loads into Chromium via `chrome://extensions` → Developer mode
+→ Load unpacked → `extension/dist`.
+
+### Turning on a real vendor
+
+Provider selection is per capability: set one key and that one capability
+becomes real, with the rest staying on deterministic mocks.
+
+```bash
+DEEPGRAM_API_KEY=...     # real transcription — the one the editor rests on
+ANTHROPIC_API_KEY=...    # the Riff assistant, translation, frame masking
+ELEVENLABS_API_KEY=...   # synthesized narration (also needs DEMORIFF_WORKSPACE_ID)
+```
+
+`GET /api/providers` reports what each capability resolved to and what is
+missing where it did not, and the Studio says on screen when a transcript
+came from the mock rather than a microphone.
 
 `.env.example` documents every variable, each with a note on what breaks
 without it. None is required for either path above.

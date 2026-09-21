@@ -101,15 +101,31 @@ export function Canvas({
               )}
             </div>
 
-            {/* brand frame */}
-            <div aria-hidden className="pointer-events-none absolute inset-0 ring-2 ring-inset ring-iris-500/20" />
-            <div className="absolute top-3 left-3 flex items-center gap-1.5 rounded-md bg-black/45 px-2 py-1 backdrop-blur-sm">
-              <span className="size-3 rounded-[4px] bg-gradient-to-br from-cyan-400 to-iris-500" />
-              <span className="text-[0.5rem] font-semibold text-white/85">Meridian</span>
-            </div>
+            {/*
+              The brand frame and watermark only draw over the illustrated
+              canvas.
 
-            {/* presenter */}
-            {state.presenter ? (
+              Two things were wrong with them over a real take. The word
+              was "Meridian" — a fixture workspace's name, shown to every
+              account regardless of theirs. And the renderer burns in
+              neither, so a preview carrying them showed something the
+              exported file would not have, which is the one thing a preview
+              must not do.
+            */}
+            {!mediaUrl ? (
+              <>
+                <div aria-hidden className="pointer-events-none absolute inset-0 ring-2 ring-inset ring-iris-500/20" />
+                <div className="absolute top-3 left-3 flex items-center gap-1.5 rounded-md bg-black/45 px-2 py-1 backdrop-blur-sm">
+                  <span className="size-3 rounded-[4px] bg-gradient-to-br from-cyan-400 to-iris-500" />
+                  <span className="text-[0.5rem] font-semibold text-white/85">Sample</span>
+                </div>
+              </>
+            ) : null}
+
+            {/* The presenter bubble is drawn here and by nothing else: the
+                encoder has no overlay for it. It stays as a preview of what
+                the setting means, over the sample canvas only. */}
+            {state.presenter && !mediaUrl ? (
               <div className="absolute right-4 bottom-12 size-20 overflow-hidden rounded-2xl border-2 border-white/15 bg-[linear-gradient(160deg,#2A2140,#131826)]">
                 <div className="flex h-full flex-col items-center justify-end pb-1">
                   <div className="size-8 rounded-full bg-[linear-gradient(140deg,#8B7355,#5C4A3A)]" />
