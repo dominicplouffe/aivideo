@@ -3,6 +3,7 @@
 import { cn, formatDuration } from "@/lib/utils";
 import { Icon, type IconName } from "@/components/ui/Icon";
 import type { Project } from "@/lib/app-data";
+import { silentSpanSec } from "@/lib/segment-span";
 import type { EditState, EditedWord } from "./types";
 
 /** What the four chips ask for, in the words a person would use. */
@@ -38,7 +39,8 @@ export function Transcript({
   onAsk?: (prompt: string) => void;
 }) {
   const totalWords = project.segments.reduce((n, s) => n + s.words.length, 0);
-  const keptWords = timeline.length;
+  // Silent spans stand in for wordless chapters and are not words.
+  const keptWords = timeline.filter((w) => !w.silent).length;
   const removed = totalWords - keptWords;
 
   // Map (segIndex, wordIndex) → edited start time so clicking a word seeks.
@@ -142,31 +144,42 @@ export function Transcript({
                 <p className="mb-2 font-mono text-2xs text-fg-faint">{seg.action}</p>
               ) : null}
 
-              <p className="text-[0.875rem] leading-[1.85]">
-                {seg.words.map((w, wordIndex) => {
-                  const edited = index.get(`${segIndex}:${wordIndex}`);
-                  const isCut = Boolean(w.cut) && state.removeFillers;
-                  const isNow =
-                    activeWord?.segIndex === segIndex && activeWord?.wordIndex === wordIndex;
-                  return (
-                    <span
-                      key={wordIndex}
-                      onClick={() => edited && onSeek(edited.start)}
-                      className={cn(
-                        "rounded px-px transition-colors",
-                        edited && "cursor-pointer",
-                        isCut && "text-fg-faint line-through decoration-rose-400/70",
-                        !isCut && w.cut && "bg-rose-500/12 text-rose-300",
-                        !isCut && w.em && "font-medium text-cyan-300",
-                        !isCut && !w.em && !w.cut && "text-fg-muted hover:text-fg",
-                        isNow && "bg-iris-500/25 text-fg-strong",
-                      )}
-                    >
-                      {w.w}{" "}
-                    </span>
-                  );
-                })}
-              </p>
+              {seg.words.length === 0 ? (
+                // Nothing was heard — no microphone, or audio that was music
+                // or room noise rather than speech. Said plainly, because a
+                // chapter with no text and no explanation looks like a
+                // transcription that never ran.
+                <p className="text-[0.8125rem] leading-relaxed text-fg-faint">
+                  No speech was heard in this chapter. It plays as recorded,{" "}
+                  {formatDuration(silentSpanSec(seg))} of footage.
+                </p>
+              ) : (
+                <p className="text-[0.875rem] leading-[1.85]">
+                  {seg.words.map((w, wordIndex) => {
+                    const edited = index.get(`${segIndex}:${wordIndex}`);
+                    const isCut = Boolean(w.cut) && state.removeFillers;
+                    const isNow =
+                      activeWord?.segIndex === segIndex && activeWord?.wordIndex === wordIndex;
+                    return (
+                      <span
+                        key={wordIndex}
+                        onClick={() => edited && onSeek(edited.start)}
+                        className={cn(
+                          "rounded px-px transition-colors",
+                          edited && "cursor-pointer",
+                          isCut && "text-fg-faint line-through decoration-rose-400/70",
+                          !isCut && w.cut && "bg-rose-500/12 text-rose-300",
+                          !isCut && w.em && "font-medium text-cyan-300",
+                          !isCut && !w.em && !w.cut && "text-fg-muted hover:text-fg",
+                          isNow && "bg-iris-500/25 text-fg-strong",
+                        )}
+                      >
+                        {w.w}{" "}
+                      </span>
+                    );
+                  })}
+                </p>
+              )}
             </section>
           );
         })}

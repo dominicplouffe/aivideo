@@ -1,4 +1,5 @@
 import type { Project, Segment } from "@/lib/app-data";
+import { silentSpanSec } from "@/lib/segment-span";
 import type { MaskedRegion } from "@/lib/providers/types";
 
 /**
@@ -183,6 +184,14 @@ interface SourceWord {
 function sourceWords(segments: Segment[]): SourceWord[] {
   const out: SourceWord[] = [];
   segments.forEach((seg, segIndex) => {
+    if (seg.words.length === 0) {
+      // Silent footage plays as recorded; see `silentSpanSec`. One range,
+      // no text: it becomes a clip and never a caption.
+      if (silentSpanSec(seg) > 0) {
+        out.push({ text: "", start: seg.start, end: seg.end, cut: false, segIndex });
+      }
+      return;
+    }
     let t = seg.start;
     for (const word of seg.words) {
       out.push({ text: word.w, start: t, end: t + word.d, cut: Boolean(word.cut), segIndex });
@@ -319,6 +328,7 @@ export function buildEdl(input: BuildEdlInput): Edl {
       current = null;
     };
     for (const word of kept) {
+      if (!word.text) continue; // a silent span has nothing to caption
       const at = mapSourceToOutput(clips, word.start);
       if (at === null) continue;
       const endsAt = at + (word.end - word.start);

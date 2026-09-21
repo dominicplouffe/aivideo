@@ -2,6 +2,7 @@ import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { getDb } from "../client";
 import * as s from "../schema";
 import type { Project, Segment, ProjectStatus, OutputKind } from "@/lib/app-data";
+import { silentSpanSec } from "@/lib/segment-span";
 import { slugify } from "@/lib/utils";
 
 /**
@@ -50,6 +51,11 @@ function toProject(
   const removeFillers = (r.editState as { removeFillers?: boolean })?.removeFillers ?? true;
   const durationSec = segs.reduce((total, seg, i) => {
     if (deleted.has(i)) return total;
+    if (seg.words.length === 0) {
+      // Silent footage plays as recorded; see `silentSpanSec`.
+      const span = silentSpanSec({ start: seg.startSec, end: seg.endSec });
+      return span > 0 ? total + span + 0.35 : total;
+    }
     const spoken = seg.words
       .filter((w) => !(removeFillers && w.cut))
       .reduce((n, w) => n + w.d, 0);

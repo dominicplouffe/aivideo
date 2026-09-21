@@ -6,6 +6,7 @@ import {
   serializeEditState,
   sourceTimeAt,
   buildTimeline,
+  timelineDuration,
   DEFAULT_EDIT_STATE,
 } from "@/components/app/studio/types";
 import type { TranscriptionResult } from "@/lib/providers/types";
@@ -166,6 +167,25 @@ test("the playhead maps back to where the words actually are in the file", () =>
 
   assert.equal(sourceTimeAt(timeline, 0), 0);
   assert.ok(Math.abs((sourceTimeAt(timeline, 0.31) ?? 0) - 1.31) < 0.02);
+});
+
+test("a take with no speech still plays, start to end", () => {
+  // Recorded without a microphone, or over music: Deepgram hears nothing,
+  // and the editor must still show the footage rather than a zero-length
+  // edit with a play button that does nothing.
+  const silent: TranscriptionResult = { language: "en", durationSec: 47.8, words: [] };
+  const drafts = segmentTranscript(silent);
+  assert.equal(drafts.length, 1);
+  assert.ok(Math.abs(editedDuration(drafts) - (47.8 + 0.35)) < 0.001);
+
+  const timeline = buildTimeline(projectWith(drafts), DEFAULT_EDIT_STATE);
+  assert.equal(timeline.length, 1);
+  assert.equal(timeline[0].silent, true);
+  assert.equal(timeline[0].text, "");
+  assert.ok(Math.abs(timelineDuration(timeline) - 47.8) < 0.001);
+  // No words means nothing was cut, so edited time is source time.
+  assert.equal(sourceTimeAt(timeline, 0), 0);
+  assert.ok(Math.abs((sourceTimeAt(timeline, 12.5) ?? 0) - 12.5) < 0.001);
 });
 
 test("keeping the fillers makes edited time and source time agree again", () => {

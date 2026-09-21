@@ -1,4 +1,5 @@
 import type { TranscriptionResult } from "@/lib/providers/types";
+import { silentSpanSec } from "@/lib/segment-span";
 
 /**
  * Turns a word-level transcript into the chapters the Studio edits.
@@ -171,6 +172,11 @@ export function segmentTranscript(
 /** Runtime left after the fillers are cut — what the finished video will run. */
 export function editedDuration(drafts: SegmentDraft[]): number {
   return drafts.reduce((total, draft) => {
+    if (draft.words.length === 0) {
+      // Silent footage plays as recorded; see `silentSpanSec`.
+      const span = silentSpanSec({ start: draft.startSec, end: draft.endSec });
+      return span > 0 ? total + span + 0.35 : total;
+    }
     const spoken = draft.words.filter((w) => !w.cut).reduce((n, w) => n + w.d, 0);
     return total + spoken + 0.35;
   }, 0);

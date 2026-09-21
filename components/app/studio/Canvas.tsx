@@ -5,6 +5,7 @@ import { cn, formatDuration, stablePercent } from "@/lib/utils";
 import { Icon } from "@/components/ui/Icon";
 import { MockApp } from "@/components/marketing/MockApp";
 import type { Project, Segment } from "@/lib/app-data";
+import { silentSpanSec } from "@/lib/segment-span";
 import type { EditState } from "./types";
 
 export function Canvas({
@@ -297,15 +298,17 @@ export function TimelineStrip({
     }));
   }, [project.segments, project.sourceDurationSec, state.deletedSegments]);
 
-  const totalWeight = live.reduce(
-    (n, { s }) =>
-      n + s.words.filter((w) => !(state.removeFillers && w.cut)).reduce((m, w) => m + w.d, 0),
-    0,
-  );
+  // A chapter's share of the strip is its running time under this edit.
+  // Silent footage plays as recorded; see `silentSpanSec`.
+  const weightOf = (s: Segment) =>
+    s.words.length === 0
+      ? silentSpanSec(s)
+      : s.words.filter((w) => !(state.removeFillers && w.cut)).reduce((m, w) => m + w.d, 0);
+  const totalWeight = live.reduce((n, { s }) => n + weightOf(s), 0);
 
   let acc = 0;
   const laid = live.map(({ s, i }) => {
-    const w = s.words.filter((x) => !(state.removeFillers && x.cut)).reduce((m, x) => m + x.d, 0);
+    const w = weightOf(s);
     const start = acc;
     acc += w;
     return { s, i, start, width: w / Math.max(0.01, totalWeight) };

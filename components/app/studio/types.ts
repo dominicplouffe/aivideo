@@ -1,4 +1,5 @@
 import type { Project, Segment } from "@/lib/app-data";
+import { silentSpanSec } from "@/lib/segment-span";
 
 export interface EditedWord {
   segIndex: number;
@@ -16,6 +17,12 @@ export interface EditedWord {
   srcStart: number;
   cut: boolean;
   em: boolean;
+  /**
+   * A span standing in for a chapter that has no words, so the playhead
+   * crosses it and the canvas shows its frames. Not a word: it carries no
+   * text, is never counted as one, and cannot be cut as a filler.
+   */
+  silent: boolean;
 }
 
 export interface EditState {
@@ -38,6 +45,25 @@ export function buildTimeline(project: Project, state: EditState): EditedWord[] 
   let t = 0;
   project.segments.forEach((seg: Segment, segIndex) => {
     if (state.deletedSegments.has(segIndex)) return;
+    if (seg.words.length === 0) {
+      // Silent footage plays as recorded; see `silentSpanSec`.
+      const span = silentSpanSec(seg);
+      if (span > 0) {
+        out.push({
+          segIndex,
+          wordIndex: 0,
+          text: "",
+          start: t,
+          end: t + span,
+          srcStart: seg.start,
+          cut: false,
+          em: false,
+          silent: true,
+        });
+        t += span + 0.35;
+      }
+      return;
+    }
     seg.words.forEach((w, wordIndex) => {
       if (state.removeFillers && w.cut) return;
       out.push({
@@ -49,6 +75,7 @@ export function buildTimeline(project: Project, state: EditState): EditedWord[] 
         srcStart: w.t,
         cut: Boolean(w.cut),
         em: Boolean(w.em),
+        silent: false,
       });
       t += w.d;
     });

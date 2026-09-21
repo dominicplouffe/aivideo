@@ -122,6 +122,21 @@ test("removing a filler word genuinely shortens the video", () => {
   assert.equal(without.durationSec, 2);
 });
 
+test("a chapter with no speech renders as recorded rather than vanishing", () => {
+  const silent = project();
+  silent.segments = [{ id: "seg_silent", title: "Untitled chapter", start: 0, end: 12, words: [] }];
+  const edl = buildEdl({ project: silent, sourceUrl: "file://a.mp4" });
+
+  assert.deepEqual(
+    edl.clips.map((c) => [c.sourceStart, c.sourceEnd, c.outputStart]),
+    [[0, 12, 0]],
+  );
+  assert.equal(edl.durationSec, 12);
+  // Nothing was said, so there is nothing to caption.
+  assert.equal(edl.captions.length, 0);
+  assert.deepEqual(validateEdl(edl), []);
+});
+
 test("adjacent survivors merge into one clip rather than one clip per word", () => {
   const edl = buildEdl({ project: project(), sourceUrl: "file://a.mp4", removeFillers: true });
   // seg_1 loses its leading "So", leaving one run; seg_2 loses a middle word,
