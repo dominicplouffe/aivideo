@@ -4,7 +4,22 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import { Icon, type IconName } from "@/components/ui/Icon";
-import { projects } from "@/lib/app-data";
+
+/**
+ * The searchable projects, handed down from the layout's own read.
+ *
+ * This list used to be the seeded fixture array, so ⌘K in a workspace with
+ * no projects offered eight of somebody else's and navigated to a Studio
+ * that would 404.
+ */
+export interface PaletteProject {
+  id: string;
+  title: string;
+  slug: string;
+  description: string;
+  collection: string;
+  status: string;
+}
 
 interface Command {
   id: string;
@@ -35,7 +50,15 @@ const staticCommands: Command[] = [
   { id: "api", label: "Open API reference", icon: "code", group: "Help", href: "/docs/api" },
 ];
 
-export function CommandPalette({ open, onClose }: { open: boolean; onClose: () => void }) {
+export function CommandPalette({
+  open,
+  onClose,
+  projects = [],
+}: {
+  open: boolean;
+  onClose: () => void;
+  projects?: PaletteProject[];
+}) {
   const router = useRouter();
   const [query, setQuery] = useState("");
   const [cursor, setCursor] = useState(0);
@@ -54,7 +77,7 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
         keywords: p.description + " " + p.slug,
       })),
     ],
-    [],
+    [projects],
   );
 
   const results = useMemo(() => {

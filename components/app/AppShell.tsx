@@ -7,8 +7,8 @@ import { cn, relativeTime } from "@/lib/utils";
 import { LogoMark } from "@/components/brand/Logo";
 import { Icon, type IconName } from "@/components/ui/Icon";
 import { Button } from "@/components/ui/Button";
-import { workspace, currentUser } from "@/lib/app-data";
-import { CommandPalette } from "./CommandPalette";
+
+import { CommandPalette, type PaletteProject } from "./CommandPalette";
 
 interface NavEntry {
   label: string;
@@ -61,12 +61,15 @@ export function AppShell({
   children,
   usage = null,
   viewer = null,
+  projects = [],
 }: {
   children: React.ReactNode;
   /** Real metered usage, or null when there is nothing measured to show. */
   usage?: ShellUsage | null;
-  /** The signed-in member, or null in fixture mode. */
+  /** The signed-in member. Null only while the layout is gating. */
   viewer?: ShellViewer | null;
+  /** This workspace's projects, for the ⌘K palette. */
+  projects?: PaletteProject[];
 }) {
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -75,18 +78,21 @@ export function AppShell({
   useEffect(() => setMobileOpen(false), [pathname]);
 
   // Initials and a hue from the signed-in address, so two people do not get
-  // the same badge. Falls back to the fixture identity when nobody is signed
-  // in, which is the state the app runs in with no database.
-  const label = viewer?.name ?? currentUser.name;
-  const initials = label
-    .split(/[\s.]+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((part) => part[0]?.toUpperCase() ?? "")
-    .join("");
+  // the same badge. There is no fixture identity to fall back to: the shell
+  // used to greet everybody as "Renata Alves" until a viewer arrived, which
+  // on a slow read meant somebody's own workspace briefly wore a stranger's
+  // name.
+  const label = viewer?.name ?? "";
+  const initials =
+    label
+      .split(/[\s.]+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((part) => part[0]?.toUpperCase() ?? "")
+      .join("") || "·";
   const hue = viewer
     ? [...viewer.email].reduce((n, c) => (n * 31 + c.charCodeAt(0)) % 360, 7)
-    : currentUser.hue;
+    : 240;
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -136,14 +142,14 @@ export function AppShell({
         <div className="border-b border-[var(--line)] p-3">
           <div className="flex w-full items-center gap-2.5 rounded-xl border border-[var(--line)] bg-ink-900 px-3 py-2.5 text-left">
             <span className="inline-flex size-7 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-cyan-400 to-iris-500 text-[0.6875rem] font-bold text-white">
-              {(viewer?.workspaceName ?? workspace.name).charAt(0).toUpperCase()}
+              {(viewer?.workspaceName ?? "·").charAt(0).toUpperCase()}
             </span>
             <span className="min-w-0 flex-1">
               <span className="block truncate text-[0.8125rem] font-medium text-fg-strong">
-                {viewer?.workspaceName ?? workspace.name}
+                {viewer?.workspaceName ?? "Your workspace"}
               </span>
               <span className="block text-2xs text-fg-faint">
-                {viewer ? `${viewer.plan} · ${viewer.region.toUpperCase()}` : `${workspace.plan} · ${workspace.region}`}
+                {viewer ? `${viewer.plan} · ${viewer.region.toUpperCase()}` : ""}
               </span>
             </span>
           </div>
@@ -273,7 +279,7 @@ export function AppShell({
         <main className="min-w-0 flex-1">{children}</main>
       </div>
 
-      <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
+      <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} projects={projects} />
     </div>
   );
 }

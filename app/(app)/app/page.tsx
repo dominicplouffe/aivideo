@@ -1,14 +1,10 @@
 import Link from "next/link";
 import type { Metadata } from "next";
-import { PageHeader, Panel, StatTile, StatusPill, Avatar, Sparkline } from "@/components/app/Shared";
+import { PageHeader, Panel, StatTile, StatusPill, Sparkline, EmptyState } from "@/components/app/Shared";
 import { Button } from "@/components/ui/Button";
 import { Icon, type IconName } from "@/components/ui/Icon";
-import {
-  activity, workspace, currentUser, members,
-  viewsSeries, localeMatrix,
-} from "@/lib/app-data";
-import { getProjects, getUsage } from "@/lib/data";
-import { relativeTime, formatDuration, formatNumber, cn } from "@/lib/utils";
+import { getProjects, getUsage, getViewer, getRecentActivity, getWorkspaceAnalytics } from "@/lib/data";
+import { relativeTime, formatDuration, formatNumber } from "@/lib/utils";
 
 export const metadata: Metadata = { title: "Home" };
 
@@ -19,11 +15,34 @@ const quickActions: { label: string; hint: string; href: string; icon: IconName 
   { label: "Translate a project", hint: "34 languages, no extra minutes", href: "/app/localization", icon: "globe" },
 ];
 
+/** An icon for an audit action like `project.published` or `member.invited`. */
+function activityIcon(action: string): IconName {
+  if (action.includes("publish")) return "rocket";
+  if (action.includes("render")) return "refresh";
+  if (action.includes("locale") || action.includes("translat")) return "globe";
+  if (action.includes("member") || action.includes("invite")) return "users";
+  if (action.includes("workspace")) return "grid";
+  if (action.includes("agent")) return "sparkles";
+  return "wand";
+}
+
+/** Morning / afternoon / evening, rather than a hardcoded "afternoon". */
+function greeting(hour = new Date().getHours()): string {
+  if (hour < 12) return "Good morning";
+  if (hour < 18) return "Good afternoon";
+  return "Good evening";
+}
+
 export default async function DashboardPage() {
   // From the data access layer, so every card on this page links to a page
   // that can find what it names.
-  const projects = await getProjects();
-  const usage = await getUsage();
+  const [projects, usage, viewer, activity, analytics] = await Promise.all([
+    getProjects(),
+    getUsage(),
+    getViewer(),
+    getRecentActivity(5),
+    getWorkspaceAnalytics(30),
+  ]);
 
   const recent = [...projects].sort(
     (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
@@ -35,11 +54,30 @@ export default async function DashboardPage() {
   const totalCta = published.reduce((n, p) => n + p.ctaClicks, 0);
   const stale = projects.filter((p) => p.status === "stale");
 
+  // The minutes sentence is only true when something has measured them. It
+  // used to read "76 video minutes remain in this cycle" from a fixture, on
+  // every account, directly above a tile correctly reporting 0 used.
+  const minutesLeft = usage
+    ? Math.max(0, Math.round((usage.allowanceSeconds - usage.usedSeconds) / 60))
+    : null;
+  const firstName = viewer?.name?.split(/[\s.]+/)[0] ?? "";
+
   return (
     <>
       <PageHeader
-        title={`Good afternoon, ${currentUser.name.split(" ")[0]}`}
-        description={`${workspace.name} shipped ${published.length} published assets this quarter. ${workspace.minutes.total - workspace.minutes.used} video minutes remain in this cycle.`}
+        title={firstName ? `${greeting()}, ${firstName}` : greeting()}
+        description={
+          [
+            viewer?.workspaceName
+              ? `${viewer.workspaceName} has ${published.length} published asset${published.length === 1 ? "" : "s"}.`
+              : null,
+            minutesLeft !== null
+              ? `${minutesLeft} video minute${minutesLeft === 1 ? "" : "s"} remain in this cycle.`
+              : null,
+          ]
+            .filter(Boolean)
+            .join(" ") || "Record your screen to get started."
+        }
         actions={
           <>
             <Button href="/app/analytics" variant="outline" size="sm">
@@ -138,9 +176,21 @@ export default async function DashboardPage() {
               </Link>
             }
           >
+            {recent.length === 0 ? (
+              <EmptyState
+                icon="record"
+                title="No projects yet"
+                description="Record your screen or import a video, and it will appear here."
+                action={
+                  <Button href="/app/new" size="sm">
+                    <Icon name="plus" className="size-4" strokeWidth={2.2} />
+                    New recording
+                  </Button>
+                }
+              />
+            ) : (
             <ul className="divide-y divide-[var(--line)]">
               {recent.slice(0, 6).map((p) => {
-                const owner = members.find((m) => m.id === p.owner) ?? currentUser;
                 return (
                   <li key={p.id}>
                     <Link
@@ -185,7 +235,6 @@ export default async function DashboardPage() {
                           </span>
                         ))}
                       </span>
-                      <Avatar name={owner.name} hue={owner.hue} size={26} className="hidden shrink-0 sm:inline-flex" />
                       <Icon
                         name="chevronRight"
                         className="size-4 shrink-0 text-fg-faint transition-transform group-hover:translate-x-0.5"
@@ -196,72 +245,55 @@ export default async function DashboardPage() {
                 );
               })}
             </ul>
+            )}
           </Panel>
 
           {/* right column */}
           <div className="flex flex-col gap-4">
+            {/*
+              Views over the last 30 days, counted from `analytics_sessions`.
+
+              This panel used to print `viewsSeries("dash")` — a PRNG seeded
+              with the literal string "dash" — which summed to 7.7k on every
+              account that had ever existed, including ones created that
+              morning with nothing published.
+            */}
             <Panel title="Views this month" bodyClassName="p-5">
               <p className="text-[1.75rem] leading-none font-semibold tracking-[-0.03em] text-fg-strong tabular-nums">
-                {formatNumber(viewsSeries("dash").reduce((a, b) => a + b, 0))}
+                {formatNumber(analytics.views)}
               </p>
-              {/* "+18.4% vs. previous 30 days", hardcoded, under a real sum. */}
-              <Sparkline data={viewsSeries("dash")} className="mt-4 h-14" />
+              {analytics.viewsByDay.length > 1 ? (
+                <Sparkline data={analytics.viewsByDay.map((d) => d.views)} className="mt-4 h-14" />
+              ) : (
+                <p className="mt-2 text-[0.8125rem] leading-relaxed text-fg-subtle">
+                  {analytics.views === 0
+                    ? "Nothing has been watched yet. Publish a project and its views appear here."
+                    : "A chart needs more than one day of views."}
+                </p>
+              )}
             </Panel>
 
-            <Panel title="Localization" action={
-              <Link href="/app/localization" className="text-[0.8125rem] font-medium text-iris-300 hover:text-iris-400">
-                Manage
-              </Link>
-            }>
-              <ul className="divide-y divide-[var(--line)]">
-                {localeMatrix.slice(0, 5).map((l) => (
-                  <li key={l.code} className="flex items-center gap-3 px-5 py-2.5">
-                    <span className="font-mono text-2xs text-fg-faint">{l.code}</span>
-                    <span className="flex-1 truncate text-[0.8125rem] text-fg">{l.label}</span>
-                    <span
-                      className={cn(
-                        "rounded-md px-1.5 py-0.5 font-mono text-2xs",
-                        l.status === "published" && "bg-mint-500/15 text-mint-400",
-                        l.status === "rendering" && "bg-iris-500/15 text-iris-300",
-                        l.status === "stale" && "bg-amber-500/15 text-amber-400",
-                        l.status === "queued" && "bg-white/6 text-fg-faint",
-                        l.status === "none" && "bg-white/4 text-fg-faint",
-                      )}
-                    >
-                      {l.status === "rendering" ? `${Math.round((l.progress ?? 0) * 100)}%` : l.status}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            </Panel>
-
-            <Panel title="Activity">
-              <ul className="divide-y divide-[var(--line)]">
-                {activity.slice(0, 5).map((a) => (
-                  <li key={a.id} className="flex gap-3 px-5 py-3">
-                    <span className="mt-0.5 inline-flex size-6 shrink-0 items-center justify-center rounded-lg bg-ink-850 text-fg-faint">
-                      <Icon
-                        name={
-                          a.kind === "publish" ? "rocket"
-                          : a.kind === "comment" ? "quote"
-                          : a.kind === "translate" ? "globe"
-                          : a.kind === "invite" ? "users"
-                          : a.kind === "render" ? "refresh"
-                          : "wand"
-                        }
-                        className="size-3"
-                        strokeWidth={2}
-                      />
-                    </span>
-                    <span className="min-w-0 text-[0.8125rem] leading-snug">
-                      <span className="text-fg">{a.who}</span>{" "}
-                      <span className="text-fg-subtle">{a.what}</span>{" "}
-                      <span className="text-fg">{a.target}</span>
-                      <span className="mt-0.5 block text-2xs text-fg-faint">{relativeTime(a.when)}</span>
-                    </span>
-                  </li>
-                ))}
-              </ul>
+            <Panel title="Activity" description="From the workspace audit log">
+              {activity.length === 0 ? (
+                <p className="px-5 py-4 text-[0.8125rem] leading-relaxed text-fg-subtle">
+                  Nothing has happened in this workspace yet.
+                </p>
+              ) : (
+                <ul className="divide-y divide-[var(--line)]">
+                  {activity.map((a) => (
+                    <li key={a.id} className="flex gap-3 px-5 py-3">
+                      <span className="mt-0.5 inline-flex size-6 shrink-0 items-center justify-center rounded-lg bg-ink-850 text-fg-faint">
+                        <Icon name={activityIcon(a.action)} className="size-3" strokeWidth={2} />
+                      </span>
+                      <span className="min-w-0 text-[0.8125rem] leading-snug">
+                        <span className="text-fg">{a.who}</span>{" "}
+                        <span className="text-fg-subtle">{a.action}</span>
+                        <span className="mt-0.5 block text-2xs text-fg-faint">{relativeTime(a.at)}</span>
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </Panel>
           </div>
         </div>

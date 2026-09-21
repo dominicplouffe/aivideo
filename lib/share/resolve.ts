@@ -4,7 +4,6 @@ import { getDb, isDatabaseConfigured } from "@/lib/db/client";
 import * as s from "@/lib/db/schema";
 import { getPublishedAsset, getPublishedAssetByProject } from "@/lib/db/repositories/assets";
 import { getStorage } from "@/lib/storage";
-import * as fixtures from "@/lib/app-data";
 import type { Project } from "@/lib/app-data";
 
 /**
@@ -17,14 +16,17 @@ import type { Project } from "@/lib/app-data";
  * from the moment somebody starts recording, and reading from it would put
  * every draft in the workspace one guessed slug away.
  *
- * The fixture fallback stays for a deployment with no database, which is
- * what makes the marketing site's demo links work from a fresh clone.
+ * There is no fixture fallback. A seeded project used to be servable here by
+ * slug even on a deployment with a real database, so `/d/<a seeded slug>`
+ * resolved to a demo nobody in that workspace had made or published — a
+ * public page, on the customer's own domain, showing a company that does not
+ * exist. An unpublished or unknown slug is a 404.
  */
 
 export interface ResolvedShare {
   project: Project;
-  /** A signed, expiring URL for the rendered file. Null for fixtures. */
-  videoUrl: string | null;
+  /** A signed, expiring URL for the rendered file. */
+  videoUrl: string;
   publishedAt: string | null;
 }
 
@@ -34,22 +36,14 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const SHARE_URL_TTL_SECONDS = 4 * 60 * 60;
 
 export async function resolveShare(slug: string): Promise<ResolvedShare | null> {
-  if (!isDatabaseConfigured()) {
-    const project = fixtures.getProject(slug);
-    return project ? { project, videoUrl: null, publishedAt: null } : null;
-  }
+  if (!isDatabaseConfigured()) return null;
 
   // By slug first, then by project id: an embed snippet copied before the
   // slug form existed still resolves, and a URL somebody bookmarked keeps
   // working. Both go through the same published check.
   let asset = await getPublishedAsset(slug, "video");
   if (!asset && UUID.test(slug)) asset = await getPublishedAssetByProject(slug, "video");
-  if (!asset) {
-    // A fixture with the same slug is still servable — the seeded demos are
-    // public by intent. Anything else is a miss.
-    const project = fixtures.getProject(slug);
-    return project ? { project, videoUrl: null, publishedAt: null } : null;
-  }
+  if (!asset) return null;
 
   const { getProjectById } = await import("@/lib/db/repositories/projects");
   const project = await getProjectById(asset.workspaceId, asset.projectId);
@@ -70,9 +64,9 @@ export async function resolveShare(slug: string): Promise<ResolvedShare | null> 
 
 /** Every published slug, for the sitemap and for static generation. */
 export async function listPublishedSlugs(): Promise<string[]> {
-  if (!isDatabaseConfigured()) {
-    return fixtures.projects.filter((p) => p.status === "published").map((p) => p.slug);
-  }
+  // No database, nothing published. The fixture branch here put eight
+  // invented slugs into the production sitemap.
+  if (!isDatabaseConfigured()) return [];
   const rows = await getDb()
     .select({ slug: s.assets.publicSlug, publishedAt: s.assets.publishedAt })
     .from(s.assets)

@@ -1,5 +1,5 @@
 /**
- * Seeds the database from the fixtures in lib/app-data.ts.
+ * Seeds the database from the fixtures in lib/db/scripts/fixtures.ts.
  *
  * Idempotent: identifiers are derived from the fixture ids, and the workspace
  * is removed (cascading) before re-insert, so running this repeatedly
@@ -14,7 +14,7 @@ import { stableUuid } from "../ids";
 import {
   workspace as wsFixture, members as memberFixtures, brandKits as kitFixtures,
   voices as voiceFixtures, projects as projectFixtures, localeMatrix,
-} from "../../app-data";
+} from "./fixtures";
 
 /** Refers to the row Postgres was about to insert, inside an upsert. */
 const sqlExcluded = (column: string) => drizzleSql.raw(`excluded."${column}"`);
