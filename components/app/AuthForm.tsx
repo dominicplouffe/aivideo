@@ -43,6 +43,8 @@ const REASONS: Record<string, string> = {
   "exchange-failed": "We could not complete the sign-in with your identity provider. Try again.",
   "no-database": "This deployment is running on fixtures and cannot sign anybody in.",
   "sso-email-required": "Enter your work email, then continue with single sign-on.",
+  "sso-connection-unconfigured":
+    "Your workspace's single sign-on is not finished being set up. Ask your administrator to connect it.",
   "sso-unknown-organization": "That identity provider is not connected to any workspace.",
   "sso-email-unverified":
     "Confirm your email address with your provider, then sign in again. We do not create a workspace for an address nobody has verified.",

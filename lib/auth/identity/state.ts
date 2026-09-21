@@ -34,7 +34,17 @@ export interface StatePayload {
   nonce: string;
   /** Where to send the browser afterwards. Always a same-site path. */
   next: string;
-  connectionId?: string;
+  /**
+   * The organization this flow was pinned to, for an enterprise login.
+   *
+   * Carried so the callback can check that the login came back through the
+   * same organization it was started against. This field held a *connection*
+   * id under the older API; putting an organization id in a field named for
+   * a connection is how the callback ends up comparing two different kinds
+   * of identifier and refusing every flow, or comparing nothing and
+   * accepting any.
+   */
+  organizationId?: string;
   issuedAt: number;
 }
 
@@ -76,7 +86,7 @@ export function safeNext(raw: string | null | undefined, fallback = "/app"): str
   }
 }
 
-export function issueState(input: { next?: string | null; connectionId?: string }): {
+export function issueState(input: { next?: string | null; organizationId?: string }): {
   state: string;
   nonce: string;
 } {
@@ -84,7 +94,7 @@ export function issueState(input: { next?: string | null; connectionId?: string 
   const payload: StatePayload = {
     nonce,
     next: safeNext(input.next),
-    connectionId: input.connectionId,
+    organizationId: input.organizationId,
     issuedAt: Date.now(),
   };
   const body = Buffer.from(JSON.stringify(payload), "utf8").toString("base64url");

@@ -87,8 +87,14 @@ export async function GET(request: Request) {
   // login came back through. Without this, a flow started against one
   // customer's identity provider could be completed with a code minted
   // against another's.
-  if (verdict.payload.connectionId && profile.organizationId) {
-    if (verdict.payload.connectionId !== profile.organizationId) {
+  //
+  // A pinned flow that comes back carrying *no* organization is refused for
+  // the same reason, and it is the sharper case: falling through would send
+  // an enterprise login down the self-serve path and hand somebody a brand
+  // new personal workspace, which to them looks exactly like their company's
+  // one having been emptied.
+  if (verdict.payload.organizationId) {
+    if (verdict.payload.organizationId !== profile.organizationId) {
       return refuse(request, "connection-mismatch");
     }
   }

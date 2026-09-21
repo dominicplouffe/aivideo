@@ -38,7 +38,6 @@ export async function GET(request: Request) {
   const next = params.get("next");
 
   let organizationId: string | undefined;
-  let connectionId: string | undefined;
 
   // Only the enterprise door needs to know who the caller is before they have
   // proved anything. The OAuth doors and the hosted pane collect the address
@@ -52,23 +51,25 @@ export async function GET(request: Request) {
     if (!found.ok) {
       return backToSignIn(request, `sso-connection-${found.reason}`, next);
     }
-    connectionId = found.connectionId;
-    // Prefer the organization when the connection records one: it is what
-    // the callback will match against, and starting the flow on the same
-    // identifier it will finish on is what makes the mismatch check mean
-    // something.
+
+    // The organization is what the login comes back carrying and what
+    // resolves the workspace, so a connection without one cannot complete.
+    // Refused here rather than started: a flow that leaves for an identity
+    // provider and fails on the way back costs somebody a round trip and
+    // tells them nothing useful about why.
     const connection = await findConnection(found.connectionId);
     organizationId = connection?.organizationId ?? undefined;
-    if (organizationId) connectionId = undefined;
+    if (!organizationId) {
+      return backToSignIn(request, "sso-connection-unconfigured", next);
+    }
   }
 
-  const { state, nonce } = issueState({ next, connectionId: organizationId ?? connectionId });
+  const { state, nonce } = issueState({ next, organizationId });
 
   const url = getIdentityProvider().authorizationUrl({
     state,
     method,
     organizationId,
-    connectionId,
     loginHint: email || undefined,
     intent: params.get("intent") === "sign-up" ? "sign-up" : undefined,
     redirectUri: callbackUrl(request),

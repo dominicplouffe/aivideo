@@ -34,11 +34,11 @@ const OWNER = "77777777-7777-4777-8777-777777777001";
 
 describe("the state parameter", () => {
   it("round-trips when the nonce matches the browser's cookie", () => {
-    const { state, nonce } = issueState({ next: "/app/projects", connectionId: CONNECTION });
+    const { state, nonce } = issueState({ next: "/app/projects", organizationId: ORGANIZATION });
     const verdict = verifyState(state, nonce);
     assert.equal(verdict.ok, true);
     assert.equal(verdict.ok && verdict.payload.next, "/app/projects");
-    assert.equal(verdict.ok && verdict.payload.connectionId, CONNECTION);
+    assert.equal(verdict.ok && verdict.payload.organizationId, ORGANIZATION);
   });
 
   it("is refused when it is signed but presented by a different browser", () => {
@@ -245,6 +245,25 @@ describe("provisioning through a connection", { skip: !RUN }, () => {
     // Least privilege by default: an account arriving from a directory
     // nobody has reviewed can watch demos, not publish them.
     assert.equal(result.ok && result.member.role, "viewer");
+  });
+
+  it("refuses an enterprise login that comes back with no organization", async () => {
+    // The sharp case. Falling through here would send an enterprise login
+    // down the self-serve path and hand somebody a brand new personal
+    // workspace, which to them looks exactly like their company's one having
+    // been emptied. The route refuses on the pinned organization before it
+    // ever reaches provisioning; this asserts the other half, that a profile
+    // with no organization is never treated as an enterprise one.
+    const result = await provision(profile({ organizationId: undefined }));
+    // Not an error: with no organization this *is* a self-serve login, and
+    // the thing that must not happen is it landing in WS.
+    assert.equal(result.ok, true);
+    assert.notEqual(
+      result.ok && result.member.workspaceId,
+      WS,
+      "A login with no organization must never land in a connection's workspace.",
+    );
+    if (result.ok) await eraseWorkspace(result.member.workspaceId, "test teardown");
   });
 
   it("refuses an organization nobody has registered", async () => {
