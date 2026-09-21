@@ -19,7 +19,7 @@ type Step = "configure" | "rendering" | "done" | "error";
  */
 const formats: { id: string; label: string; meta: string; icon: IconName; built: boolean }[] = [
   { id: "video", label: "Demo video", meta: "MP4 · H.264 · cut, zoomed, captioned", icon: "play", built: true },
-  { id: "guide", label: "Step-by-step guide", meta: "Markdown + screenshots", icon: "doc", built: false },
+  { id: "guide", label: "Step-by-step guide", meta: "Markdown + real screenshots", icon: "doc", built: true },
   { id: "interactive", label: "Interactive tour", meta: "Embeddable · 6 KB runtime", icon: "cursor", built: false },
   { id: "clips", label: "Social cuts", meta: "9:16 and 1:1 cutdowns", icon: "scissors", built: false },
 ];
@@ -37,7 +37,7 @@ export function ExportDialog({
   onClose: () => void;
 }) {
   const [step, setStep] = useState<Step>("configure");
-  const [picked, setPicked] = useState<string[]>(["video"]);
+  const [picked, setPicked] = useState<string[]>(["video", "guide"]);
   const [ratio, setRatio] = useState<string[]>(["16:9"]);
   // 1080p, not 4K. The default should be the one most people want and
   // nobody regrets waiting for.

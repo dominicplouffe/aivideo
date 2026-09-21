@@ -61,12 +61,23 @@ export async function GET(request: Request) {
 
   const extension = key.split(".").pop()?.toLowerCase() ?? "";
   const contentType =
-    extension === "mp4" ? "video/mp4"
-    : extension === "webm" ? "video/webm"
-    : extension === "srt" ? "application/x-subrip"
-    : extension === "json" ? "application/json"
-    : extension === "mp3" ? "audio/mpeg"
-    : "application/octet-stream";
+    {
+      mp4: "video/mp4",
+      webm: "video/webm",
+      png: "image/png",
+      jpg: "image/jpeg",
+      jpeg: "image/jpeg",
+      webp: "image/webp",
+      srt: "application/x-subrip",
+      vtt: "text/vtt",
+      json: "application/json",
+      // `charset` matters: a guide is UTF-8 and somebody's product name is
+      // not always ASCII.
+      md: "text/markdown; charset=utf-8",
+      txt: "text/plain; charset=utf-8",
+      mp3: "audio/mpeg",
+      wav: "audio/wav",
+    }[extension] ?? "application/octet-stream";
 
   return mediaResponse({
     storage,

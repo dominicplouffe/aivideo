@@ -107,6 +107,7 @@ export async function POST(request: Request) {
   const providers = getProviders();
   const job = await providers.render.submit({
     projectId: project.id,
+    title: project.title,
     outputs,
     locales: body.locales ?? ["en-US"],
     brandKitId: body.brand_kit ?? "kit_meridian_primary",

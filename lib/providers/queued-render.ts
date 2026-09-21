@@ -63,6 +63,7 @@ export class QueuedRenderProvider implements RenderProvider {
         outputs: req.outputs,
         locales: req.locales,
         brandKitId: req.brandKitId,
+        title: req.title ?? null,
         video: req.video ?? null,
         // The edit as it was when the button was pressed. See RenderRequest.
         edl: req.edl ?? null,

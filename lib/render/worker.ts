@@ -129,7 +129,7 @@ export async function renderEdl(
     ffprobeBinary?: string;
     onProgress?: (fraction: number) => void;
   } = {},
-): Promise<{ outputPath: string; dir: string; durationSec: number; bytes: number }> {
+): Promise<{ outputPath: string; sourcePath: string; dir: string; durationSec: number; bytes: number }> {
   const problems = validateEdl(edl);
   if (problems.length > 0) {
     // A bad EDL is a bug in the editor, not a transient failure. Retrying it
@@ -172,7 +172,7 @@ export async function renderEdl(
     const probed = await probe(outputPath, options.ffprobeBinary);
     const bytes = (await readFile(outputPath)).byteLength;
 
-    return { outputPath, dir, durationSec: probed.durationSec, bytes };
+    return { outputPath, sourcePath, dir, durationSec: probed.durationSec, bytes };
   } catch (error) {
     await rm(dir, { recursive: true, force: true });
     throw error;
@@ -186,7 +186,12 @@ export async function renderEdl(
  * time this runs; failing the job here would tell a customer their render
  * failed while holding the file it produced.
  */
-async function recordAsset(job: Job, edl: Edl, storageKey: string): Promise<void> {
+async function recordAsset(
+  job: Job,
+  edl: Edl,
+  storageKey: string,
+  kind: "video" | "guide",
+): Promise<void> {
   try {
     const { isDatabaseConfigured } = await import("@/lib/db/client");
     if (!isDatabaseConfigured()) return;
@@ -203,7 +208,7 @@ async function recordAsset(job: Job, edl: Edl, storageKey: string): Promise<void
     await recordRenderedAsset({
       workspaceId: job.workspaceId,
       projectId: edl.projectId,
-      kind: "video",
+      kind,
       locale: edl.locale,
       storageKey,
       // The project's slug, which a person chose and can read. Minted once
@@ -213,6 +218,80 @@ async function recordAsset(job: Job, edl: Edl, storageKey: string): Promise<void
     });
   } catch (error) {
     console.error(`[render] could not file the asset for job ${job.id}:`, error);
+  }
+}
+
+/**
+ * Writes the step-by-step guide for a job that asked for one.
+ *
+ * Two files, because they have two readers. `guide.json` is what the guide
+ * editor loads — structured steps with a storage key per screenshot, so the
+ * app never has to parse Markdown to render a page. `guide.md` is what a
+ * person downloads and pastes into a help centre.
+ *
+ * Best-effort, like `recordAsset`: a guide that could not be written is a
+ * missing document, not a failed video.
+ */
+async function produceGuide(
+  job: Job,
+  edl: Edl,
+  sourcePath: string,
+  ffmpegBinary?: string,
+): Promise<{ status: string; key: string; steps: number } | null> {
+  const outputs = (job.payload.outputs as string[] | undefined) ?? [];
+  if (!outputs.includes("guide")) return null;
+
+  try {
+    const { buildGuide } = await import("./guide");
+    const built = await buildGuide(edl, {
+      title: (job.payload.title as string) || "Walkthrough",
+      sourcePath,
+      ffmpegBinary,
+      // Relative, so the Markdown works wherever the folder is unpacked.
+      imageBase: ".",
+    });
+
+    const storage = getStorage();
+    const prefix = `renders/${job.id}`;
+
+    for (const step of built.steps) {
+      if (!step.screenshot) continue;
+      await storage.put(
+        { workspaceId: job.workspaceId, path: `${prefix}/${step.screenshotName}` },
+        step.screenshot,
+        "image/png",
+      );
+    }
+
+    const document = {
+      title: (job.payload.title as string) || "Walkthrough",
+      locale: edl.locale,
+      steps: built.steps.map((step) => ({
+        ordinal: step.ordinal,
+        title: step.title,
+        body: step.body,
+        atSec: step.atSec,
+        screenshotKey: step.screenshot ? `${job.workspaceId}/${prefix}/${step.screenshotName}` : null,
+      })),
+    };
+
+    await storage.put(
+      { workspaceId: job.workspaceId, path: `${prefix}/guide.json` },
+      new TextEncoder().encode(JSON.stringify(document, null, 2)),
+      "application/json",
+    );
+    await storage.put(
+      { workspaceId: job.workspaceId, path: `${prefix}/guide.md` },
+      new TextEncoder().encode(built.markdown),
+      "text/markdown",
+    );
+
+    const key = `${job.workspaceId}/${prefix}/guide.json`;
+    await recordAsset(job, edl, key, "guide");
+    return { status: "ready", key, steps: built.steps.length };
+  } catch (error) {
+    console.error(`[render] could not build the guide for job ${job.id}:`, error);
+    return null;
   }
 }
 
@@ -316,10 +395,17 @@ export async function processOne(options: RenderWorkerOptions): Promise<RenderOu
     // Without this, a render existed only inside a queue row — the share
     // page, the embed and the library had no way to find the file, and a
     // purged job took the only pointer to it with it.
-    await recordAsset(job, edl, `${key.workspaceId}/${key.path}`);
+    await recordAsset(job, edl, `${key.workspaceId}/${key.path}`, "video");
+
+    // The written walkthrough, from the same EDL and the same frames. It is
+    // built after the video rather than beside it because it reads the
+    // staged source file, which only exists while the render's scratch
+    // directory does.
+    const guide = await produceGuide(job, edl, result.sourcePath, options.ffmpegBinary);
 
     await complete(job.id, options.workerId, {
       video: { status: "ready", url: signed.url, key: `${key.workspaceId}/${key.path}` },
+      ...(guide ? { guide } : {}),
       // Seconds, not minutes: metering in minutes means rounding, and
       // rounding in our favour on every render is a choice, not an accident.
       billedSeconds: result.durationSec,

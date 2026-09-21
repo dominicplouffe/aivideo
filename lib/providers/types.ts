@@ -144,6 +144,8 @@ export interface RenderRequest {
   video?: { resolution: "720p" | "1080p" | "1440p" | "2160p"; fps: 30 | 60; aspects: string[] };
   webhookUrl?: string;
   idempotencyKey?: string;
+  /** The project's title, which the written guide is headed with. */
+  title?: string;
   /**
    * Which workspace this render belongs to.
    *
