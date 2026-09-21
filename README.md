@@ -101,7 +101,16 @@ creates itself through the real signup route — record, transcribe, render,
 publish, watch, and then checks that every figure on the analytics page
 matches a direct SQL count. It needs `ffmpeg` and `ffprobe`, because it
 asserts on a real encoded file rather than on the fact that a job said it
-finished.
+finished, and a Chromium, because one of the tests sweeps every page in a
+real browser for hydration errors and overflow. `npx playwright install
+chromium` provides one; `CHROMIUM_PATH` points at a browser you already
+have. The script refuses to start without either, rather than letting that
+test skip itself and reporting the run as a pass.
+
+It runs its four files one at a time. They share one server, one database
+and one worker, so running them at once is the suite competing with itself
+rather than a test of anything — it cost a run to a request that never got a
+connection.
 
 **Run the worker to export anything.** Rendering happens in a separate
 process, so `npm run worker` has to be running alongside `npm run dev` for

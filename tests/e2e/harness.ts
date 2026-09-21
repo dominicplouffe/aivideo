@@ -50,7 +50,29 @@ export async function api(
   };
   if (init.cookie) headers.Cookie = init.cookie;
   if (init.body && !headers["Content-Type"]) headers["Content-Type"] = "application/json";
-  return fetch(`${BASE}${path}`, { ...init, headers, redirect: "manual" });
+
+  const started = Date.now();
+  try {
+    return await fetch(`${BASE}${path}`, { ...init, headers, redirect: "manual" });
+  } catch (cause) {
+    // A request that never reaches the server throws `TypeError: fetch
+    // failed` and names neither the route nor the reason. That is how a
+    // ten-second connect timeout once surfaced as an unexplained failure in
+    // a test about transcripts, with nothing in the server log to match it
+    // against — because nothing had arrived. Say what was asked for, how
+    // long it waited, and what the socket did.
+    const code = (cause as { cause?: { code?: string } }).cause?.code ?? (cause as Error).name;
+    const waited = Date.now() - started;
+    const hint =
+      code === "UND_ERR_CONNECT_TIMEOUT"
+        ? "The server never accepted the connection, so it never saw this request. " +
+          "That means it was saturated, not that it answered wrongly."
+        : "Is the server still running?";
+    throw new Error(
+      `${init.method ?? "GET"} ${path} never completed: ${code} after ${waited}ms. ${hint}`,
+      { cause },
+    );
+  }
 }
 
 export async function json<T = unknown>(response: Response): Promise<T> {

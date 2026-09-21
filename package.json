@@ -16,7 +16,7 @@
     "worker": "tsx lib/render/scripts/worker.ts",
     "build:extension": "node scripts/build-extension.mjs",
     "build:embed": "node scripts/build-embed.mjs",
-    "test:e2e": "tsx --test \"tests/e2e/**/*.test.ts\"",
+    "test:e2e": "tsx --test --test-concurrency=1 \"tests/e2e/**/*.test.ts\"",
     "test:all": "scripts/test-env.sh"
   },
   "dependencies": {
