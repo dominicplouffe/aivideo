@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback } from "react";
+import { createPortal } from "react-dom";
 import { useRouter, useSearchParams } from "next/navigation";
 import { cn, formatBytes, formatDuration } from "@/lib/utils";
 import { Icon, type IconName } from "@/components/ui/Icon";
@@ -118,6 +119,39 @@ function mixAudio(videoTracks: MediaStreamTrack[], audioTracks: MediaStreamTrack
   };
 }
 
+/**
+ * The floating control window.
+ *
+ * A screen recorder's controls live on the recorder's own tab, which is the
+ * one tab the person is guaranteed not to be looking at while they record.
+ * Chrome and Edge can open a small always-on-top window through the
+ * Document Picture-in-Picture API — the same mechanism the popular desktop
+ * recorders use — so Pause and Stop stay in view over whatever is being
+ * demoed. Where the API is absent the controls stay on the tab, and the
+ * person switches back to it the way they always have.
+ *
+ * Not in lib.dom yet, hence the local declaration.
+ */
+interface DocumentPictureInPicture {
+  requestWindow(options?: { width?: number; height?: number }): Promise<Window>;
+}
+
+function pictureInPictureApi(): DocumentPictureInPicture | null {
+  if (typeof window === "undefined") return null;
+  return (window as unknown as { documentPictureInPicture?: DocumentPictureInPicture })
+    .documentPictureInPicture ?? null;
+}
+
+/** Gives a fresh window the page's stylesheets and theme, so the portal looks like the app. */
+function adoptStyles(target: Window) {
+  for (const node of document.querySelectorAll('link[rel="stylesheet"], style')) {
+    target.document.head.appendChild(node.cloneNode(true));
+  }
+  const theme = document.documentElement.getAttribute("data-theme");
+  if (theme) target.document.documentElement.setAttribute("data-theme", theme);
+  target.document.documentElement.className = document.documentElement.className;
+}
+
 async function measure(url: string | null): Promise<TakeShape> {
   const empty: TakeShape = { durationSec: null, width: null, height: null };
   if (!url) return empty;
@@ -175,6 +209,17 @@ function RecordFlow({
   const [audioLevel, setAudioLevel] = useState(0);
   const [audioSilent, setAudioSilent] = useState(false);
 
+  // Paused, and the seconds left before a resume actually resumes — long
+  // enough to get back to the window being recorded.
+  const [paused, setPaused] = useState(false);
+  const [resumingIn, setResumingIn] = useState<number | null>(null);
+  const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // The floating controls, when the browser can open them.
+  const [canFloat, setCanFloat] = useState(false);
+  const [floatControls, setFloatControls] = useState(true);
+  const [pipWindow, setPipWindow] = useState<Window | null>(null);
+  useEffect(() => setCanFloat(pictureInPictureApi() !== null), []);
+
   const [withMic, setWithMic] = useState(true);
   const [withSystemAudio, setWithSystemAudio] = useState(true);
   const [masking, setMasking] = useState(true);
@@ -203,8 +248,10 @@ function RecordFlow({
   useEffect(() => () => {
     stopTracks();
     if (tickRef.current) clearInterval(tickRef.current);
+    if (countdownRef.current) clearInterval(countdownRef.current);
     if (blobUrl) URL.revokeObjectURL(blobUrl);
   }, [stopTracks, blobUrl]);
+  useEffect(() => () => pipWindow?.close(), [pipWindow]);
 
   const start = async () => {
     setError(null);
@@ -301,21 +348,15 @@ function RecordFlow({
       setElapsed(0);
       setBytes(0);
       setEvents([]);
+      setPaused(false);
+      setResumingIn(null);
       setPhase("live");
+      startClock();
 
-      tickRef.current = setInterval(() => {
-        setElapsed((s) => {
-          const next = s + 1;
-          // No interaction log here, and none invented. A tab captured
-          // through `getDisplayMedia` gives pixels and nothing else — the
-          // browser will not tell one page what a different one was
-          // clicked on, which is the entire reason the extension exists.
-          // The previous version filled this panel with hardcoded
-          // selectors like `button#new-shipment`, which read as though the
-          // recorder had understood the screen.
-          return next;
-        });
-      }, 1000);
+      // Opened here, inside the click that started the take, because the
+      // browser only opens a window for a gesture. A refusal is not an
+      // error: the button in the panel offers it again.
+      if (floatControls) void openFloatingControls();
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
       setError(
@@ -326,13 +367,85 @@ function RecordFlow({
     }
   };
 
+  // No interaction log here, and none invented. A tab captured through
+  // `getDisplayMedia` gives pixels and nothing else — the browser will not
+  // tell one page what a different one was clicked on, which is the entire
+  // reason the extension exists.
+  const startClock = () => {
+    if (tickRef.current) clearInterval(tickRef.current);
+    tickRef.current = setInterval(() => setElapsed((s) => s + 1), 1000);
+  };
+
+  /**
+   * Pausing stops the frames and the clock; the file stays one file with
+   * the wait simply absent. This is the answer to "the build takes twenty
+   * minutes": say so, pause, and resume with the result.
+   */
+  const pause = () => {
+    const rec = recorderRef.current;
+    if (!rec || rec.state !== "recording") return;
+    rec.pause();
+    if (tickRef.current) clearInterval(tickRef.current);
+    setPaused(true);
+  };
+
+  // Three seconds, so the person can get back to the window being recorded
+  // before a single frame of the recorder's own tab is captured.
+  const resume = () => {
+    const rec = recorderRef.current;
+    if (!rec || rec.state !== "paused" || resumingIn !== null) return;
+    let left = 3;
+    setResumingIn(left);
+    countdownRef.current = setInterval(() => {
+      left -= 1;
+      if (left > 0) {
+        setResumingIn(left);
+        return;
+      }
+      if (countdownRef.current) clearInterval(countdownRef.current);
+      countdownRef.current = null;
+      setResumingIn(null);
+      if (recorderRef.current?.state === "paused") {
+        recorderRef.current.resume();
+        setPaused(false);
+        startClock();
+      }
+    }, 1000);
+  };
+
+  const closeFloatingControls = () => {
+    pipWindow?.close();
+    setPipWindow(null);
+  };
+
+  const openFloatingControls = async () => {
+    const api = pictureInPictureApi();
+    if (!api || pipWindow) return;
+    try {
+      const win = await api.requestWindow({ width: 300, height: 88 });
+      adoptStyles(win);
+      win.document.body.style.margin = "0";
+      win.addEventListener("pagehide", () => setPipWindow(null));
+      setPipWindow(win);
+    } catch {
+      // Refused — no gesture, or a browser that lists the API but will not
+      // open a window. The panel's button offers it again.
+    }
+  };
+
   const stop = () => {
     if (tickRef.current) clearInterval(tickRef.current);
+    if (countdownRef.current) clearInterval(countdownRef.current);
+    countdownRef.current = null;
+    setResumingIn(null);
     // Settled here rather than left to the meter's timing: a take stopped
     // in its first seconds should still be told its track was silent.
     if (audioCtxRef.current) setAudioSilent(peakRef.current < SILENT_PEAK);
-    recorderRef.current?.state === "recording" && recorderRef.current.stop();
+    // A paused recorder still has to be stopped, or the take never lands.
+    const rec = recorderRef.current;
+    if (rec && rec.state !== "inactive") rec.stop();
     stopTracks();
+    closeFloatingControls();
   };
 
   /**
@@ -478,6 +591,15 @@ function RecordFlow({
               <Toggle label="Microphone" hint="Your narration, mixed into the take" icon="mic" on={withMic} onChange={setWithMic} />
               <Toggle label="System audio" hint="Your app's own sound" icon="volume" on={withSystemAudio} onChange={setWithSystemAudio} />
               <Toggle label="Masking policy" hint="Enforced by your workspace" icon="shield" on={masking} onChange={setMasking} locked />
+              {canFloat ? (
+                <Toggle
+                  label="Floating controls"
+                  hint="Pause and Stop in a small window that stays on top"
+                  icon="layers"
+                  on={floatControls}
+                  onChange={setFloatControls}
+                />
+              ) : null}
             </div>
           </div>
         </Panel>
@@ -497,12 +619,7 @@ function RecordFlow({
       <div className="grid gap-4 lg:grid-cols-[1fr_20rem]">
         <Panel
           title="Recording"
-          action={
-            <span className="inline-flex items-center gap-2 rounded-full border border-rose-500/40 bg-rose-500/12 px-2.5 py-1 font-mono text-2xs text-rose-300">
-              <span className="size-1.5 rounded-full bg-rose-500 animate-pulse" />
-              REC {formatDuration(elapsed)}
-            </span>
-          }
+          action={<RecPill elapsed={elapsed} paused={paused} resumingIn={resumingIn} />}
         >
           <div className="p-5">
             <div className="relative aspect-video overflow-hidden rounded-xl border-2 border-rose-500/40 bg-black">
@@ -510,10 +627,26 @@ function RecordFlow({
             </div>
 
             <div className="mt-5 flex flex-wrap items-center gap-3">
+              <Button
+                variant="outline"
+                size="md"
+                disabled={resumingIn !== null}
+                onClick={paused ? resume : pause}
+                aria-label={paused ? "Resume recording" : "Pause recording"}
+              >
+                <Icon name={paused ? "play" : "pause"} className="size-4" strokeWidth={2.2} />
+                {resumingIn !== null ? `Resuming in ${resumingIn}…` : paused ? "Resume" : "Pause"}
+              </Button>
               <Button variant="danger" size="md" onClick={stop}>
-                <Icon name="pause" className="size-4" strokeWidth={2.2} />
+                <Icon name="x" className="size-4" strokeWidth={2.2} />
                 Stop recording
               </Button>
+              {canFloat && !pipWindow ? (
+                <Button variant="ghost" size="sm" onClick={() => void openFloatingControls()}>
+                  <Icon name="layers" className="size-3.5" strokeWidth={1.9} />
+                  Float controls
+                </Button>
+              ) : null}
               <span className="font-mono text-2xs text-fg-faint">{formatBytes(bytes)} captured</span>
               {audioCaptured ? (
                 <span
@@ -536,9 +669,26 @@ function RecordFlow({
                 </span>
               ) : null}
               <span className="ml-auto text-[0.75rem] text-fg-subtle">
-                Fumbled a line? Pause two seconds and say it again — the clean take wins.
+                {paused
+                  ? "Paused. The wait will not be in the video; resume when there is something to show."
+                  : "Waiting on something slow? Say so, pause, and resume with the result."}
               </span>
             </div>
+
+            {pipWindow
+              ? createPortal(
+                  <FloatingControls
+                    elapsed={elapsed}
+                    paused={paused}
+                    resumingIn={resumingIn}
+                    audioLevel={audioLevel}
+                    onPause={pause}
+                    onResume={resume}
+                    onStop={stop}
+                  />,
+                  pipWindow.document.body,
+                )
+              : null}
 
             {audioSilent ? (
               <p role="alert" className="mt-4 flex items-start gap-2.5 rounded-xl border border-amber-500/30 bg-amber-500/[0.08] p-3.5 text-[0.8125rem] leading-relaxed text-amber-300">
@@ -1067,6 +1217,60 @@ function AgentFlow() {
 }
 
 /* ============================================================ shared bits */
+
+/** The recording state, in one glance: red while recording, amber while paused. */
+function RecPill({ elapsed, paused, resumingIn }: { elapsed: number; paused: boolean; resumingIn: number | null }) {
+  const resuming = resumingIn !== null;
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-2 rounded-full border px-2.5 py-1 font-mono text-2xs",
+        paused && !resuming
+          ? "border-amber-500/40 bg-amber-500/12 text-amber-300"
+          : "border-rose-500/40 bg-rose-500/12 text-rose-300",
+      )}
+    >
+      <span className={cn("size-1.5 rounded-full", paused && !resuming ? "bg-amber-400" : "bg-rose-500 animate-pulse")} />
+      {resuming ? `REC IN ${resumingIn}` : paused ? "PAUSED" : "REC"} {formatDuration(elapsed)}
+    </span>
+  );
+}
+
+/** What the always-on-top window shows: the clock, Pause, Stop. Nothing else fits, and nothing else is needed mid-take. */
+function FloatingControls({
+  elapsed, paused, resumingIn, audioLevel, onPause, onResume, onStop,
+}: {
+  elapsed: number;
+  paused: boolean;
+  resumingIn: number | null;
+  audioLevel: number;
+  onPause: () => void;
+  onResume: () => void;
+  onStop: () => void;
+}) {
+  return (
+    <div className="flex h-dvh items-center gap-2 bg-ink-950 px-3 text-fg select-none">
+      <RecPill elapsed={elapsed} paused={paused} resumingIn={resumingIn} />
+      <span className="h-1.5 w-10 overflow-hidden rounded-full bg-ink-800" aria-hidden>
+        <span className="block h-full rounded-full bg-mint-400" style={{ width: `${Math.min(100, Math.sqrt(audioLevel) * 100)}%` }} />
+      </span>
+      <Button
+        variant="outline"
+        size="sm"
+        disabled={resumingIn !== null}
+        onClick={paused ? onResume : onPause}
+        aria-label={paused ? "Resume recording" : "Pause recording"}
+      >
+        <Icon name={paused ? "play" : "pause"} className="size-3.5" strokeWidth={2.2} />
+        {paused ? "Resume" : "Pause"}
+      </Button>
+      <Button variant="danger" size="sm" onClick={onStop} aria-label="Stop recording">
+        <Icon name="x" className="size-3.5" strokeWidth={2.2} />
+        Stop
+      </Button>
+    </div>
+  );
+}
 
 function Toggle({
   label, hint, icon, on, onChange, locked,
