@@ -7,11 +7,17 @@ import { Icon } from "@/components/ui/Icon";
 import { Panel, StatTile, Sparkline } from "./Shared";
 import { projects, retentionCurve, viewsSeries, topAccounts, trafficSources } from "@/lib/app-data";
 
-const periods = ["7 days", "30 days", "90 days", "12 months"] as const;
+/** Label and the number of days it covers, so the switcher can mean it. */
+const periods = [
+  { label: "7 days", days: 7 },
+  { label: "30 days", days: 30 },
+  { label: "90 days", days: 90 },
+  { label: "12 months", days: 365 },
+] as const;
 
 export function AnalyticsView({ curves }: { curves?: Record<string, number[]> }) {
   const published = projects.filter((p) => p.status === "published");
-  const [period, setPeriod] = useState<(typeof periods)[number]>("30 days");
+  const [period, setPeriod] = useState<(typeof periods)[number]>(periods[1]);
   const [projectId, setProjectId] = useState(published[0].id);
 
   const project = published.find((p) => p.id === projectId) ?? published[0];
@@ -22,7 +28,30 @@ export function AnalyticsView({ curves }: { curves?: Record<string, number[]> })
     () => curves?.[project.id] ?? retentionCurve(project.id, 48),
     [curves, project.id],
   );
-  const series = useMemo(() => viewsSeries(project.id, 30), [project.id]);
+  // Resampled to the selected period. This was fixed at 30 days while the
+  // switcher changed one label — clicking "12 months" relabelled a
+  // thirty-day chart and moved nothing.
+  const series = useMemo(
+    () => viewsSeries(project.id, period.days),
+    [project.id, period.days],
+  );
+
+  /**
+   * Change against the preceding window of the same length.
+   *
+   * Computed, not written down. The four deltas on this page were string
+   * literals — "+18.4%", "+3.1pt", "+24.9%", "+37" — which never moved when
+   * the period, the project or the data did.
+   */
+  const delta = useMemo(() => {
+    const half = Math.floor(series.length / 2);
+    if (half < 2) return null;
+    const previous = series.slice(0, half).reduce((a, b) => a + b, 0);
+    const current = series.slice(half).reduce((a, b) => a + b, 0);
+    if (previous === 0) return null;
+    const change = ((current - previous) / previous) * 100;
+    return `${change >= 0 ? "+" : ""}${change.toFixed(1)}%`;
+  }, [series]);
 
   // Biggest single-step drop — the sentence that lost them.
   const drop = useMemo(() => {
@@ -60,15 +89,15 @@ export function AnalyticsView({ curves }: { curves?: Record<string, number[]> })
         <div className="inline-flex items-center gap-0.5 rounded-xl border border-[var(--line)] bg-ink-900 p-0.5">
           {periods.map((p) => (
             <button
-              key={p}
+              key={p.label}
               type="button"
               onClick={() => setPeriod(p)}
               className={cn(
                 "rounded-lg px-2.5 py-1.5 text-2xs font-medium transition-colors",
-                period === p ? "bg-ink-750 text-fg" : "text-fg-subtle hover:text-fg",
+                period.label === p.label ? "bg-ink-750 text-fg" : "text-fg-subtle hover:text-fg",
               )}
             >
-              {p}
+              {p.label}
             </button>
           ))}
         </div>
@@ -76,10 +105,36 @@ export function AnalyticsView({ curves }: { curves?: Record<string, number[]> })
 
       {/* tiles */}
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <StatTile label="Views" value={formatNumber(project.views)} delta="+18.4%" icon="eye" sub={`last ${period}`} />
-        <StatTile label="Avg. completion" value={`${Math.round(project.completion * 100)}%`} delta="+3.1pt" icon="play" />
-        <StatTile label="CTA clicks" value={formatNumber(project.ctaClicks)} delta="+24.9%" icon="target" sub={`${((project.ctaClicks / Math.max(1, project.views)) * 100).toFixed(1)}% conversion`} />
-        <StatTile label="Accounts reached" value="284" delta="+37" icon="briefcase" sub="identified via CRM" />
+        {/*
+          Deltas come from the series or are absent. "Accounts reached 284 /
+          +37 / identified via CRM" was four constants describing a CRM
+          integration that had not been consulted; the tile now counts the
+          accounts actually in the table below.
+        */}
+        <StatTile
+          label="Views"
+          value={formatNumber(project.views)}
+          delta={delta ?? undefined}
+          icon="eye"
+          sub={`last ${period.label}`}
+        />
+        <StatTile
+          label="Avg. completion"
+          value={`${Math.round(project.completion * 100)}%`}
+          icon="play"
+        />
+        <StatTile
+          label="CTA clicks"
+          value={formatNumber(project.ctaClicks)}
+          icon="target"
+          sub={`${((project.ctaClicks / Math.max(1, project.views)) * 100).toFixed(1)}% conversion`}
+        />
+        <StatTile
+          label="Accounts identified"
+          value={formatNumber(topAccounts.length)}
+          icon="briefcase"
+          sub="seen on a personalized link"
+        />
       </div>
 
       {/* retention */}
@@ -114,9 +169,9 @@ export function AnalyticsView({ curves }: { curves?: Record<string, number[]> })
                 Largest drop: −{Math.round(drop.pct * 100)}% at {formatDuration(dropSeconds)}
               </p>
               <p className="mt-1.5 text-[0.8125rem] leading-relaxed text-fg-muted">
-                That is the start of <span className="text-fg">“{dropSegment?.title}”</span>. Viewers
-                leave when configuration comes before the outcome. Moving this scene after the
-                result typically recovers 8–14 points of completion.
+                That is the start of <span className="text-fg">“{dropSegment?.title}”</span>. Open
+                it in the Studio to read what is said there — the words are the only place this
+                can be explained from.
               </p>
             </div>
             <Link
@@ -136,13 +191,20 @@ export function AnalyticsView({ curves }: { curves?: Record<string, number[]> })
             <p className="text-[1.5rem] leading-none font-semibold tracking-[-0.03em] text-fg-strong tabular-nums">
               {formatNumber(series.reduce((a, b) => a + b, 0))}
             </p>
-            <p className="mt-1.5 flex items-center gap-1 text-[0.75rem] text-mint-400">
-              <Icon name="trending" className="size-3.5" strokeWidth={2} />
-              +18.4% vs. previous period
-            </p>
+            {delta ? (
+              <p
+                className={cn(
+                  "mt-1.5 flex items-center gap-1 text-[0.75rem]",
+                  delta.startsWith("-") ? "text-rose-300" : "text-mint-400",
+                )}
+              >
+                <Icon name="trending" className="size-3.5" strokeWidth={2} />
+                {delta} vs. the {Math.floor(period.days / 2)} days before
+              </p>
+            ) : null}
             <Sparkline data={series} className="mt-4 h-24" />
             <div className="mt-2 flex justify-between font-mono text-2xs text-fg-faint">
-              <span>30 days ago</span>
+              <span>{period.label} ago</span>
               <span>today</span>
             </div>
           </div>
@@ -174,9 +236,18 @@ export function AnalyticsView({ curves }: { curves?: Record<string, number[]> })
               </li>
             ))}
           </ul>
+          {/* The footnote quoted 78% and 32% to match the fixture beside
+              it. It now reads off the same rows the table does. */}
           <p className="border-t border-[var(--line)] px-5 py-3 text-[0.75rem] leading-relaxed text-fg-subtle">
-            A demo that completes at 78% from your pricing page and 32% from paid social does not
-            have a video problem. It has an ad problem.
+            {(() => {
+              const sorted = [...trafficSources].sort((a, b) => b.completion - a.completion);
+              const best = sorted[0];
+              const worst = sorted[sorted.length - 1];
+              if (!best || !worst || best === worst) {
+                return "Completion by source tells you whether a weak number is the video or the traffic.";
+              }
+              return `A demo that completes at ${Math.round(best.completion * 100)}% from ${best.source} and ${Math.round(worst.completion * 100)}% from ${worst.source} does not have a video problem. It has a traffic problem.`;
+            })()}
           </p>
         </Panel>
       </div>
@@ -187,7 +258,7 @@ export function AnalyticsView({ curves }: { curves?: Record<string, number[]> })
           <table className="w-full min-w-[40rem] border-collapse text-left">
             <thead>
               <tr>
-                {["Account", "Viewers", "Max depth", "Stage", ""].map((h) => (
+                {["Account", "Viewers", "Max depth", "Stage"].map((h) => (
                   <th key={h} className="border-b border-[var(--line)] px-5 py-2.5 text-2xs font-medium text-fg-faint">
                     {h}
                   </th>
@@ -219,25 +290,15 @@ export function AnalyticsView({ curves }: { curves?: Record<string, number[]> })
                   <td className="border-b border-[var(--line)] px-5 py-3">
                     <span className="rounded-md bg-ink-850 px-2 py-0.5 text-2xs text-fg-muted">{a.stage}</span>
                   </td>
-                  <td className="border-b border-[var(--line)] px-5 py-3 text-right">
-                    <button className="text-2xs font-medium text-iris-300 hover:text-iris-400">
-                      View in CRM
-                    </button>
-                  </td>
+                  {/* "View in CRM" had no handler and no CRM to open. */}
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
-        <div className="flex flex-wrap items-center gap-3 border-t border-[var(--line)] bg-ink-900 px-5 py-3.5">
-          <Icon name="bell" className="size-4 shrink-0 text-iris-400" strokeWidth={1.9} />
-          <p className="min-w-0 flex-1 text-[0.8125rem] text-fg-muted">
-            Alerting is on for target accounts watching past 60%. Three reps were notified this week.
-          </p>
-          <button className="shrink-0 text-2xs font-medium text-iris-300 hover:text-iris-400">
-            Configure alerts
-          </button>
-        </div>
+        {/* "Alerting is on… Three reps were notified this week" was a
+            fabricated event report beside a Configure alerts button with no
+            handler. Neither alerting nor its configuration exists yet. */}
       </Panel>
     </div>
   );

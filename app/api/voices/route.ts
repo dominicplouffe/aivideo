@@ -15,8 +15,54 @@ import { resolveActor, UnauthenticatedError } from "@/lib/auth/session";
  * would destroy the only evidence that answers it.
  */
 
-/** Lists voices available to the workspace. Mirrors GET /v1/voices. */
-export async function GET() {
+/** Maps the two authorization errors onto responses. Used by both verbs. */
+function unauthorized(error: unknown): NextResponse | null {
+  if (error instanceof UnauthenticatedError) {
+    return NextResponse.json({ error: error.message }, { status: 401 });
+  }
+  if (error instanceof ForbiddenError) {
+    return NextResponse.json({ error: error.message }, { status: 403 });
+  }
+  return null;
+}
+
+/**
+ * Lists voices available to the workspace. Mirrors GET /v1/voices.
+ *
+ * From the database when there is one, so `revoked_at` is the real answer.
+ * The fixture list is the fallback for a deployment running without one —
+ * but it used to be the *only* answer, which meant the voices page could
+ * not show that a clone had been revoked through this very endpoint.
+ */
+export async function GET(request: Request) {
+  if (isDatabaseConfigured()) {
+    try {
+      const actor = await resolveActor(request);
+      authorize(actor, "project.view", { workspaceId: actor.workspaceId });
+
+      const { listVoicesForWorkspace } = await import("@/lib/db/repositories/voices");
+      const rows = await listVoicesForWorkspace(actor.workspaceId);
+
+      if (rows.length > 0) {
+        return NextResponse.json({
+          object: "list",
+          data: rows.map((voice) => ({
+            id: voice.id,
+            name: voice.name,
+            kind: voice.kind,
+            consented_at: voice.consentRecordedAt?.toISOString() ?? null,
+            revoked_at: voice.revokedAt?.toISOString() ?? null,
+          })),
+          has_more: false,
+        });
+      }
+    } catch (error) {
+      const refusal = unauthorized(error);
+      if (refusal) return refusal;
+      throw error;
+    }
+  }
+
   const data = voiceFixtures.map((voice) => ({
     id: voice.id,
     name: voice.name,
@@ -25,6 +71,7 @@ export async function GET() {
     kind: voice.kind,
     languages: voice.languages,
     consented_at: voice.consented ?? null,
+    revoked_at: null,
   }));
   return NextResponse.json({ object: "list", data, has_more: false });
 }

@@ -105,3 +105,14 @@ export async function findRevoked(voiceIds: string[]): Promise<VoiceRecord[]> {
 
   return rows.filter((row) => row.revokedAt !== null).map(toVoice);
 }
+
+/** Every voice a workspace can use, including the studio library. */
+export async function listVoicesForWorkspace(workspaceId: string): Promise<VoiceRecord[]> {
+  const rows = await getDb()
+    .select()
+    .from(s.voices)
+    // A studio voice has no workspace — it is licensed to everybody — so
+    // both are in scope and only clones are tenant-owned.
+    .where(or(isNull(s.voices.workspaceId), eq(s.voices.workspaceId, workspaceId)));
+  return rows.map(toVoice);
+}

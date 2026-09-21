@@ -1,21 +1,33 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
 import { Icon, type IconName } from "@/components/ui/Icon";
 import { Button } from "@/components/ui/Button";
 import { Panel } from "./Shared";
-import { integrations } from "@/lib/marketing-data";
-import { workspace, currentUser } from "@/lib/app-data";
 
-type Tab = "general" | "security" | "masking" | "integrations" | "api";
+/**
+ * Workspace settings.
+ *
+ * This page previously asserted an entire security posture that nothing
+ * checked: "SAML single sign-on — Okta · enforced", "SCIM provisioning —
+ * Synced 14 minutes ago", six masking rules marked Enforced, three API keys
+ * with prefixes and last-used times, "42 available · 5 connected". All of it
+ * was hardcoded, and every button on the page — Save changes, Delete
+ * workspace, Connect, Rotate, Revoke, Create API key, Stream to SIEM — had
+ * no handler.
+ *
+ * A settings screen is where somebody goes to find out what is true about
+ * their account. Inventing the answer is worse here than anywhere else in a
+ * product, so what is real is wired up and what is not says so.
+ */
+
+type Tab = "general" | "security" | "integrations";
 
 const tabs: { id: Tab; label: string; icon: IconName }[] = [
   { id: "general", label: "General", icon: "settings" },
   { id: "security", label: "Security", icon: "shield" },
-  { id: "masking", label: "Masking", icon: "lock" },
   { id: "integrations", label: "Integrations", icon: "puzzle" },
-  { id: "api", label: "API keys", icon: "key" },
 ];
 
 export function SettingsView() {
@@ -46,9 +58,7 @@ export function SettingsView() {
       <div className="max-w-3xl space-y-4">
         {tab === "general" ? <General /> : null}
         {tab === "security" ? <Security /> : null}
-        {tab === "masking" ? <Masking /> : null}
         {tab === "integrations" ? <Integrations /> : null}
-        {tab === "api" ? <ApiKeys /> : null}
       </div>
     </div>
   );
@@ -56,182 +66,270 @@ export function SettingsView() {
 
 /* ---------------------------------------------------------- general */
 
+interface WorkspaceSettings {
+  name: string;
+  slug: string;
+  plan: string;
+  region: string;
+  share_domain: string | null;
+  hard_stop_at_limit: boolean;
+}
+
 function General() {
+  const [settings, setSettings] = useState<WorkspaceSettings | null>(null);
+  const [name, setName] = useState("");
+  const [slug, setSlug] = useState("");
+  const [shareDomain, setShareDomain] = useState("");
+  const [hardStop, setHardStop] = useState(false);
+  const [state, setState] = useState<"loading" | "idle" | "saving" | "saved" | "error">("loading");
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const response = await fetch("/api/workspace");
+        const body = (await response.json()) as { workspace?: WorkspaceSettings; error?: string };
+        if (!response.ok || !body.workspace) throw new Error(body.error ?? "Could not load settings.");
+        setSettings(body.workspace);
+        setName(body.workspace.name);
+        setSlug(body.workspace.slug);
+        setShareDomain(body.workspace.share_domain ?? "");
+        setHardStop(body.workspace.hard_stop_at_limit);
+        setState("idle");
+      } catch (cause) {
+        setError(cause instanceof Error ? cause.message : String(cause));
+        setState("error");
+      }
+    })();
+  }, []);
+
+  const save = async () => {
+    setState("saving");
+    setError(null);
+    try {
+      const response = await fetch("/api/workspace", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name,
+          slug,
+          share_domain: shareDomain,
+          hard_stop_at_limit: hardStop,
+        }),
+      });
+      const body = (await response.json()) as { error?: string };
+      if (!response.ok) throw new Error(body.error ?? "That did not save.");
+      setState("saved");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+      setState("error");
+    }
+  };
+
+  if (state === "loading") {
+    return <Panel title="Workspace"><p className="p-5 text-[0.8125rem] text-fg-faint">Loading…</p></Panel>;
+  }
+
   return (
     <>
       <Panel title="Workspace">
         <div className="space-y-4 p-5">
-          <Field label="Workspace name" defaultValue={workspace.name} />
-          <Field label="Workspace URL" defaultValue="meridian" prefix="demoriff.com/" />
-          <Field label="Custom share domain" defaultValue="demos.meridian.app" hint="CNAME to share.demoriff.com — certificate issued automatically." />
-          <Select label="Default language" options={["English (US)", "English (UK)", "German", "Japanese"]} />
+          <Field label="Workspace name" value={name} onChange={setName} />
+          <Field label="Workspace URL" value={slug} onChange={setSlug} prefix="demoriff.com/" />
+          <Field
+            label="Custom share domain"
+            value={shareDomain}
+            onChange={setShareDomain}
+            placeholder="demos.example.com"
+            hint="Point a CNAME at this deployment. Leave blank to serve share pages from here."
+          />
+          <Toggle
+            label="Stop renders at the plan limit"
+            hint="Off by default. Running out mid-launch is worse than an overage line."
+            on={hardStop}
+            onChange={setHardStop}
+          />
         </div>
-        <div className="border-t border-[var(--line)] p-4">
-          <Button size="sm">Save changes</Button>
+        <div className="flex flex-wrap items-center gap-3 border-t border-[var(--line)] p-4">
+          <Button size="sm" disabled={state === "saving"} onClick={() => void save()}>
+            {state === "saving" ? "Saving…" : "Save changes"}
+          </Button>
+          {state === "saved" ? (
+            <span className="inline-flex items-center gap-1.5 text-2xs text-mint-400">
+              <Icon name="check" className="size-3" strokeWidth={3} />
+              Saved
+            </span>
+          ) : null}
+          {error ? <span className="text-2xs text-rose-300">{error}</span> : null}
         </div>
       </Panel>
 
-      <Panel title="Your profile">
-        <div className="space-y-4 p-5">
-          <Field label="Name" defaultValue={currentUser.name} />
-          <Field label="Email" defaultValue={currentUser.email} hint="Managed by your identity provider." disabled />
-          <Select label="Theme" options={["Dark", "System"]} />
+      <Panel title="Plan">
+        <div className="space-y-1.5 p-5">
+          <Readout label="Plan" value={settings?.plan ?? "—"} />
+          <Readout label="Region" value={(settings?.region ?? "").toUpperCase() || "—"} />
         </div>
       </Panel>
 
-      <Panel title="Danger zone">
-        <div className="flex flex-wrap items-center gap-3 p-5">
-          <div className="min-w-0 flex-1">
-            <p className="text-[0.875rem] font-medium text-fg-strong">Delete workspace</p>
-            <p className="mt-1 text-[0.8125rem] leading-relaxed text-fg-subtle">
-              Exports remain available for 90 days, after which everything is purged from primary
-              storage, replicas and backups. We issue a signed deletion certificate on request.
-            </p>
-          </div>
-          <Button variant="danger" size="sm" className="shrink-0">Delete workspace</Button>
-        </div>
-      </Panel>
+      {/*
+        The danger zone is gone until deletion works.
+
+        It was a `variant="danger"` button with no confirmation and no
+        effect, beside a paragraph promising purges from replicas and
+        backups and a signed deletion certificate. `lib/db/erase.ts` is the
+        real erasure path; this returns when a route calls it.
+      */}
     </>
   );
 }
 
 /* ---------------------------------------------------------- security */
 
-function Security() {
-  const rows = [
-    { label: "SAML single sign-on", value: "Okta · enforced", on: true },
-    { label: "SCIM provisioning", value: "Synced 14 minutes ago", on: true },
-    { label: "Enforced domain capture", value: "meridian.app", on: true },
-    { label: "Two-factor for non-SSO", value: "Required", on: true },
-    { label: "Session length", value: "12 hours", on: true },
-    { label: "IP allowlist", value: "Not configured", on: false },
-  ];
-  return (
-    <>
-      <Panel title="Identity">
-        <ul className="divide-y divide-[var(--line)]">
-          {rows.map((r) => (
-            <li key={r.label} className="flex items-center gap-4 px-5 py-3.5">
-              <Icon
-                name={r.on ? "check" : "x"}
-                className={cn("size-4 shrink-0", r.on ? "text-mint-400" : "text-fg-faint")}
-                strokeWidth={2.4}
-              />
-              <span className="min-w-0 flex-1">
-                <span className="block text-[0.875rem] text-fg">{r.label}</span>
-                <span className="block text-2xs text-fg-faint">{r.value}</span>
-              </span>
-              <Button variant="ghost" size="xs" className="shrink-0">
-                {r.on ? "Configure" : "Enable"}
-              </Button>
-            </li>
-          ))}
-        </ul>
-      </Panel>
-
-      <Panel title="Data residency">
-        <div className="space-y-4 p-5">
-          <div className="grid gap-2 sm:grid-cols-3">
-            {["United States", "European Union", "Australia"].map((r, i) => (
-              <button
-                key={r}
-                type="button"
-                className={cn(
-                  "rounded-xl border px-3.5 py-3 text-left transition-colors",
-                  i === 0 ? "border-iris-500/45 bg-iris-500/[0.08]" : "border-[var(--line)] hover:border-[var(--line-strong)]",
-                )}
-              >
-                <span className="block text-[0.8125rem] font-medium text-fg">{r}</span>
-                <span className="block text-2xs text-fg-faint">
-                  {i === 0 ? "Active · us-east-1" : "Available"}
-                </span>
-              </button>
-            ))}
-          </div>
-          <p className="flex items-start gap-2.5 rounded-xl border border-[var(--line)] bg-ink-900 p-3.5 text-[0.8125rem] leading-relaxed text-fg-subtle">
-            <Icon name="info" className="mt-0.5 size-4 shrink-0 text-iris-400" strokeWidth={1.9} />
-            Capture, processing and storage are pinned to the selected region. Private rendering
-            inside your own cloud account is available on Enterprise.
-          </p>
-        </div>
-      </Panel>
-
-      <Panel title="Audit log">
-        <div className="space-y-3 p-5">
-          <p className="text-[0.8125rem] leading-relaxed text-fg-subtle">
-            Every view, export, share, permission change, masking rule and agent run, with actor,
-            timestamp, IP and resource. Retained 24 months.
-          </p>
-          <div className="flex flex-wrap gap-2">
-            <Button variant="outline" size="sm">
-              <Icon name="download" className="size-4" strokeWidth={1.8} />
-              Export CSV
-            </Button>
-            <Button variant="outline" size="sm">
-              <Icon name="link" className="size-4" strokeWidth={1.8} />
-              Stream to SIEM
-            </Button>
-          </div>
-        </div>
-      </Panel>
-    </>
-  );
+interface SessionRow {
+  id: string;
+  created_at: string;
+  last_seen_at: string;
+  ip: string | null;
+  user_agent: string | null;
+  current: boolean;
 }
 
-/* ---------------------------------------------------------- masking */
+interface SiemDestination {
+  id: string;
+  name: string;
+  kind?: string;
+  url?: string;
+}
 
-function Masking() {
-  const rules = [
-    { type: "detector", label: "Email addresses", detail: "Built-in detector", enforced: true },
-    { type: "detector", label: "Card numbers and IBANs", detail: "Built-in detector", enforced: true },
-    { type: "detector", label: "API keys and JWTs", detail: "Built-in detector", enforced: true },
-    { type: "selector", label: "[data-customer-name]", detail: "Blur · DOM selector", enforced: true },
-    { type: "region", label: "Left panel (0–18%)", detail: "Pixelate · fixed region", enforced: false },
-    { type: "pattern", label: "ACC-[0-9]{8}", detail: "Redact · regex", enforced: true },
-  ];
-  const tone: Record<string, string> = {
-    detector: "bg-iris-500/15 text-iris-300",
-    selector: "bg-cyan-500/15 text-cyan-300",
-    region: "bg-amber-500/15 text-amber-400",
-    pattern: "bg-violet-500/15 text-violet-400",
+function Security() {
+  const [sessions, setSessions] = useState<SessionRow[] | null>(null);
+  const [destinations, setDestinations] = useState<SiemDestination[] | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = async () => {
+    const [auth, siem] = await Promise.all([
+      fetch("/api/auth").then((r) => (r.ok ? r.json() : { sessions: [] })),
+      fetch("/api/siem").then((r) => (r.ok ? r.json() : { destinations: [] })),
+    ]);
+    setSessions((auth as { sessions?: SessionRow[] }).sessions ?? []);
+    setDestinations((siem as { destinations?: SiemDestination[] }).destinations ?? []);
+  };
+
+  useEffect(() => {
+    void load().catch(() => {
+      setSessions([]);
+      setDestinations([]);
+    });
+  }, []);
+
+  const signOutEverywhere = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const response = await fetch("/api/auth?all=true", { method: "DELETE" });
+      if (!response.ok) throw new Error("Could not end those sessions.");
+      window.location.href = "/signin";
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+      setBusy(false);
+    }
   };
 
   return (
     <>
-      <Panel title="Production safeguards" description="Applied at capture, before frames are encoded">
-        <ul className="divide-y divide-[var(--line)]">
-          {rules.map((r) => (
-            <li key={r.label} className="flex flex-wrap items-center gap-3 px-5 py-3.5">
-              <span className={cn("shrink-0 rounded px-1.5 py-0.5 font-mono text-2xs", tone[r.type])}>
-                {r.type}
-              </span>
-              <span className="min-w-0 flex-1">
-                <span className="block truncate font-mono text-[0.8125rem] text-fg">{r.label}</span>
-                <span className="block text-2xs text-fg-faint">{r.detail}</span>
-              </span>
-              {r.enforced ? (
-                <span className="inline-flex shrink-0 items-center gap-1 rounded bg-mint-500/15 px-1.5 py-0.5 text-2xs text-mint-400">
-                  <Icon name="lock" className="size-2.5" strokeWidth={2.6} />
-                  Enforced
+      {/*
+        Sessions, which are real and revocable — the one security control on
+        this page that was already implemented end to end, and the one the
+        page did not mention. What it listed instead was six hardcoded rows
+        claiming Okta SSO was enforced and SCIM had synced fourteen minutes
+        ago.
+      */}
+      <Panel
+        title="Where you are signed in"
+        description="Ending a session takes effect on the next request, not at the next expiry"
+      >
+        {sessions === null ? (
+          <p className="p-5 text-[0.8125rem] text-fg-faint">Loading…</p>
+        ) : sessions.length === 0 ? (
+          <p className="p-5 text-[0.8125rem] text-fg-subtle">No active sessions to show.</p>
+        ) : (
+          <ul className="divide-y divide-[var(--line)]">
+            {sessions.map((session) => (
+              <li key={session.id} className="flex flex-wrap items-center gap-4 px-5 py-3.5">
+                <Icon
+                  name={session.current ? "check" : "clock"}
+                  className={cn("size-4 shrink-0", session.current ? "text-mint-400" : "text-fg-faint")}
+                  strokeWidth={2.2}
+                />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-[0.875rem] text-fg">
+                    {session.user_agent ?? "Unknown client"}
+                    {session.current ? " · this device" : ""}
+                  </span>
+                  <span className="block text-2xs text-fg-faint">
+                    {session.ip ?? "no address recorded"} · last seen{" "}
+                    {new Date(session.last_seen_at).toLocaleString()}
+                  </span>
                 </span>
-              ) : (
-                <span className="shrink-0 rounded bg-white/6 px-1.5 py-0.5 text-2xs text-fg-faint">
-                  Advisory
-                </span>
-              )}
-            </li>
-          ))}
-        </ul>
+              </li>
+            ))}
+          </ul>
+        )}
         <div className="flex flex-wrap items-center gap-3 border-t border-[var(--line)] p-4">
-          <Button variant="outline" size="sm">
-            <Icon name="plus" className="size-4" strokeWidth={2.2} />
-            Add rule
+          <Button variant="outline" size="sm" disabled={busy} onClick={() => void signOutEverywhere()}>
+            {busy ? "Ending…" : "Sign out everywhere"}
           </Button>
-          <p className="min-w-0 flex-1 text-2xs leading-relaxed text-fg-faint">
-            Enforced rules cannot be disabled by the person recording. Masking applies to frames,
-            transcripts, generated guides, screenshots and the search index.
-          </p>
+          {error ? <span className="text-2xs text-rose-300">{error}</span> : null}
         </div>
+      </Panel>
+
+      <Panel
+        title="Audit log"
+        description="Append-only, hash-chained, with actor, timestamp, IP and resource"
+      >
+        <div className="space-y-3 p-5">
+          {destinations === null ? (
+            <p className="text-[0.8125rem] text-fg-faint">Loading…</p>
+          ) : destinations.length === 0 ? (
+            <p className="text-[0.8125rem] leading-relaxed text-fg-subtle">
+              No SIEM destination is registered. The log is recorded either way;{" "}
+              <code className="font-mono text-fg-muted">POST /api/siem</code> registers a collector
+              to stream it to.
+            </p>
+          ) : (
+            <ul className="space-y-1.5">
+              {destinations.map((destination) => (
+                <li
+                  key={destination.id}
+                  className="flex items-center gap-2 rounded-lg border border-[var(--line)] px-3 py-2"
+                >
+                  <Icon name="check" className="size-3 shrink-0 text-mint-400" strokeWidth={3} />
+                  <span className="min-w-0 flex-1 truncate text-[0.8125rem] text-fg">
+                    {destination.name}
+                  </span>
+                  <span className="shrink-0 font-mono text-2xs text-fg-faint">
+                    {destination.kind ?? "siem"}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </Panel>
+
+      <Panel title="Single sign-on">
+        <p className="p-5 text-[0.8125rem] leading-relaxed text-fg-subtle">
+          {/*
+            Previously: "SAML single sign-on — Okta · enforced" with a green
+            tick, on a deployment where no identity provider was configured.
+          */}
+          SSO and SCIM are wired to WorkOS and need{" "}
+          <code className="font-mono text-fg-muted">WORKOS_API_KEY</code> and{" "}
+          <code className="font-mono text-fg-muted">WORKOS_CLIENT_ID</code> set on the deployment.
+          Whether they are is a property of the server, not of this workspace, so this page will not
+          guess at it.
+        </p>
       </Panel>
 
       <Panel title="Model training">
@@ -243,8 +341,8 @@ function Masking() {
             </p>
             <p className="mt-1.5 text-[0.8125rem] leading-relaxed text-fg-subtle">
               This is not a setting because it is not optional. Media, transcripts and derived
-              assets are never used to train any model, ours or a subprocessor's, on any plan. Every
-              inference subprocessor operates under a zero-retention agreement.
+              assets are never used to train any model, and nothing in this codebase sends them
+              anywhere but the transcription, synthesis and translation calls a render needs.
             </p>
           </div>
         </div>
@@ -255,149 +353,171 @@ function Masking() {
 
 /* ---------------------------------------------------------- integrations */
 
+interface Vendor {
+  id: string;
+  name: string;
+  category?: string;
+}
+
+interface Installation {
+  id: string;
+  vendor: string;
+  status?: string;
+  last_sync_at?: string | null;
+}
+
 function Integrations() {
-  const connected = ["Slack", "HubSpot", "Zendesk", "Notion", "Okta"];
+  const [vendors, setVendors] = useState<Vendor[] | null>(null);
+  const [installations, setInstallations] = useState<Installation[]>([]);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const response = await fetch("/api/connectors");
+        const body = (await response.json()) as {
+          vendors?: Vendor[];
+          installations?: Installation[];
+        };
+        setVendors(body.vendors ?? []);
+        setInstallations(body.installations ?? []);
+      } catch {
+        setVendors([]);
+      }
+    })();
+  }, []);
+
+  if (vendors === null) {
+    return <Panel title="Integrations"><p className="p-5 text-[0.8125rem] text-fg-faint">Loading…</p></Panel>;
+  }
+
+  const connected = new Set(installations.map((i) => i.vendor));
+
   return (
-    <Panel title="Integrations" description="42 available · 5 connected">
+    <Panel
+      title="Help centre connectors"
+      // Counted, not asserted. The description used to read "42 available ·
+      // 5 connected" over a hardcoded list of five names.
+      description={`${vendors.length} available · ${connected.size} connected`}
+    >
       <div className="grid gap-3 p-5 sm:grid-cols-2">
-        {integrations.map((it) => {
-          const on = connected.includes(it.name);
+        {vendors.map((vendor) => {
+          const installation = installations.find((i) => i.vendor === vendor.id);
           return (
             <div
-              key={it.name}
+              key={vendor.id}
               className={cn(
                 "flex items-center gap-3 rounded-xl border p-3.5",
-                on ? "border-mint-500/30 bg-mint-500/[0.05]" : "border-[var(--line)]",
+                installation ? "border-mint-500/30 bg-mint-500/[0.05]" : "border-[var(--line)]",
               )}
             >
               <span className="inline-flex size-9 shrink-0 items-center justify-center rounded-xl bg-ink-850 text-iris-400">
-                <Icon name={it.icon} className="size-4" strokeWidth={1.7} />
+                <Icon name="puzzle" className="size-4" strokeWidth={1.7} />
               </span>
               <span className="min-w-0 flex-1">
-                <span className="block text-[0.875rem] font-medium text-fg-strong">{it.name}</span>
-                <span className="block truncate text-2xs text-fg-faint">{it.category}</span>
+                <span className="block text-[0.875rem] font-medium text-fg-strong">{vendor.name}</span>
+                <span className="block truncate text-2xs text-fg-faint">
+                  {installation
+                    ? installation.last_sync_at
+                      ? `Synced ${new Date(installation.last_sync_at).toLocaleDateString()}`
+                      : "Connected, never synced"
+                    : (vendor.category ?? "Not connected")}
+                </span>
               </span>
-              <Button variant={on ? "ghost" : "outline"} size="xs" className="shrink-0">
-                {on ? "Configure" : "Connect"}
-              </Button>
             </div>
           );
         })}
       </div>
+      <p className="border-t border-[var(--line)] px-5 py-3 text-2xs leading-relaxed text-fg-faint">
+        Connecting one needs its OAuth credentials on the deployment. The Connect buttons that used
+        to sit here had no handlers.
+      </p>
     </Panel>
   );
 }
 
-/* ---------------------------------------------------------- api keys */
-
-function ApiKeys() {
-  const keys = [
-    { name: "CI render pipeline", prefix: "dr_live_7f2a", created: "Mar 4, 2026", lastUsed: "2 hours ago", scope: "renders:write" },
-    { name: "Help center sync", prefix: "dr_live_91cb", created: "Jan 18, 2026", lastUsed: "yesterday", scope: "guides:write" },
-    { name: "Warehouse export", prefix: "dr_live_3e08", created: "Nov 2, 2025", lastUsed: "5 days ago", scope: "analytics:read" },
-  ];
-  return (
-    <>
-      <Panel title="API keys" description="Scoped, rotatable, never shown again after creation">
-        <ul className="divide-y divide-[var(--line)]">
-          {keys.map((k) => (
-            <li key={k.prefix} className="flex flex-wrap items-center gap-4 px-5 py-3.5">
-              <span className="min-w-0 flex-1">
-                <span className="block text-[0.875rem] font-medium text-fg-strong">{k.name}</span>
-                <span className="block font-mono text-2xs text-fg-faint">
-                  {k.prefix}••••••••••••••••
-                </span>
-              </span>
-              <span className="shrink-0 rounded-md bg-ink-850 px-2 py-0.5 font-mono text-2xs text-cyan-300">
-                {k.scope}
-              </span>
-              <span className="w-28 shrink-0 text-2xs text-fg-faint">Used {k.lastUsed}</span>
-              <span className="flex shrink-0 gap-1">
-                <Button variant="ghost" size="xs">Rotate</Button>
-                <Button variant="ghost" size="xs">Revoke</Button>
-              </span>
-            </li>
-          ))}
-        </ul>
-        <div className="border-t border-[var(--line)] p-4">
-          <Button size="sm">
-            <Icon name="plus" className="size-4" strokeWidth={2.2} />
-            Create API key
-          </Button>
-        </div>
-      </Panel>
-
-      <Panel title="Webhooks">
-        <ul className="divide-y divide-[var(--line)]">
-          {[
-            { url: "https://hooks.meridian.app/demoriff", events: 7, status: "Healthy" },
-            { url: "https://ci.meridian.app/webhooks/render", events: 2, status: "Healthy" },
-          ].map((w) => (
-            <li key={w.url} className="flex flex-wrap items-center gap-4 px-5 py-3.5">
-              <span className="min-w-0 flex-1 truncate font-mono text-[0.8125rem] text-fg">{w.url}</span>
-              <span className="shrink-0 text-2xs text-fg-faint">{w.events} events</span>
-              <span className="shrink-0 rounded-md bg-mint-500/15 px-2 py-0.5 text-2xs text-mint-400">
-                {w.status}
-              </span>
-            </li>
-          ))}
-        </ul>
-        <div className="border-t border-[var(--line)] p-4">
-          <Button href="/docs/api" variant="outline" size="sm">
-            <Icon name="code" className="size-4" strokeWidth={1.8} />
-            API reference
-          </Button>
-        </div>
-      </Panel>
-    </>
-  );
-}
-
-/* ---------------------------------------------------------- fields */
+/* ---------------------------------------------------------- bits */
 
 function Field({
   label,
-  defaultValue,
-  hint,
+  value,
+  onChange,
   prefix,
-  disabled,
+  hint,
+  placeholder,
 }: {
   label: string;
-  defaultValue?: string;
-  hint?: string;
+  value: string;
+  onChange: (v: string) => void;
   prefix?: string;
-  disabled?: boolean;
+  hint?: string;
+  placeholder?: string;
 }) {
+  const id = label.toLowerCase().replace(/[^a-z]+/g, "-");
   return (
     <div>
-      <label className="mb-2 block text-[0.8125rem] font-medium text-fg">{label}</label>
-      <div className="flex items-center">
-        {prefix ? (
-          <span className="rounded-l-xl border border-r-0 border-[var(--line)] bg-ink-850 px-3 py-2.5 font-mono text-[0.75rem] text-fg-faint">
-            {prefix}
-          </span>
-        ) : null}
+      <label htmlFor={id} className="text-[0.8125rem] font-medium text-fg">
+        {label}
+      </label>
+      <div className="mt-1.5 flex items-center gap-2">
+        {prefix ? <span className="shrink-0 font-mono text-2xs text-fg-faint">{prefix}</span> : null}
         <input
-          defaultValue={defaultValue}
-          disabled={disabled}
-          className={cn(
-            "h-10 w-full border border-[var(--line)] bg-ink-900 px-3.5 text-[0.8125rem] text-fg focus:border-iris-500/50 focus:outline-none disabled:opacity-55",
-            prefix ? "rounded-r-xl" : "rounded-xl",
-          )}
+          id={id}
+          value={value}
+          placeholder={placeholder}
+          onChange={(e) => onChange(e.target.value)}
+          className="h-10 min-w-0 flex-1 rounded-xl border border-[var(--line)] bg-ink-900 px-3.5 text-[0.875rem] text-fg placeholder:text-fg-faint focus:border-iris-500/50 focus:outline-none"
         />
       </div>
-      {hint ? <p className="mt-1.5 text-2xs text-fg-faint">{hint}</p> : null}
+      {hint ? <p className="mt-1.5 text-2xs leading-relaxed text-fg-faint">{hint}</p> : null}
     </div>
   );
 }
 
-function Select({ label, options }: { label: string; options: string[] }) {
+function Toggle({
+  label,
+  hint,
+  on,
+  onChange,
+}: {
+  label: string;
+  hint?: string;
+  on: boolean;
+  onChange: (v: boolean) => void;
+}) {
   return (
-    <div>
-      <label className="mb-2 block text-[0.8125rem] font-medium text-fg">{label}</label>
-      <select className="h-10 w-full rounded-xl border border-[var(--line)] bg-ink-900 px-3 text-[0.8125rem] text-fg focus:border-iris-500/50 focus:outline-none">
-        {options.map((o) => <option key={o}>{o}</option>)}
-      </select>
+    <button
+      type="button"
+      role="switch"
+      aria-checked={on}
+      onClick={() => onChange(!on)}
+      className="flex w-full items-center gap-3 rounded-lg py-1.5 text-left"
+    >
+      <span className="min-w-0 flex-1">
+        <span className="block text-[0.8125rem] text-fg">{label}</span>
+        {hint ? <span className="block text-2xs text-fg-faint">{hint}</span> : null}
+      </span>
+      <span
+        className={cn(
+          "relative h-5 w-9 shrink-0 rounded-full transition-colors",
+          on ? "bg-iris-500" : "bg-ink-700",
+        )}
+      >
+        <span
+          className={cn(
+            "absolute top-0.5 size-4 rounded-full bg-white transition-transform",
+            on ? "translate-x-4.5" : "translate-x-0.5",
+          )}
+        />
+      </span>
+    </button>
+  );
+}
+
+function Readout({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <span className="text-[0.8125rem] text-fg-subtle">{label}</span>
+      <span className="font-mono text-2xs text-fg-muted">{value}</span>
     </div>
   );
 }
