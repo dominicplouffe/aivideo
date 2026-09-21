@@ -2,6 +2,7 @@ import { and, desc, eq, inArray, isNull } from "drizzle-orm";
 import { getDb } from "../client";
 import * as s from "../schema";
 import type { Project, Segment, ProjectStatus, OutputKind } from "@/lib/app-data";
+import { slugify } from "@/lib/utils";
 
 /**
  * Reads projects out of Postgres in exactly the shape the UI already consumes.
@@ -199,4 +200,111 @@ export async function getProjectById(workspaceId: string, id: string): Promise<P
 export async function listStaleProjects(workspaceSlug: string): Promise<Project[]> {
   const all = await listProjects(workspaceSlug);
   return all.filter((p) => p.status === "stale");
+}
+
+/**
+ * Creates a project from a recording.
+ *
+ * The slug is derived from the title and made unique within the workspace by
+ * appending a counter — not a random suffix. A person who records "Shipments
+ * walkthrough" twice should get `shipments-walkthrough` and
+ * `shipments-walkthrough-2`, because they will read these in a URL and a
+ * random suffix tells them nothing about which is which.
+ */
+export async function createProject(input: {
+  workspaceId: string;
+  recordingId: string | null;
+  ownerId: string | null;
+  title: string;
+  description?: string | null;
+  sourceDurationSec?: number | null;
+}): Promise<Project> {
+  const db = getDb();
+  const base = slugify(input.title) || "untitled-recording";
+
+  const taken = new Set(
+    (
+      await db
+        .select({ slug: s.projects.slug })
+        .from(s.projects)
+        .where(eq(s.projects.workspaceId, input.workspaceId))
+    ).map((row) => row.slug),
+  );
+
+  let slug = base;
+  for (let n = 2; taken.has(slug); n++) slug = `${base}-${n}`;
+
+  const [row] = await db
+    .insert(s.projects)
+    .values({
+      workspaceId: input.workspaceId,
+      recordingId: input.recordingId,
+      ownerId: input.ownerId,
+      slug,
+      title: input.title,
+      description: input.description ?? null,
+      // Processing, not draft: the take has arrived and work is queued on it.
+      // Draft would suggest somebody has to do something next, and at this
+      // point nobody does.
+      status: "processing",
+      sourceDurationSec: input.sourceDurationSec ?? null,
+    })
+    .returning();
+
+  const [project] = await hydrate([row]);
+  return project;
+}
+
+/** Saves the Studio's edit decisions. The only writer of `edit_state`. */
+export async function saveEditState(
+  workspaceId: string,
+  projectId: string,
+  editState: Record<string, unknown>,
+): Promise<boolean> {
+  const [updated] = await getDb()
+    .update(s.projects)
+    .set({ editState, updatedAt: new Date() })
+    .where(and(eq(s.projects.id, projectId), eq(s.projects.workspaceId, workspaceId)))
+    .returning({ id: s.projects.id });
+  return Boolean(updated);
+}
+
+/** Replaces a project's segments. Used once, when a transcript lands. */
+export async function replaceSegments(
+  projectId: string,
+  segments: {
+    ordinal: number;
+    title: string;
+    startSec: number;
+    endSec: number;
+    action?: string | null;
+    words: { w: string; t: number; d: number; cut?: boolean; em?: boolean }[];
+  }[],
+): Promise<void> {
+  const db = getDb();
+  await db.delete(s.segments).where(eq(s.segments.projectId, projectId));
+  if (segments.length === 0) return;
+
+  await db.insert(s.segments).values(
+    segments.map((segment) => ({
+      projectId,
+      ordinal: segment.ordinal,
+      title: segment.title,
+      startSec: segment.startSec,
+      endSec: segment.endSec,
+      action: segment.action ?? null,
+      words: segment.words,
+    })),
+  );
+}
+
+export async function setProjectStatus(
+  projectId: string,
+  status: typeof s.projects.$inferInsert["status"],
+  extra: { durationSec?: number | null } = {},
+): Promise<void> {
+  await getDb()
+    .update(s.projects)
+    .set({ status, updatedAt: new Date(), ...extra })
+    .where(eq(s.projects.id, projectId));
 }

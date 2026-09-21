@@ -61,6 +61,44 @@ export function Recorder() {
 
 /* ============================================================ record */
 
+/** The server's own words where it gave any, rather than a status code. */
+async function messageFrom(response: Response): Promise<string> {
+  const body = (await response.json().catch(() => null)) as { error?: string } | null;
+  return body?.error ?? `That step failed (${response.status}).`;
+}
+
+/**
+ * How long the take runs, read from the recording itself.
+ *
+ * A WebM produced by `MediaRecorder` has no duration in its header, so a
+ * browser reports `Infinity` until it has seen the end. Seeking to the far
+ * end forces it to resolve. Returns null rather than guessing when it will
+ * not: a wrong duration is worse than none, because everything downstream
+ * treats it as fact.
+ */
+async function durationOf(url: string | null): Promise<number | null> {
+  if (!url) return null;
+  return new Promise((resolve) => {
+    const probe = document.createElement("video");
+    const done = (value: number | null) => {
+      probe.src = "";
+      resolve(value);
+    };
+    probe.preload = "metadata";
+    probe.onloadedmetadata = () => {
+      if (Number.isFinite(probe.duration) && probe.duration > 0) return done(probe.duration);
+      probe.currentTime = 1e101;
+      probe.ontimeupdate = () => {
+        probe.ontimeupdate = null;
+        done(Number.isFinite(probe.duration) && probe.duration > 0 ? probe.duration : null);
+      };
+    };
+    probe.onerror = () => done(null);
+    setTimeout(() => done(null), 5000);
+    probe.src = url;
+  });
+}
+
 function RecordFlow({ onDone }: { onDone: (projectId: string) => void }) {
   const [phase, setPhase] = useState<Phase>("setup");
   const [error, setError] = useState<string | null>(null);
@@ -69,9 +107,13 @@ function RecordFlow({ onDone }: { onDone: (projectId: string) => void }) {
   const [events, setEvents] = useState<CapturedEvent[]>([]);
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
   const [progress, setProgress] = useState(0);
+  const [stage, setStage] = useState("");
+  // Kept alongside the object URL: the URL is for the <video> element, the
+  // blob is what gets uploaded. Revoking one must not lose the other.
+  const [blob, setBlob] = useState<Blob | null>(null);
+  const [audioCaptured, setAudioCaptured] = useState<boolean | null>(null);
 
   const [withMic, setWithMic] = useState(true);
-  const [withCamera, setWithCamera] = useState(false);
   const [withSystemAudio, setWithSystemAudio] = useState(true);
   const [masking, setMasking] = useState(true);
   const [brandKit, setBrandKit] = useState(brandKits[0].id);
@@ -111,14 +153,25 @@ function RecordFlow({ onDone }: { onDone: (projectId: string) => void }) {
       });
 
       let combined = display;
+      let gotAudio = display.getAudioTracks().length > 0;
+
       if (withMic) {
         try {
           const mic = await navigator.mediaDevices.getUserMedia({ audio: true });
           combined = new MediaStream([...display.getTracks(), ...mic.getAudioTracks()]);
+          gotAudio = gotAudio || mic.getAudioTracks().length > 0;
         } catch {
-          // Microphone denied — continue with screen only rather than failing the take.
+          // The take continues without the microphone — losing a recording
+          // over a permission prompt would be worse. But it is *said*, now,
+          // and before a word is spoken: the previous version swallowed this
+          // and handed back a silent take with nothing to explain it.
+          setError(
+            "Your microphone was not available, so this take has no narration. " +
+              "Check the browser's microphone permission for this site, then start again.",
+          );
         }
       }
+      setAudioCaptured(gotAudio);
 
       streamRef.current = combined;
       if (videoRef.current) {
@@ -138,8 +191,9 @@ function RecordFlow({ onDone }: { onDone: (projectId: string) => void }) {
         }
       };
       rec.onstop = () => {
-        const blob = new Blob(chunksRef.current, { type: "video/webm" });
-        setBlobUrl(URL.createObjectURL(blob));
+        const recorded = new Blob(chunksRef.current, { type: "video/webm" });
+        setBlob(recorded);
+        setBlobUrl(URL.createObjectURL(recorded));
         setPhase("review");
       };
       rec.start(1000);
@@ -156,27 +210,13 @@ function RecordFlow({ onDone }: { onDone: (projectId: string) => void }) {
       tickRef.current = setInterval(() => {
         setElapsed((s) => {
           const next = s + 1;
-          // Synthesise plausible intent events so the panel shows what the
-          // real recorder captures. The desktop app reads these from the OS.
-          if (next % 4 === 0) {
-            setEvents((prev) =>
-              [
-                {
-                  at: next,
-                  kind: (["click", "scroll", "key", "route"] as const)[next % 4],
-                  label:
-                    next % 4 === 0
-                      ? "button#new-shipment"
-                      : next % 4 === 1
-                        ? "table.shipments"
-                        : next % 4 === 2
-                          ? "input#origin"
-                          : "/shipments/new",
-                },
-                ...prev,
-              ].slice(0, 8),
-            );
-          }
+          // No interaction log here, and none invented. A tab captured
+          // through `getDisplayMedia` gives pixels and nothing else — the
+          // browser will not tell one page what a different one was
+          // clicked on, which is the entire reason the extension exists.
+          // The previous version filled this panel with hardcoded
+          // selectors like `button#new-shipment`, which read as though the
+          // recorder had understood the screen.
           return next;
         });
       }, 1000);
@@ -196,19 +236,83 @@ function RecordFlow({ onDone }: { onDone: (projectId: string) => void }) {
     stopTracks();
   };
 
-  const process = () => {
+  /**
+   * Turns the take into a project.
+   *
+   * Three steps, each restartable on its own: reserve a recording, send the
+   * bytes into it, then create the project that points at it. The previous
+   * version of this function was a `setInterval` counting to sixty and then
+   * navigating to a seeded fixture — the recording was discarded, nothing
+   * was created, and the destination was somebody else's demo.
+   *
+   * Progress is reported per step rather than on a timer. A bar that moves
+   * on its own clock tells you how long somebody guessed it would take; this
+   * one tells you where it actually is, and stops where it actually failed.
+   */
+  const process = async () => {
+    if (!blob) {
+      setError("There is nothing to process — the take recorded no data.");
+      return;
+    }
+    if (!title.trim()) {
+      // Checked before anything is sent. Failing after a 40 MB upload
+      // because of an empty text field is a special kind of rude.
+      setError("Give the recording a name before processing it.");
+      setPhase("review");
+      return;
+    }
+
     setPhase("processing");
-    setProgress(0);
-    const steps = 60;
-    let i = 0;
-    const id = setInterval(() => {
-      i += 1;
-      setProgress(i / steps);
-      if (i >= steps) {
-        clearInterval(id);
-        onDone(projects[0].id);
-      }
-    }, 55);
+    setError(null);
+    setProgress(0.02);
+    setStage("Reserving the take…");
+
+    try {
+      const created = await fetch("/api/recordings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ source: "upload" }),
+      });
+      if (!created.ok) throw new Error(await messageFrom(created));
+      const { id: recordingId } = (await created.json()) as { id: string };
+
+      setProgress(0.1);
+      setStage(`Uploading ${formatBytes(blob.size)}…`);
+
+      // The duration comes from the element that just played it back; the
+      // server would otherwise have to probe the file to learn it.
+      const duration = await durationOf(blobUrl);
+      const query = new URLSearchParams();
+      if (duration) query.set("duration", String(duration));
+
+      const uploaded = await fetch(
+        `/api/recordings/${recordingId}/media?${query.toString()}`,
+        { method: "PUT", headers: { "Content-Type": "video/webm" }, body: blob },
+      );
+      if (!uploaded.ok) throw new Error(await messageFrom(uploaded));
+
+      setProgress(0.75);
+      setStage("Creating the project…");
+
+      const project = await fetch("/api/projects", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ recording_id: recordingId, title: title.trim() }),
+      });
+      if (!project.ok) throw new Error(await messageFrom(project));
+      const body = (await project.json()) as { project: { id: string } };
+
+      setProgress(1);
+      setStage("Done");
+      onDone(body.project.id);
+    } catch (cause) {
+      // Back to review, with the take intact. A failed upload must not cost
+      // somebody the recording they just made.
+      setError(cause instanceof Error ? cause.message : String(cause));
+      setStage("");
+      setProgress(0);
+      setPhase("review");
+    }
   };
 
   /* ---------------- setup ---------------- */
@@ -247,7 +351,6 @@ function RecordFlow({ onDone }: { onDone: (projectId: string) => void }) {
             <div className="mt-5 grid gap-2 sm:grid-cols-2">
               <Toggle label="Microphone" hint="Recorded as its own track" icon="mic" on={withMic} onChange={setWithMic} />
               <Toggle label="System audio" hint="Your app's own sound" icon="volume" on={withSystemAudio} onChange={setWithSystemAudio} />
-              <Toggle label="Camera bubble" hint="Background removed automatically" icon="avatar" on={withCamera} onChange={setWithCamera} />
               <Toggle label="Masking policy" hint="Enforced by your workspace" icon="shield" on={masking} onChange={setMasking} locked />
             </div>
           </div>
@@ -279,11 +382,6 @@ function RecordFlow({ onDone }: { onDone: (projectId: string) => void }) {
           <div className="p-5">
             <div className="relative aspect-video overflow-hidden rounded-xl border-2 border-rose-500/40 bg-black">
               <video ref={videoRef} muted playsInline className="size-full object-contain" />
-              {withCamera ? (
-                <span className="absolute right-4 bottom-4 flex size-20 items-center justify-center rounded-full border-2 border-white/15 bg-gradient-to-br from-ink-700 to-ink-850">
-                  <Icon name="avatar" className="size-8 text-fg-faint" strokeWidth={1.3} />
-                </span>
-              ) : null}
             </div>
 
             <div className="mt-5 flex flex-wrap items-center gap-3">
@@ -299,11 +397,18 @@ function RecordFlow({ onDone }: { onDone: (projectId: string) => void }) {
           </div>
         </Panel>
 
-        <Panel title="Intent stream" description="Captured alongside the frames">
+        <Panel title="Intent stream" description="Which element, not just where">
           <ul className="max-h-[22rem] divide-y divide-[var(--line)] overflow-y-auto">
             {events.length === 0 ? (
-              <li className="px-5 py-6 text-center text-[0.8125rem] text-fg-subtle">
-                Interactions appear here as you click.
+              <li className="space-y-2 px-5 py-6 text-[0.8125rem] leading-relaxed text-fg-subtle">
+                <p>
+                  Browser capture records pixels only — a page cannot be told what
+                  was clicked in a different one.
+                </p>
+                <p className="text-fg-faint">
+                  Record with the extension to capture the interaction log, which
+                  is what automatic zoom and the written guide are built from.
+                </p>
               </li>
             ) : (
               events.map((e, i) => (
@@ -343,8 +448,39 @@ function RecordFlow({ onDone }: { onDone: (projectId: string) => void }) {
                 </div>
               )}
             </div>
+            {audioCaptured === false ? (
+              <p className="mt-4 flex items-start gap-2.5 rounded-xl border border-amber-500/30 bg-amber-500/[0.08] p-3.5 text-[0.8125rem] leading-relaxed text-amber-300">
+                <Icon name="alert" className="mt-0.5 size-4 shrink-0" strokeWidth={1.9} />
+                This take has no audio track. Play it back before processing —
+                if you expected narration, the microphone was not captured.
+              </p>
+            ) : null}
+
+            {error ? (
+              <p role="alert" className="mt-4 flex items-start gap-2.5 rounded-xl border border-rose-500/30 bg-rose-500/[0.07] p-3.5 text-[0.8125rem] leading-relaxed text-rose-300">
+                <Icon name="alert" className="mt-0.5 size-4 shrink-0" strokeWidth={1.9} />
+                {error}
+              </p>
+            ) : null}
+
+            <div className="mt-5">
+              <label htmlFor="take-name" className="text-[0.8125rem] font-medium text-fg">
+                Name
+              </label>
+              <p className="mb-1.5 mt-0.5 text-2xs text-fg-faint">
+                What this becomes in your project library. Required.
+              </p>
+              <input
+                id="take-name"
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                placeholder="Shipments walkthrough"
+                className="h-11 w-full rounded-xl border border-[var(--line)] bg-ink-900 px-3.5 text-[0.875rem] text-fg placeholder:text-fg-faint focus:border-iris-500/50 focus:outline-none"
+              />
+            </div>
+
             <div className="mt-5 flex flex-wrap gap-3">
-              <Button size="md" onClick={process}>
+              <Button size="md" onClick={process} disabled={!title.trim() || !blob}>
                 <Icon name="sparkles" className="size-4" strokeWidth={2} />
                 Process this take
               </Button>
@@ -396,28 +532,77 @@ function RecordFlow({ onDone }: { onDone: (projectId: string) => void }) {
   }
 
   /* ---------------- processing ---------------- */
-  return <Processing progress={progress} />;
+  // The label is the step actually running, not a script of steps somebody
+  // expected. When it stops, it stops on the one that failed.
+  return <Processing progress={progress} label={stage || "Processing take"} />;
 }
 
 /* ============================================================ import */
 
 function ImportFlow({ onDone }: { onDone: (id: string) => void }) {
   const [files, setFiles] = useState<{ name: string; size: number }[]>([]);
+  // The File objects themselves, not just their names: the previous version
+  // kept only name and size, which is everything except the thing to upload.
+  const [picked, setPicked] = useState<File[] | null>(null);
+  const [name, setName] = useState("");
   const [link, setLink] = useState("");
   const [dragging, setDragging] = useState(false);
   const [progress, setProgress] = useState<number | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
-  const run = () => {
-    setProgress(0);
-    let i = 0;
-    const id = setInterval(() => {
-      i += 1;
-      setProgress(i / 60);
-      if (i >= 60) {
-        clearInterval(id);
-        onDone(projects[1].id);
-      }
-    }, 55);
+  /**
+   * Imports a file through exactly the path a recording takes.
+   *
+   * Same three calls, same rows, same result — an imported video and a
+   * captured one are the same thing to everything downstream, and a second
+   * code path for them would be a second place for this to rot.
+   */
+  const run = async () => {
+    const file = picked?.[0];
+    if (!file) {
+      setError("Choose a video file first.");
+      return;
+    }
+    if (!name.trim()) {
+      setError("Give the import a name.");
+      return;
+    }
+
+    setError(null);
+    setProgress(0.02);
+
+    try {
+      const created = await fetch("/api/recordings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ source: "upload" }),
+      });
+      if (!created.ok) throw new Error(await messageFrom(created));
+      const { id } = (await created.json()) as { id: string };
+
+      setProgress(0.15);
+      const uploaded = await fetch(`/api/recordings/${id}/media`, {
+        method: "PUT",
+        headers: { "Content-Type": file.type || "video/webm" },
+        body: file,
+      });
+      if (!uploaded.ok) throw new Error(await messageFrom(uploaded));
+
+      setProgress(0.8);
+      const project = await fetch("/api/projects", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ recording_id: id, title: name.trim() }),
+      });
+      if (!project.ok) throw new Error(await messageFrom(project));
+      const body = (await project.json()) as { project: { id: string } };
+
+      setProgress(1);
+      onDone(body.project.id);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+      setProgress(null);
+    }
   };
 
   if (progress !== null) return <Processing progress={progress} label="Analysing imported footage" />;
@@ -432,7 +617,10 @@ function ImportFlow({ onDone }: { onDone: (id: string) => void }) {
             onDrop={(e) => {
               e.preventDefault();
               setDragging(false);
-              setFiles(Array.from(e.dataTransfer.files).map((f) => ({ name: f.name, size: f.size })));
+              const dropped = Array.from(e.dataTransfer.files);
+              setPicked(dropped);
+              setFiles(dropped.map((f) => ({ name: f.name, size: f.size })));
+              if (!name && dropped[0]) setName(dropped[0].name.replace(/\.[^.]+$/, ""));
             }}
             className={cn(
               "flex cursor-pointer flex-col items-center gap-3 rounded-2xl border-2 border-dashed px-6 py-14 text-center transition-colors",
@@ -444,9 +632,12 @@ function ImportFlow({ onDone }: { onDone: (id: string) => void }) {
               accept="video/*,audio/*"
               multiple
               className="sr-only"
-              onChange={(e) =>
-                setFiles(Array.from(e.target.files ?? []).map((f) => ({ name: f.name, size: f.size })))
-              }
+              onChange={(e) => {
+                const chosen = Array.from(e.target.files ?? []);
+                setPicked(chosen);
+                setFiles(chosen.map((f) => ({ name: f.name, size: f.size })));
+                if (!name && chosen[0]) setName(chosen[0].name.replace(/\.[^.]+$/, ""));
+              }}
             />
             <Icon name="upload" className="size-7 text-iris-400" strokeWidth={1.6} />
             <span>
@@ -484,7 +675,15 @@ function ImportFlow({ onDone }: { onDone: (id: string) => void }) {
                 placeholder="https://www.loom.com/share/… or a Zoom / Drive link"
                 className="h-10 flex-1 rounded-xl border border-[var(--line)] bg-ink-900 px-3.5 text-[0.8125rem] text-fg placeholder:text-fg-faint focus:border-iris-500/50 focus:outline-none"
               />
-              <Button variant="secondary" size="sm" onClick={() => setFiles([{ name: link || "Imported link", size: 412_103_448 }])}>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() =>
+                  setError(
+                    "Importing from a link is not built yet — download the file and drop it above.",
+                  )
+                }
+              >
                 Fetch
               </Button>
             </div>
@@ -497,7 +696,32 @@ function ImportFlow({ onDone }: { onDone: (id: string) => void }) {
             </div>
           </div>
 
-          <Button size="md" className="mt-6" disabled={files.length === 0} onClick={run}>
+          <div className="mt-6">
+            <label htmlFor="import-name" className="text-[0.8125rem] font-medium text-fg">
+              Name
+            </label>
+            <input
+              id="import-name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Shipments walkthrough"
+              className="mt-1.5 h-11 w-full rounded-xl border border-[var(--line)] bg-ink-900 px-3.5 text-[0.875rem] text-fg placeholder:text-fg-faint focus:border-iris-500/50 focus:outline-none"
+            />
+          </div>
+
+          {error ? (
+            <p role="alert" className="mt-4 flex items-start gap-2.5 rounded-xl border border-rose-500/30 bg-rose-500/[0.07] p-3.5 text-[0.8125rem] leading-relaxed text-rose-300">
+              <Icon name="alert" className="mt-0.5 size-4 shrink-0" strokeWidth={1.9} />
+              {error}
+            </p>
+          ) : null}
+
+          <Button
+            size="md"
+            className="mt-6"
+            disabled={!picked?.length || !name.trim()}
+            onClick={run}
+          >
             <Icon name="sparkles" className="size-4" strokeWidth={2} />
             Import and analyse
           </Button>
