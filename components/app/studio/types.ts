@@ -1,5 +1,20 @@
-import type { Project, Segment, TranscriptWord } from "@/lib/app-data";
-import { silentSpanSec, wordKey } from "@/lib/segments";
+import type { Project, Segment } from "@/lib/app-data";
+import { silentSpanSec } from "@/lib/segments";
+import { isWordRemoved, resolveWords, type EditState } from "@/lib/edit-state";
+
+// The edit model lives in lib so the server can share it; the editor
+// re-exports it so its components keep one import path.
+export {
+  DEFAULT_EDIT_STATE,
+  hydrateEditState,
+  isWordRemoved,
+  normalizeToken,
+  occurrencesOf,
+  resolveWords,
+  serializeEditState,
+  withTrailingPunctuation,
+} from "@/lib/edit-state";
+export type { EditState, ResolvedWord, StoredEditState, WordEdit } from "@/lib/edit-state";
 
 export interface EditedWord {
   segIndex: number;
@@ -23,32 +38,6 @@ export interface EditedWord {
    * text, is never counted as one, and cannot be cut as a filler.
    */
   silent: boolean;
-}
-
-export interface EditState {
-  removeFillers: boolean;
-  deletedSegments: Set<number>;
-  /**
-   * Words cut by hand, keyed with `wordKey`. Independent of the filler
-   * toggle: a filler is removed by the toggle whether or not it is here, and
-   * a word here is removed whatever the toggle says.
-   */
-  cutWords: Set<string>;
-  studioSound: boolean;
-  captions: boolean;
-  music: boolean;
-  presenter: boolean;
-  zoomEnabled: boolean;
-}
-
-/** Whether this edit removes the word: a filler under the toggle, or a hand cut. */
-export function isWordRemoved(
-  state: Pick<EditState, "removeFillers" | "cutWords">,
-  segIndex: number,
-  wordIndex: number,
-  word: Pick<TranscriptWord, "cut">,
-): boolean {
-  return (state.removeFillers && Boolean(word.cut)) || state.cutWords.has(wordKey(segIndex, wordIndex));
 }
 
 /**
@@ -80,21 +69,21 @@ export function buildTimeline(project: Project, state: EditState): EditedWord[] 
       }
       return;
     }
-    seg.words.forEach((w, wordIndex) => {
-      if (isWordRemoved(state, segIndex, wordIndex, w)) return;
+    for (const w of resolveWords(seg, segIndex, state)) {
+      if (isWordRemoved(state, segIndex, w.wordIndex, w)) continue;
       out.push({
         segIndex,
-        wordIndex,
-        text: w.w,
+        wordIndex: w.wordIndex,
+        text: w.text,
         start: t,
         end: t + w.d,
         srcStart: w.t,
-        cut: Boolean(w.cut),
-        em: Boolean(w.em),
+        cut: w.cut,
+        em: w.em,
         silent: false,
       });
       t += w.d;
-    });
+    }
     t += 0.35; // breath between segments
   });
   return out;
@@ -102,85 +91,6 @@ export function buildTimeline(project: Project, state: EditState): EditedWord[] 
 
 export function timelineDuration(tl: EditedWord[]): number {
   return tl.length ? tl[tl.length - 1].end : 0;
-}
-
-/**
- * The saved shape of an `EditState`.
- *
- * `deletedSegments` is a `Set` in the component and an array on the wire,
- * because JSON has no sets and a `Set` serializes to `{}` without a word of
- * complaint — which is exactly how a "saved" edit turns out to have saved
- * nothing at all.
- */
-export interface StoredEditState {
-  removeFillers?: boolean;
-  deletedSegments?: number[];
-  /** `[chapter index, word index]` pairs; see `wordKey`. */
-  cutWords?: [number, number][];
-  studioSound?: boolean;
-  captions?: boolean;
-  music?: boolean;
-  presenter?: boolean;
-  zoomEnabled?: boolean;
-}
-
-export const DEFAULT_EDIT_STATE: EditState = {
-  removeFillers: true,
-  deletedSegments: new Set<number>(),
-  cutWords: new Set<string>(),
-  studioSound: true,
-  captions: true,
-  music: true,
-  presenter: false,
-  zoomEnabled: true,
-};
-
-export function hydrateEditState(stored: unknown): EditState {
-  if (!stored || typeof stored !== "object") return DEFAULT_EDIT_STATE;
-  const raw = stored as StoredEditState;
-  const flag = (value: unknown, fallback: boolean) =>
-    typeof value === "boolean" ? value : fallback;
-
-  return {
-    removeFillers: flag(raw.removeFillers, DEFAULT_EDIT_STATE.removeFillers),
-    deletedSegments: new Set(
-      Array.isArray(raw.deletedSegments)
-        ? raw.deletedSegments.filter((n): n is number => Number.isInteger(n) && n >= 0)
-        : [],
-    ),
-    cutWords: new Set(
-      Array.isArray(raw.cutWords)
-        ? raw.cutWords
-            .filter(
-              (pair): pair is [number, number] =>
-                Array.isArray(pair) &&
-                pair.length === 2 &&
-                pair.every((n) => Number.isInteger(n) && n >= 0),
-            )
-            .map(([segIndex, wordIndex]) => wordKey(segIndex, wordIndex))
-        : [],
-    ),
-    studioSound: flag(raw.studioSound, DEFAULT_EDIT_STATE.studioSound),
-    captions: flag(raw.captions, DEFAULT_EDIT_STATE.captions),
-    music: flag(raw.music, DEFAULT_EDIT_STATE.music),
-    presenter: flag(raw.presenter, DEFAULT_EDIT_STATE.presenter),
-    zoomEnabled: flag(raw.zoomEnabled, DEFAULT_EDIT_STATE.zoomEnabled),
-  };
-}
-
-export function serializeEditState(state: EditState): StoredEditState {
-  return {
-    removeFillers: state.removeFillers,
-    deletedSegments: [...state.deletedSegments].sort((a, b) => a - b),
-    cutWords: [...state.cutWords]
-      .map((key) => key.split(":").map(Number) as [number, number])
-      .sort((a, b) => a[0] - b[0] || a[1] - b[1]),
-    studioSound: state.studioSound,
-    captions: state.captions,
-    music: state.music,
-    presenter: state.presenter,
-    zoomEnabled: state.zoomEnabled,
-  };
 }
 
 /** Where in the source file the edited playhead is currently pointing. */

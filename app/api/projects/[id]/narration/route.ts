@@ -5,9 +5,11 @@ import { getProjectById } from "@/lib/db/repositories/projects";
 import { getVoice } from "@/lib/db/repositories/voices";
 import { getProviders, providerReport } from "@/lib/providers";
 import { ProviderError } from "@/lib/providers/errors";
-import { hydrateEditState } from "@/components/app/studio/types";
+import { hydrateEditState } from "@/lib/edit-state";
 import { buildEdl, segmentOutputSeconds } from "@/lib/render/edl";
 import { chapterText } from "@/lib/render/narration";
+import { listGlossary } from "@/lib/db/repositories/glossary";
+import { pronunciationsFor } from "@/lib/pipeline/glossary";
 
 /**
  * Hear one chapter in the project's chosen voice before rendering.
@@ -90,15 +92,18 @@ export async function POST(request: Request, context: Context) {
     removeFillers: state.removeFillers,
     deletedSegments: state.deletedSegments,
     cutWords: state.cutWords,
+    wordEdits: state.wordEdits,
   });
   const availableSec = segmentOutputSeconds(edl, segment.id);
 
   try {
+    const pronunciations = pronunciationsFor(await listGlossary(guard.actor.workspaceId));
     const clip = await getProviders().synthesis.synthesize({
       text,
       voiceId: voice.providerVoiceId,
       locale: edl.locale,
       workspaceId: guard.actor.workspaceId,
+      ...(Object.keys(pronunciations).length > 0 ? { pronunciations } : {}),
     });
     return NextResponse.json({
       voice: { id: voice.id, name: voice.name },

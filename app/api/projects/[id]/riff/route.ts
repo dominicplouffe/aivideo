@@ -7,7 +7,7 @@ import {
   offlineAssistant,
   type AssistantChapter,
 } from "@/lib/providers/assistant";
-import { hydrateEditState, isWordRemoved, type EditState } from "@/components/app/studio/types";
+import { hydrateEditState, isWordRemoved, resolveWords, type EditState } from "@/lib/edit-state";
 import type { Segment } from "@/lib/app-data";
 
 /**
@@ -24,9 +24,11 @@ export const maxDuration = 60;
 
 type Context = { params: Promise<{ id: string }> };
 
-/** The words a chapter still speaks under this edit: fillers and hand cuts removed. */
-function spokenWords(words: Segment["words"], segIndex: number, state: EditState) {
-  return words.filter((w, wordIndex) => !isWordRemoved(state, segIndex, wordIndex, w));
+/** The words a chapter still shows under this edit: rewritten, then fillers and hand cuts removed. */
+function spokenWords(segment: Pick<Segment, "words">, segIndex: number, state: EditState) {
+  return resolveWords(segment, segIndex, state).filter(
+    (w) => !isWordRemoved(state, segIndex, w.wordIndex, w),
+  );
 }
 
 export async function POST(request: Request, context: Context) {
@@ -55,12 +57,12 @@ export async function POST(request: Request, context: Context) {
   const state = hydrateEditState(project.editState);
 
   const chapters: AssistantChapter[] = project.segments.map((segment, ordinal) => {
-    const spoken = spokenWords(segment.words, ordinal, state);
+    const spoken = spokenWords(segment, ordinal, state);
     return {
       ordinal,
       title: segment.title,
       durationSec: spoken.reduce((n, w) => n + w.d, 0),
-      text: spoken.map((w) => w.w).join(" "),
+      text: spoken.map((w) => w.text).join(" "),
       deleted: state.deletedSegments.has(ordinal),
     };
   });

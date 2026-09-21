@@ -676,6 +676,36 @@ export const voices = pgTable(
   ],
 );
 
+/**
+ * Words a workspace spells its own way.
+ *
+ * Each term maps what the transcriber writes ("core", "c l o") to what the
+ * workspace shows ("Qore", "Claude") and, when the spelling is not how the
+ * word is said, to what a narrator should say. Applied three times: the
+ * terms are handed to the transcriber so new recordings come back right,
+ * whatever still comes back wrong is corrected before segmentation, and the
+ * spoken form is given to synthesis as a respelling.
+ */
+export const glossaryTerms = pgTable(
+  "glossary_terms",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workspaceId: uuid("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+    /** As the transcriber writes it. */
+    heard: text("heard").notNull(),
+    /** `heard`, lower-cased and stripped of punctuation, for matching. */
+    heardKey: text("heard_key").notNull(),
+    /** What the transcript, captions and Riff show. */
+    text: text("text").notNull(),
+    /** What a narrator says, when the spelling is not how it is said. */
+    spoken: text("spoken"),
+    createdBy: uuid("created_by").references(() => members.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("glossary_terms_workspace_heard_key").on(t.workspaceId, t.heardKey)],
+);
+
 export const maskingPolicies = pgTable(
   "masking_policies",
   {

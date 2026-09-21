@@ -1,11 +1,20 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { cn, formatDuration } from "@/lib/utils";
 import { Icon, type IconName } from "@/components/ui/Icon";
+import { Button } from "@/components/ui/Button";
 import type { Project } from "@/lib/app-data";
 import { silentSpanSec, wordKey } from "@/lib/segments";
-import type { EditState, EditedWord } from "./types";
+import {
+  occurrencesOf,
+  resolveWords,
+  withTrailingPunctuation,
+  type EditState,
+  type EditedWord,
+  type ResolvedWord,
+  type WordEdit,
+} from "./types";
 
 /** What the four chips ask for, in the words a person would use. */
 const ASK_CHIPS: { label: string; icon: IconName; prompt: string }[] = [
@@ -14,6 +23,12 @@ const ASK_CHIPS: { label: string; icon: IconName; prompt: string }[] = [
   { label: "Cut to 60s", icon: "clock", prompt: "Get this under 60 seconds and tell me what I would lose." },
   { label: "Simplify language", icon: "globe", prompt: "Where is the language more complicated than it needs to be?" },
 ];
+
+/** One change to the word edits: set an edit at a key, or clear it. */
+export interface WordEditChange {
+  key: string;
+  edit: WordEdit | null;
+}
 
 export function Transcript({
   project,
@@ -26,6 +41,8 @@ export function Transcript({
   onToggleSegment,
   onToggleFillers,
   onCutWords,
+  onEditWords,
+  onGlossary,
   onAsk,
 }: {
   project: Project;
@@ -39,41 +56,60 @@ export function Transcript({
   onToggleFillers: () => void;
   /** Cuts (or restores) the words under these keys; see `wordKey`. */
   onCutWords: (keys: string[], cut: boolean) => void;
+  /** Rewrites words. Cuts inside a rewritten run are cleared by the caller. */
+  onEditWords: (changes: WordEditChange[]) => void;
+  /** Remembers a rewrite for the workspace: future recordings get it too. */
+  onGlossary: (term: { heard: string; text: string; spoken: string | null }) => void;
   /** Sends a request to the Riff panel. Absent in read-only contexts. */
   onAsk?: (prompt: string) => void;
 }) {
-  const totalWords = project.segments.reduce((n, s) => n + s.words.length, 0);
+  // Every chapter's words after the hand edits, which is what this panel
+  // renders and what the selection ranges over.
+  const resolved = useMemo(
+    () => project.segments.map((seg, segIndex) => resolveWords(seg, segIndex, state)),
+    [project.segments, state],
+  );
+
+  const totalWords = resolved.reduce((n, words) => n + words.length, 0);
   // Silent spans stand in for wordless chapters and are not words.
   const keptWords = timeline.filter((w) => !w.silent).length;
   const removed = totalWords - keptWords;
+  const corrected = resolved.reduce((n, words) => n + words.filter((w) => w.edited).length, 0);
 
   // Map (segIndex, wordIndex) → edited start time so clicking a word seeks.
   const index = new Map<string, EditedWord>();
   timeline.forEach((w) => index.set(wordKey(w.segIndex, w.wordIndex), w));
 
   /*
-   * Cutting by hand.
+   * Selecting, cutting and rewriting.
    *
    * Click a word to select it, shift-click to extend the selection through
-   * its chapter, then Delete or Backspace. The same key on words that are
-   * already cut restores them, and the pill in the header does whatever the
-   * key would, so the shortcut has something to be learned from.
+   * its chapter. Delete or Backspace cuts the selection, and the same key on
+   * words already cut restores them. Enter, or a double-click, opens the
+   * editor for the selection. The pill in the header does whatever the key
+   * would, so the shortcut has something to be learned from.
    *
    * A selection is kept within one chapter: a span that crosses a chapter
    * boundary would cut across a title, and it is never what a person
-   * dragging through a sentence meant.
+   * dragging through a sentence meant. Positions are indices into the
+   * chapter's resolved words, so a rewritten run selects as one thing.
    */
   const [selection, setSelection] = useState<{ seg: number; anchor: number; focus: number } | null>(
     null,
   );
-  const selectedKeys = useMemo(() => {
+  const [editing, setEditing] = useState(false);
+
+  const selectedWords = useMemo((): ResolvedWord[] => {
     if (!selection) return [];
+    const words = resolved[selection.seg] ?? [];
     const from = Math.min(selection.anchor, selection.focus);
     const to = Math.max(selection.anchor, selection.focus);
-    const keys: string[] = [];
-    for (let i = from; i <= to; i++) keys.push(wordKey(selection.seg, i));
-    return keys;
-  }, [selection]);
+    return words.slice(from, to + 1);
+  }, [selection, resolved]);
+  const selectedKeys = useMemo(
+    () => (selection ? selectedWords.map((w) => wordKey(selection.seg, w.wordIndex)) : []),
+    [selection, selectedWords],
+  );
   const selectionCut = selectedKeys.length > 0 && selectedKeys.every((key) => state.cutWords.has(key));
 
   const toggleSelected = useCallback(() => {
@@ -82,7 +118,7 @@ export function Transcript({
   }, [selectedKeys, selectionCut, onCutWords]);
 
   useEffect(() => {
-    if (!selection) return;
+    if (!selection || editing) return;
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
       if (target && ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName)) return;
@@ -91,18 +127,81 @@ export function Transcript({
         e.preventDefault();
         toggleSelected();
       }
+      if (e.key === "Enter") {
+        e.preventDefault();
+        setEditing(true);
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [selection, toggleSelected]);
+  }, [selection, editing, toggleSelected]);
 
-  const selectWord = (segIndex: number, wordIndex: number, extend: boolean) => {
+  const selectWord = (segIndex: number, position: number, extend: boolean) => {
+    setEditing(false);
     setSelection((current) =>
       extend && current && current.seg === segIndex
-        ? { ...current, focus: wordIndex }
-        : { seg: segIndex, anchor: wordIndex, focus: wordIndex },
+        ? { ...current, focus: position }
+        : { seg: segIndex, anchor: position, focus: position },
     );
   };
+
+  /**
+   * Applies a rewrite to the selection, and optionally to every other place
+   * the transcriber wrote the same words. The original run is matched on
+   * what was heard, so "Apply to all" reaches the occurrences the person has
+   * not scrolled to yet.
+   */
+  const applyEdit = (
+    edit: { text: string; spoken: string | null },
+    everywhere: boolean,
+    remember: boolean,
+  ) => {
+    if (!selection || selectedWords.length === 0) return;
+    const first = selectedWords[0];
+    const last = selectedWords[selectedWords.length - 1];
+    const span = last.wordIndex + last.span - first.wordIndex;
+    const originalWords = selectedWords.flatMap((w) => w.original.split(" "));
+    const text = edit.text.trim();
+    const spoken = edit.spoken?.trim() || null;
+
+    const changes: WordEditChange[] = [];
+    const target = (segIndex: number, wordIndex: number, n: number, lastOriginal: string) => {
+      const key = wordKey(segIndex, wordIndex);
+      const shown = withTrailingPunctuation(text, lastOriginal);
+      const isOriginal =
+        !spoken &&
+        shown === project.segments[segIndex].words.slice(wordIndex, wordIndex + n).map((w) => w.w).join(" ");
+      changes.push({
+        key,
+        edit: isOriginal ? null : { span: n, text: shown, ...(spoken && spoken !== shown ? { spoken } : {}) },
+      });
+    };
+
+    target(selection.seg, first.wordIndex, span, originalWords[originalWords.length - 1]);
+    if (everywhere) {
+      for (const hit of occurrencesOf(project, originalWords)) {
+        if (hit.segIndex === selection.seg && hit.wordIndex === first.wordIndex) continue;
+        const lastWord = project.segments[hit.segIndex].words[hit.wordIndex + hit.span - 1]?.w ?? "";
+        target(hit.segIndex, hit.wordIndex, hit.span, lastWord);
+      }
+    }
+    onEditWords(changes);
+    if (remember) {
+      const bare = (s: string) => s.replace(/[.,!?;:]+$/, "");
+      onGlossary({ heard: bare(originalWords.join(" ")), text: bare(text), spoken: spoken ? bare(spoken) : null });
+    }
+    setEditing(false);
+    // The rewritten run is one token now; keep it selected.
+    setSelection({ seg: selection.seg, anchor: Math.min(selection.anchor, selection.focus), focus: Math.min(selection.anchor, selection.focus) });
+  };
+
+  const otherOccurrences = useMemo(() => {
+    if (!selection || selectedWords.length === 0) return 0;
+    const originalWords = selectedWords.flatMap((w) => w.original.split(" "));
+    return occurrencesOf(project, originalWords).filter(
+      (hit) => !(hit.segIndex === selection.seg && hit.wordIndex === selectedWords[0].wordIndex),
+    ).length;
+  }, [selection, selectedWords, project]);
 
   return (
     <div className="flex min-h-0 flex-col border-r border-[var(--line)] bg-ink-950">
@@ -111,24 +210,40 @@ export function Transcript({
           <Icon name="doc" className="size-4 text-iris-400" strokeWidth={1.8} />
           <h2 className="text-[0.875rem] font-medium text-fg-strong">Script</h2>
         </div>
-        {selectedKeys.length > 0 ? (
-          <button
-            type="button"
-            onClick={toggleSelected}
-            className={cn(
-              "inline-flex items-center gap-1.5 rounded-lg border px-2 py-1 text-2xs font-medium transition-colors",
-              selectionCut
-                ? "border-mint-500/40 bg-mint-500/10 text-mint-300 hover:bg-mint-500/20"
-                : "border-rose-500/40 bg-rose-500/10 text-rose-300 hover:bg-rose-500/20",
-            )}
-          >
-            <Icon name={selectionCut ? "refresh" : "scissors"} className="size-3" strokeWidth={2.2} />
-            {selectionCut ? "Restore" : "Cut"} {selectedKeys.length} word{selectedKeys.length === 1 ? "" : "s"}
-            <kbd className="rounded border border-current/30 px-1 font-mono text-[0.625rem] opacity-70">⌫</kbd>
-          </button>
+        {selectedKeys.length > 0 && !editing ? (
+          <span className="flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => setEditing(true)}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--line)] px-2 py-1 text-2xs font-medium text-fg-subtle transition-colors hover:border-[var(--line-strong)] hover:text-fg"
+            >
+              <Icon name="wand" className="size-3" strokeWidth={2.2} />
+              Edit
+              <kbd className="rounded border border-current/30 px-1 font-mono text-[0.625rem] opacity-70">↵</kbd>
+            </button>
+            <button
+              type="button"
+              onClick={toggleSelected}
+              className={cn(
+                "inline-flex items-center gap-1.5 rounded-lg border px-2 py-1 text-2xs font-medium transition-colors",
+                selectionCut
+                  ? "border-mint-500/40 bg-mint-500/10 text-mint-300 hover:bg-mint-500/20"
+                  : "border-rose-500/40 bg-rose-500/10 text-rose-300 hover:bg-rose-500/20",
+              )}
+            >
+              <Icon name={selectionCut ? "refresh" : "scissors"} className="size-3" strokeWidth={2.2} />
+              {selectionCut ? "Restore" : "Cut"} {selectedKeys.length}
+              <kbd className="rounded border border-current/30 px-1 font-mono text-[0.625rem] opacity-70">⌫</kbd>
+            </button>
+          </span>
         ) : (
-          <span className={cn("font-mono text-2xs", removed > 0 ? "text-mint-400" : "text-fg-faint")}>
-            {removed > 0 ? `${removed} word${removed === 1 ? "" : "s"} cut` : "verbatim"}
+          <span className={cn("font-mono text-2xs", removed > 0 || corrected > 0 ? "text-mint-400" : "text-fg-faint")}>
+            {[
+              removed > 0 ? `${removed} word${removed === 1 ? "" : "s"} cut` : null,
+              corrected > 0 ? `${corrected} corrected` : null,
+            ]
+              .filter(Boolean)
+              .join(" · ") || "verbatim"}
           </span>
         )}
       </header>
@@ -158,7 +273,10 @@ export function Transcript({
         {project.segments.map((seg, segIndex) => {
           const deleted = state.deletedSegments.has(segIndex);
           const isActive = activeSegment === segIndex;
-          const first = index.get(`${segIndex}:0`);
+          const first = index.get(wordKey(segIndex, 0));
+          const words = resolved[segIndex];
+          const from = selection?.seg === segIndex ? Math.min(selection.anchor, selection.focus) : -1;
+          const to = selection?.seg === segIndex ? Math.max(selection.anchor, selection.focus) : -1;
 
           return (
             <section
@@ -218,7 +336,7 @@ export function Transcript({
                 <p className="mb-2 font-mono text-2xs text-fg-faint">{seg.action}</p>
               ) : null}
 
-              {seg.words.length === 0 ? (
+              {words.length === 0 ? (
                 // Nothing was heard — no microphone, or audio that was music
                 // or room noise rather than speech. Said plainly, because a
                 // chapter with no text and no explanation looks like a
@@ -229,50 +347,250 @@ export function Transcript({
                 </p>
               ) : (
                 <p className="text-[0.875rem] leading-[1.85]">
-                  {seg.words.map((w, wordIndex) => {
-                    const key = wordKey(segIndex, wordIndex);
+                  {words.map((w, position) => {
+                    const key = wordKey(segIndex, w.wordIndex);
                     const edited = index.get(key);
                     const handCut = state.cutWords.has(key);
-                    const isCut = (Boolean(w.cut) && state.removeFillers) || handCut;
-                    const isNow =
-                      activeWord?.segIndex === segIndex && activeWord?.wordIndex === wordIndex;
-                    const isSelected =
-                      selection?.seg === segIndex &&
-                      wordIndex >= Math.min(selection.anchor, selection.focus) &&
-                      wordIndex <= Math.max(selection.anchor, selection.focus);
+                    const isCut = (w.cut && state.removeFillers) || handCut;
+                    const isNow = activeWord?.segIndex === segIndex && activeWord?.wordIndex === w.wordIndex;
+                    const isSelected = position >= from && position <= to;
+                    const saysDifferently = w.spoken !== w.text;
+                    const bare = (s: string) => s.replace(/[.,!?;:]+$/, "");
+                    const title = handCut
+                      ? "Cut by hand. Select it and press Delete to restore."
+                      : saysDifferently
+                        ? `Said as “${bare(w.spoken)}”. Transcribed as “${bare(w.original)}”.`
+                        : w.edited
+                          ? `Transcribed as “${bare(w.original)}”.`
+                          : undefined;
                     return (
                       <span
-                        key={wordIndex}
+                        key={w.wordIndex}
                         onClick={(e) => {
                           if (edited) onSeek(edited.start);
-                          selectWord(segIndex, wordIndex, e.shiftKey);
+                          selectWord(segIndex, position, e.shiftKey);
                         }}
-                        title={handCut ? "Cut by hand. Select it and press Delete to restore." : undefined}
+                        onDoubleClick={(e) => {
+                          e.preventDefault();
+                          selectWord(segIndex, position, false);
+                          setEditing(true);
+                        }}
+                        title={title}
                         className={cn(
                           "cursor-pointer rounded px-px transition-colors select-none",
                           isCut && "text-fg-faint line-through decoration-rose-400/70",
                           !isCut && w.cut && "bg-rose-500/12 text-rose-300",
                           !isCut && w.em && "font-medium text-cyan-300",
                           !isCut && !w.em && !w.cut && "text-fg-muted hover:text-fg",
+                          // A word that is said differently from how it reads.
+                          saysDifferently && "underline decoration-dotted decoration-iris-400/70 underline-offset-4",
                           isNow && "bg-iris-500/25 text-fg-strong",
                           isSelected && "bg-iris-500/20 ring-1 ring-iris-400/70",
                         )}
                       >
-                        {w.w}{" "}
+                        {w.text}{" "}
                       </span>
                     );
                   })}
                 </p>
               )}
+
+              {editing && selection?.seg === segIndex && selectedWords.length > 0 ? (
+                <WordEditor
+                  key={`${segIndex}:${from}:${to}`}
+                  words={selectedWords}
+                  otherOccurrences={otherOccurrences}
+                  onApply={applyEdit}
+                  onCancel={() => setEditing(false)}
+                />
+              ) : null}
             </section>
           );
         })}
 
         <p className="px-1 pt-1 text-2xs leading-relaxed text-fg-faint">
-          Click a word to select it, shift-click to extend, then press Delete to cut it from the
-          video. Delete again to restore.
+          Click a word to select it, shift-click to extend. Delete cuts it from the video; Enter
+          edits its spelling or how it is said.
         </p>
       </div>
+    </div>
+  );
+}
+
+/**
+ * The editor for a selected run of words.
+ *
+ * One field, prefilled. Changing it corrects the transcript, the captions
+ * and what a narrator says — which is the whole fix for a transcription
+ * error. For a brand spelling, where the transcriber's word is how it is
+ * actually said, one click keeps that pronunciation; a second field for a
+ * different pronunciation is there but folded away, because it is rarely
+ * needed and would otherwise be read every time.
+ */
+function WordEditor({
+  words,
+  otherOccurrences,
+  onApply,
+  onCancel,
+}: {
+  words: ResolvedWord[];
+  otherOccurrences: number;
+  onApply: (edit: { text: string; spoken: string | null }, everywhere: boolean, remember: boolean) => void;
+  onCancel: () => void;
+}) {
+  const original = words.map((w) => w.original).join(" ");
+  // For reading aloud in the hint; the alias itself keeps the transcriber's
+  // punctuation, which the narrator turns into a pause.
+  const heard = original.replace(/[.,!?;:]+$/, "");
+  const currentText = words.map((w) => w.text).join(" ");
+  const currentSpoken = words.map((w) => w.spoken).join(" ");
+  const [text, setText] = useState(currentText);
+  const [spoken, setSpoken] = useState<string | null>(currentSpoken !== currentText ? currentSpoken : null);
+  const [showSpoken, setShowSpoken] = useState(currentSpoken !== currentText);
+  const [remember, setRemember] = useState(false);
+  const input = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    input.current?.focus();
+    input.current?.select();
+  }, []);
+
+  const trimmed = text.trim();
+  const changed = trimmed !== original || spoken !== null;
+  const saidAs = spoken ?? trimmed;
+  const textDiffersFromHeard = trimmed && trimmed.toLowerCase() !== original.toLowerCase();
+
+  const apply = (everywhere: boolean) => {
+    if (!trimmed) return;
+    // A glossary term applies to every occurrence here as well as to future
+    // recordings; remembering a fix for one instance and not the rest would
+    // be a strange thing to have asked for.
+    onApply(
+      { text: trimmed, spoken: spoken && spoken.trim() !== trimmed ? spoken : null },
+      everywhere || remember,
+      remember,
+    );
+  };
+
+  return (
+    <div
+      className="mt-3 rounded-xl border border-iris-500/35 bg-ink-900 p-3"
+      onKeyDown={(e) => {
+        if (e.key === "Escape") {
+          e.preventDefault();
+          onCancel();
+        }
+        if (e.key === "Enter") {
+          e.preventDefault();
+          apply(e.metaKey || e.ctrlKey);
+        }
+      }}
+    >
+      <label htmlFor="word-editor-text" className="block text-2xs font-medium tracking-[0.12em] text-fg-faint uppercase">
+        Text
+      </label>
+      <input
+        id="word-editor-text"
+        ref={input}
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        maxLength={200}
+        className="mt-1 w-full rounded-lg border border-[var(--line)] bg-ink-950 px-2.5 py-1.5 text-[0.875rem] text-fg focus:border-iris-500/50 focus:outline-none"
+      />
+      <div className="mt-1.5 space-y-0.5 text-2xs leading-relaxed text-fg-subtle">
+        {textDiffersFromHeard ? <p>Transcribed as “{heard}”.</p> : null}
+        {!showSpoken ? (
+          <p>
+            Spoken as “{saidAs.replace(/[.,!?;:]+$/, "")}”.
+            {textDiffersFromHeard && spoken === null ? (
+              <>
+                {" "}
+                <button
+                  type="button"
+                  onClick={() => setSpoken(original)}
+                  className="text-iris-300 underline-offset-2 hover:underline"
+                >
+                  Keep saying “{heard}”
+                </button>
+                {" · "}
+              </>
+            ) : (
+              " "
+            )}
+            <button
+              type="button"
+              onClick={() => {
+                setShowSpoken(true);
+                setSpoken((s) => s ?? trimmed);
+              }}
+              className="text-iris-300 underline-offset-2 hover:underline"
+            >
+              {spoken !== null ? "Change" : "Say it differently"}
+            </button>
+          </p>
+        ) : (
+          <div>
+            <label htmlFor="word-editor-spoken" className="block pt-1 text-2xs font-medium tracking-[0.12em] text-fg-faint uppercase">
+              Said as
+            </label>
+            <input
+              id="word-editor-spoken"
+              value={spoken ?? ""}
+              onChange={(e) => setSpoken(e.target.value)}
+              maxLength={200}
+              placeholder={trimmed}
+              className="mt-1 w-full rounded-lg border border-[var(--line)] bg-ink-950 px-2.5 py-1.5 text-[0.8125rem] text-fg focus:border-iris-500/50 focus:outline-none"
+            />
+            <p className="mt-1">
+              A respelling the narrator reads instead of the text.{" "}
+              <button
+                type="button"
+                onClick={() => {
+                  setSpoken(null);
+                  setShowSpoken(false);
+                }}
+                className="text-iris-300 underline-offset-2 hover:underline"
+              >
+                Say it as written
+              </button>
+            </p>
+          </div>
+        )}
+      </div>
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <Button size="sm" disabled={!trimmed} onClick={() => apply(false)}>
+          Apply
+        </Button>
+        {otherOccurrences > 0 ? (
+          <Button variant="outline" size="sm" disabled={!trimmed} onClick={() => apply(true)}>
+            Apply to all {otherOccurrences + 1}
+          </Button>
+        ) : null}
+        {textDiffersFromHeard || spoken !== null ? (
+          <label className="inline-flex cursor-pointer items-center gap-1.5 text-2xs text-fg-subtle">
+            <input
+              type="checkbox"
+              checked={remember}
+              onChange={(e) => setRemember(e.target.checked)}
+              className="size-3.5 accent-[var(--color-iris-500)]"
+            />
+            Add to glossary
+          </label>
+        ) : null}
+        <button
+          type="button"
+          onClick={onCancel}
+          className="ml-auto text-2xs text-fg-subtle underline-offset-2 hover:text-fg hover:underline"
+        >
+          {changed ? "Cancel" : "Close"}
+        </button>
+      </div>
+      {remember ? (
+        <p className="mt-2 text-2xs leading-relaxed text-fg-faint">
+          Applies everywhere in this video, and to every recording this workspace transcribes
+          from now on. Manage terms under Settings → Glossary.
+        </p>
+      ) : null}
     </div>
   );
 }

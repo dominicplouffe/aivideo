@@ -82,6 +82,16 @@ test("each chapter is read from the words the edit keeps, and placed where it be
   assert.deepEqual(result.report.chapters.map((c) => [c.pace, c.tempo, c.overrunSec]), [[1, 1, 0], [1, 1, 0]]);
 });
 
+test("the narrator reads the spoken form of a rewritten word", async () => {
+  const p = project({
+    editState: { wordEdits: [{ s: 0, w: 1, n: 1, text: "Qore", spoken: "core" }, { s: 1, w: 0, n: 1, text: "Now" }] },
+  });
+  const edl = buildEdl({ project: p, sourceUrl: "file://a.mp4" });
+  const { provider, requests } = synthesizer(0.5);
+  await narrate({ edl, project: p, workspaceId: "ws", synthesis: provider, lookupVoice: lookup });
+  assert.deepEqual(requests.map((r) => r.text), ["Open core board.", "Now save."]);
+});
+
 test("a reading that runs long is paced by the vendor first, then stretched, then reported", async () => {
   const p = project();
   const edl = buildEdl({ project: p, sourceUrl: "file://a.mp4" });

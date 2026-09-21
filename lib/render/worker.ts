@@ -565,12 +565,15 @@ async function defaultNarrate(job: Job, edl: Edl) {
   if (!project?.voiceId) return null;
 
   const { getVoice } = await import("@/lib/db/repositories/voices");
+  const { listGlossary } = await import("@/lib/db/repositories/glossary");
+  const { pronunciationsFor } = await import("@/lib/pipeline/glossary");
   const { getProviders } = await import("@/lib/providers");
   return narrate({
     edl,
     project,
     workspaceId: job.workspaceId,
     synthesis: getProviders().synthesis,
+    pronunciations: pronunciationsFor(await listGlossary(job.workspaceId)),
     lookupVoice: getVoice,
   });
 }

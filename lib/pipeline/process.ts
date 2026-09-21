@@ -6,6 +6,8 @@ import { replaceSegments, setProjectStatus } from "@/lib/db/repositories/project
 import { getStorage } from "@/lib/storage";
 import { getProviders } from "@/lib/providers";
 import { editedDuration, segmentTranscript } from "./segment";
+import { applyGlossary, keytermsFor } from "./glossary";
+import { listGlossary } from "@/lib/db/repositories/glossary";
 
 /**
  * Everything between "a take finished uploading" and "there is something to
@@ -63,9 +65,15 @@ export async function processProject(
     // publishing a customer's screen to fetch it back.
     const bytes = await getStorage().get({ workspaceId, path: recording.mediaKey });
 
-    const transcript = await providers.transcription.transcribe({
+    // The workspace's own spellings: given to the transcriber so they come
+    // back right, and applied to whatever still comes back wrong.
+    const glossary = await listGlossary(workspaceId);
+    const heard = await providers.transcription.transcribe({
       media: { bytes, contentType: "video/webm" },
+      keyterms: keytermsFor(glossary),
     });
+    const corrected = applyGlossary(heard.words, glossary);
+    const transcript = { ...heard, words: corrected.words };
 
     const drafts = segmentTranscript(transcript);
 

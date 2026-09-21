@@ -1,7 +1,7 @@
 import type { Project } from "@/lib/app-data";
 import type { SynthesisProvider } from "@/lib/providers/types";
 import { ProviderError } from "@/lib/providers/errors";
-import { hydrateEditState, isWordRemoved, type EditState } from "@/components/app/studio/types";
+import { hydrateEditState, isWordRemoved, resolveWords, type EditState } from "@/lib/edit-state";
 import { segmentOutputSeconds, withNarration, type Edl, type NarrationClip } from "./edl";
 
 /**
@@ -55,6 +55,8 @@ export interface NarrateInput {
   project: Project;
   workspaceId: string;
   synthesis: SynthesisProvider;
+  /** Respellings from the workspace glossary: shown text → how it is said. */
+  pronunciations?: Record<string, string>;
   /** Looks a voice up. Injectable so the fitting logic can be tested without a database. */
   lookupVoice: (id: string) => Promise<{
     id: string;
@@ -67,13 +69,16 @@ export interface NarrateInput {
 
 const round = (value: number) => Math.round(value * 1000) / 1000;
 
-/** What a chapter's narrator says: its words, less the ones the edit removes. */
+/**
+ * What a chapter's narrator says: its words as rewritten, in their spoken
+ * form where one was given, less the ones the edit removes.
+ */
 export function chapterText(project: Project, state: EditState, segIndex: number): string {
   const segment = project.segments[segIndex];
   if (!segment) return "";
-  return segment.words
-    .filter((word, wordIndex) => !isWordRemoved(state, segIndex, wordIndex, word))
-    .map((word) => word.w)
+  return resolveWords(segment, segIndex, state)
+    .filter((word) => !isWordRemoved(state, segIndex, word.wordIndex, word))
+    .map((word) => word.spoken)
     .join(" ")
     .trim();
 }
@@ -123,6 +128,9 @@ export async function narrate(input: NarrateInput): Promise<{ edl: Edl; report: 
       voiceId: voice.providerVoiceId,
       locale: edl.locale,
       workspaceId: input.workspaceId,
+      ...(input.pronunciations && Object.keys(input.pronunciations).length > 0
+        ? { pronunciations: input.pronunciations }
+        : {}),
     };
     let result = await input.synthesis.synthesize(request);
     let pace = 1;

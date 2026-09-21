@@ -7,8 +7,9 @@ import { Icon } from "@/components/ui/Icon";
 import { Button } from "@/components/ui/Button";
 import { StatusPill } from "@/components/app/Shared";
 import type { Project } from "@/lib/app-data";
+import { wordKey } from "@/lib/segments";
 import { Canvas, TimelineStrip } from "./Canvas";
-import { Transcript } from "./Transcript";
+import { Transcript, type WordEditChange } from "./Transcript";
 import { Inspector, type StudioVoice } from "./Inspector";
 import { ExportDialog } from "./ExportDialog";
 import {
@@ -168,6 +169,45 @@ export function Studio({
     },
     [project.id, voiceId],
   );
+
+  // A rewrite replaces whatever sat under it: an earlier rewrite inside the
+  // run, and any hand cuts, which would otherwise remove words that no
+  // longer exist as words.
+  const editWords = useCallback((changes: WordEditChange[]) => {
+    setState((s) => {
+      const edits = new Map(s.wordEdits);
+      const cuts = new Set(s.cutWords);
+      for (const { key, edit } of changes) {
+        const [seg, first] = key.split(":").map(Number);
+        const span = edit?.span ?? edits.get(key)?.span ?? 1;
+        for (let i = first; i < first + span; i++) {
+          const inner = wordKey(seg, i);
+          cuts.delete(inner);
+          if (inner !== key) edits.delete(inner);
+        }
+        if (edit) edits.set(key, edit);
+        else edits.delete(key);
+      }
+      return { ...s, wordEdits: edits, cutWords: cuts };
+    });
+    setDirty(true);
+  }, []);
+
+  // A glossary term is a workspace fact, saved on its own rather than with
+  // the edit, and reported through the same Saved indicator.
+  const rememberTerm = useCallback(async (term: { heard: string; text: string; spoken: string | null }) => {
+    setSaved("saving");
+    try {
+      const response = await fetch("/api/glossary", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(term),
+      });
+      setSaved(response.ok ? "saved" : "error");
+    } catch {
+      setSaved("error");
+    }
+  }, []);
 
   const setWordsCut = useCallback((keys: string[], cut: boolean) => {
     setState((s) => {
@@ -339,6 +379,8 @@ export function Studio({
             onSelectSegment={setSelected}
             onToggleSegment={toggleSegment}
             onCutWords={setWordsCut}
+            onEditWords={editWords}
+            onGlossary={(term) => void rememberTerm(term)}
             onToggleFillers={() => patch({ removeFillers: !state.removeFillers })}
             onAsk={(text) => setAsk({ text, at: Date.now() })}
           />
@@ -398,6 +440,8 @@ export function Studio({
             onSelectSegment={setSelected}
             onToggleSegment={toggleSegment}
             onCutWords={setWordsCut}
+            onEditWords={editWords}
+            onGlossary={(term) => void rememberTerm(term)}
             onToggleFillers={() => patch({ removeFillers: !state.removeFillers })}
           />
         </div>

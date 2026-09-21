@@ -6,7 +6,7 @@ import { authorize, ForbiddenError, type Actor } from "@/lib/auth/authorize";
 import { resolveActor, UnauthenticatedError } from "@/lib/auth/session";
 import { checkDestination, describeRefusal } from "@/lib/webhooks/destinations";
 import { getRecording, mediaKeyFor } from "@/lib/db/repositories/recordings";
-import { hydrateEditState } from "@/components/app/studio/types";
+import { hydrateEditState } from "@/lib/edit-state";
 import { buildEdl } from "@/lib/render/edl";
 import type { Project } from "@/lib/app-data";
 
@@ -98,6 +98,7 @@ export async function POST(request: Request) {
       removeFillers: state.removeFillers,
       deletedSegments: state.deletedSegments,
       cutWords: state.cutWords,
+      wordEdits: state.wordEdits,
       captions: state.captions,
       zoomEnabled: state.zoomEnabled,
       resolution: (body.video?.resolution as "1080p") ?? "1080p",

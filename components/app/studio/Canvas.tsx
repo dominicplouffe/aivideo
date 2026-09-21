@@ -6,7 +6,7 @@ import { Icon } from "@/components/ui/Icon";
 import { MockApp } from "@/components/marketing/MockApp";
 import type { Project, Segment } from "@/lib/app-data";
 import { silentSpanSec, wordKey } from "@/lib/segments";
-import { isWordRemoved, type EditState } from "./types";
+import { isWordRemoved, resolveWords, type EditState } from "./types";
 
 export function Canvas({
   project,
@@ -273,7 +273,7 @@ export function TimelineStrip({
   const speech = useMemo(() => {
     const BUCKETS = 110;
     const words = project.segments.flatMap((segment, segIndex) =>
-      segment.words.map((word, wordIndex) => ({ ...word, segIndex, wordIndex })),
+      resolveWords(segment, segIndex, state).map((word) => ({ ...word, segIndex })),
     );
 
     const span = Math.max(
@@ -302,14 +302,16 @@ export function TimelineStrip({
       density: Math.min(1, bar.spoken / bucketSec),
       cut: bar.cut,
     }));
-  }, [project.segments, project.sourceDurationSec, state.deletedSegments, state.cutWords]);
+  }, [project.segments, project.sourceDurationSec, state]);
 
   // A chapter's share of the strip is its running time under this edit.
   // Silent footage plays as recorded; see `silentSpanSec`.
   const weightOf = (s: Segment, i: number) =>
     s.words.length === 0
       ? silentSpanSec(s)
-      : s.words.filter((w, j) => !isWordRemoved(state, i, j, w)).reduce((m, w) => m + w.d, 0);
+      : resolveWords(s, i, state)
+          .filter((w) => !isWordRemoved(state, i, w.wordIndex, w))
+          .reduce((m, w) => m + w.d, 0);
   const totalWeight = live.reduce((n, { s, i }) => n + weightOf(s, i), 0);
 
   let acc = 0;

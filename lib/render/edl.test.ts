@@ -139,6 +139,19 @@ test("a chapter with no speech renders as recorded rather than vanishing", () =>
   assert.deepEqual(validateEdl(edl), []);
 });
 
+test("captions show the rewritten words, and a rewrite keeps the clip whole", () => {
+  const edl = buildEdl({
+    project: project(),
+    sourceUrl: "file://a.mp4",
+    removeFillers: false,
+    wordEdits: new Map([[wordKey(0, 1), { span: 2, text: "press here.", spoken: "press hear" }]]),
+  });
+  // seg_1's three words are still one clip, 0–1.5.
+  assert.deepEqual(edl.clips.map((c) => [c.sourceStart, c.sourceEnd]), [[0, 1.5], [5, 6.5]]);
+  // The caption reads the text, never the spoken form.
+  assert.equal(edl.captions[0]?.text, "So press here.");
+});
+
 test("cutting a word by hand splits the clip around it", () => {
   const edl = buildEdl({
     project: project(),

@@ -3,6 +3,7 @@ import { isDatabaseConfigured } from "@/lib/db/client";
 import { needsDatabase, requireActor } from "@/lib/api/guard";
 import { getProjectById, saveEditState, saveVoice } from "@/lib/db/repositories/projects";
 import { recordQuietly } from "@/lib/audit/log";
+import { parseStoredWordEdit } from "@/lib/edit-state";
 
 /**
  * One project: read it, and save what the Studio did to it.
@@ -76,6 +77,20 @@ function sanitize(raw: unknown): Record<string, unknown> | null {
     );
     const unique = new Map(pairs.map((pair) => [`${pair[0]}:${pair[1]}`, pair]));
     out.cutWords = [...unique.values()].sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  }
+
+  if (Array.isArray(input.wordEdits)) {
+    if (input.wordEdits.length > MAX_CUT_WORDS) return null;
+    const edits = new Map<string, Record<string, unknown>>();
+    for (const entry of input.wordEdits) {
+      const parsed = parseStoredWordEdit(entry);
+      if (!parsed || parsed.s >= MAX_SEGMENTS || parsed.w >= MAX_CUT_WORDS) continue;
+      const { key, ...stored } = parsed;
+      edits.set(key, stored);
+    }
+    out.wordEdits = [...edits.values()].sort(
+      (a, b) => (a.s as number) - (b.s as number) || (a.w as number) - (b.w as number),
+    );
   }
 
   return out;

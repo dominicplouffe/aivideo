@@ -1,5 +1,6 @@
 import type { Project, Segment } from "@/lib/app-data";
 import { silentSpanSec, wordKey } from "@/lib/segments";
+import { resolveWords, type WordEdit } from "@/lib/edit-state";
 import type { MaskedRegion } from "@/lib/providers/types";
 
 /**
@@ -189,7 +190,7 @@ interface SourceWord {
   wordIndex: number;
 }
 
-function sourceWords(segments: Segment[]): SourceWord[] {
+function sourceWords(segments: Segment[], wordEdits: Map<string, WordEdit>): SourceWord[] {
   const out: SourceWord[] = [];
   segments.forEach((seg, segIndex) => {
     if (seg.words.length === 0) {
@@ -201,10 +202,10 @@ function sourceWords(segments: Segment[]): SourceWord[] {
       return;
     }
     let t = seg.start;
-    seg.words.forEach((word, wordIndex) => {
-      out.push({ text: word.w, start: t, end: t + word.d, cut: Boolean(word.cut), segIndex, wordIndex });
+    for (const word of resolveWords(seg, segIndex, { wordEdits })) {
+      out.push({ text: word.text, start: t, end: t + word.d, cut: word.cut, segIndex, wordIndex: word.wordIndex });
       t += word.d;
-    });
+    }
   });
   return out;
 }
@@ -217,6 +218,8 @@ export interface BuildEdlInput {
   deletedSegments?: Set<number>;
   /** Words cut by hand, keyed with `wordKey`. */
   cutWords?: Set<string>;
+  /** Words rewritten by hand; captions show the rewrite. */
+  wordEdits?: Map<string, WordEdit>;
   captions?: boolean;
   zoomEnabled?: boolean;
   /** Regions from the masking provider, in source time. */
@@ -252,13 +255,14 @@ export function buildEdl(input: BuildEdlInput): Edl {
     removeFillers = true,
     deletedSegments = new Set<number>(),
     cutWords = new Set<string>(),
+    wordEdits = new Map<string, WordEdit>(),
     captions = true,
     zoomEnabled = true,
     resolution = "1080p",
     fps = 30,
   } = input;
 
-  const words = sourceWords(project.segments);
+  const words = sourceWords(project.segments, wordEdits);
   const kept = words.filter(
     (w) =>
       !deletedSegments.has(w.segIndex) &&

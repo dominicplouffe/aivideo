@@ -81,6 +81,7 @@ export class DeepgramTranscription implements TranscriptionProvider {
   async transcribe(input: {
     media: TranscriptionSource;
     languageHint?: string;
+    keyterms?: string[];
   }): Promise<TranscriptionResult> {
     const fetchImpl = this.config.fetchImpl ?? fetch;
     const base = this.config.baseUrl ?? "https://api.deepgram.com";
@@ -97,6 +98,10 @@ export class DeepgramTranscription implements TranscriptionProvider {
     // "multi" lets Deepgram detect the language rather than mistrusting the
     // caller's guess; an explicit hint still wins when we have one.
     query.set("language", input.languageHint ?? "multi");
+    // Keyterm prompting: one parameter per term, plain words only. The
+    // vendor lifts recognition of a primed term to around ninety percent,
+    // which is the difference between "Qore" and a correction on every take.
+    for (const term of input.keyterms ?? []) query.append("keyterm", term);
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.config.timeoutMs ?? 300_000);

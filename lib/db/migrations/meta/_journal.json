@@ -134,6 +134,13 @@
       "when": 1790022816758,
       "tag": "0018_voice_available",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1790030000664,
+      "tag": "0019_glossary_terms",
+      "breakpoints": true
     }
   ]
 }

@@ -6,6 +6,7 @@ import { Icon, type IconName } from "@/components/ui/Icon";
 import { Button } from "@/components/ui/Button";
 import { Panel } from "./Shared";
 import { ThemePicker } from "./ThemePicker";
+import { GlossaryEditor } from "./GlossaryEditor";
 
 /**
  * Workspace settings.
@@ -23,10 +24,11 @@ import { ThemePicker } from "./ThemePicker";
  * product, so what is real is wired up and what is not says so.
  */
 
-type Tab = "general" | "security" | "integrations";
+type Tab = "general" | "glossary" | "security" | "integrations";
 
 const tabs: { id: Tab; label: string; icon: IconName }[] = [
   { id: "general", label: "General", icon: "settings" },
+  { id: "glossary", label: "Glossary", icon: "book" },
   { id: "security", label: "Security", icon: "shield" },
   { id: "integrations", label: "Integrations", icon: "puzzle" },
 ];
@@ -67,6 +69,7 @@ export function SettingsView() {
             <General />
           </>
         ) : null}
+        {tab === "glossary" ? <GlossaryEditor /> : null}
         {tab === "security" ? <Security /> : null}
         {tab === "integrations" ? <Integrations /> : null}
       </div>

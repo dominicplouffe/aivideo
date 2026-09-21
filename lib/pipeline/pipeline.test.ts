@@ -12,6 +12,7 @@ import {
 import type { TranscriptionResult } from "@/lib/providers/types";
 import type { Project } from "@/lib/app-data";
 import { wordKey } from "@/lib/segments";
+import { occurrencesOf, resolveWords, withTrailingPunctuation } from "@/lib/edit-state";
 
 /** Builds a transcript from "word@start-end" shorthand, so tests stay legible. */
 function transcript(spec: string, durationSec?: number): TranscriptionResult {
@@ -214,6 +215,86 @@ test("hand cuts survive the trip through the saved edit state", () => {
   // Anything that is not a pair of non-negative integers is dropped, not trusted.
   const hydrated = hydrateEditState({ cutWords: [[1], ["a", 2], [-1, 0], [3, 4, 5], [1, 2]] });
   assert.deepEqual([...hydrated.cutWords], [wordKey(1, 2)]);
+});
+
+test("a rewritten run of words is one token that keeps the time of the words it replaces", () => {
+  const drafts = segmentTranscript(transcript("Open@0-0.4 C@0.4-0.6 L@0.6-0.8 O@0.8-1.0 now.@1.0-1.5"));
+  const project = projectWith(drafts);
+  const state = {
+    ...DEFAULT_EDIT_STATE,
+    wordEdits: new Map([[wordKey(0, 1), { span: 3, text: "Claude" }]]),
+  };
+  const words = resolveWords(project.segments[0], 0, state);
+  assert.deepEqual(
+    words.map((w) => [w.text, w.spoken, w.original, w.t, w.d, w.edited]),
+    [["Open", "Open", "Open", 0, 0.4, false], ["Claude", "Claude", "C L O", 0.4, 0.6, true], ["now.", "now.", "now.", 1, 0.5, false]],
+  );
+  const timeline = buildTimeline(project, state);
+  assert.deepEqual(timeline.map((w) => [w.text, w.start, w.end]), [["Open", 0, 0.4], ["Claude", 0.4, 1], ["now.", 1, 1.5]]);
+  // The file is untouched: edited time 0.5 is 0.5 in the source.
+  assert.ok(Math.abs((sourceTimeAt(timeline, 0.5) ?? 0) - 0.5) < 0.001);
+});
+
+test("a brand spelling shows one thing and says another", () => {
+  const drafts = segmentTranscript(transcript("Open@0-0.4 Core@0.4-0.8 now.@0.8-1.2"));
+  const project = projectWith(drafts);
+  const state = {
+    ...DEFAULT_EDIT_STATE,
+    wordEdits: new Map([[wordKey(0, 1), { span: 1, text: "Qore", spoken: "Core" }]]),
+  };
+  const [, qore] = resolveWords(project.segments[0], 0, state);
+  assert.equal(qore.text, "Qore");
+  assert.equal(qore.spoken, "Core");
+  // A cut on the rewritten token removes it from the timeline like any word.
+  const cut = { ...state, cutWords: new Set([wordKey(0, 1)]) };
+  assert.deepEqual(buildTimeline(project, cut).map((w) => w.text), ["Open", "now."]);
+});
+
+test("word edits survive the trip through the saved edit state, and junk does not", () => {
+  const state = {
+    ...DEFAULT_EDIT_STATE,
+    wordEdits: new Map([
+      [wordKey(1, 4), { span: 1, text: "Qore", spoken: "Core" }],
+      [wordKey(0, 2), { span: 3, text: "Claude" }],
+    ]),
+  };
+  const stored = serializeEditState(state);
+  assert.deepEqual(stored.wordEdits, [
+    { s: 0, w: 2, n: 3, text: "Claude" },
+    { s: 1, w: 4, n: 1, text: "Qore", spoken: "Core" },
+  ]);
+  const back = hydrateEditState(stored);
+  assert.deepEqual([...back.wordEdits.entries()], [...state.wordEdits.entries()].sort());
+
+  const hydrated = hydrateEditState({
+    wordEdits: [
+      { s: 0, w: 0, n: 1, text: "ok" },
+      { s: 0, w: 1, n: 0, text: "no span" },
+      { s: 0, w: 2, n: 1, text: "   " },
+      { s: -1, w: 2, n: 1, text: "negative" },
+      { s: 0, w: 3, n: 1, text: "same", spoken: "same" },
+      "nope",
+    ],
+  });
+  assert.deepEqual(
+    [...hydrated.wordEdits.entries()],
+    [[wordKey(0, 0), { span: 1, text: "ok" }], [wordKey(0, 3), { span: 1, text: "same" }]],
+  );
+});
+
+test("apply to all finds every place the transcriber wrote the phrase, punctuation aside", () => {
+  const drafts = segmentTranscript(
+    transcript("Open@0-0.4 C@0.4-0.6 L@0.6-0.8 O.@0.8-1.0 Ask@1.0-1.2 c@1.2-1.4 l@1.4-1.6 o@1.6-1.8 again.@1.8-2.4"),
+  );
+  const project = projectWith(drafts);
+  assert.deepEqual(occurrencesOf(project, ["C", "L", "O"]), [
+    { segIndex: 0, wordIndex: 1, span: 3 },
+    { segIndex: 0, wordIndex: 5, span: 3 },
+  ]);
+  // The transcriber's trailing punctuation stays unless the person typed their own.
+  assert.equal(withTrailingPunctuation("Claude", "O."), "Claude.");
+  assert.equal(withTrailingPunctuation("Claude", "o"), "Claude");
+  assert.equal(withTrailingPunctuation("Claude!", "O."), "Claude!");
 });
 
 test("keeping the fillers makes edited time and source time agree again", () => {

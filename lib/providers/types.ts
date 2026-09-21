@@ -41,6 +41,8 @@ export interface TranscriptionProvider {
   transcribe(input: {
     media: TranscriptionSource;
     languageHint?: string;
+    /** Spellings to favour — product names, brand terms — when the vendor supports priming. */
+    keyterms?: string[];
   }): Promise<TranscriptionResult>;
 }
 
