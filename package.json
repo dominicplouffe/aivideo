@@ -9,7 +9,7 @@
     "start": "next start",
     "typecheck": "tsc --noEmit",
     "db:generate": "drizzle-kit generate",
-    "db:migrate": "drizzle-kit migrate",
+    "db:migrate": "node scripts/db-migrate.mjs",
     "db:seed": "tsx lib/db/scripts/seed.ts",
     "db:studio": "drizzle-kit studio",
     "test": "tsx --test \"lib/**/*.test.ts\" \"extension/**/*.test.ts\"",
