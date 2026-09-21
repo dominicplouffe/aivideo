@@ -56,7 +56,7 @@ test("the report names what is missing, per capability", async () => {
     assert.equal(transcription?.live, true);
     assert.deepEqual(transcription?.missing, []);
     assert.equal(synthesis?.live, false);
-    assert.deepEqual(synthesis?.missing, ["ELEVENLABS_API_KEY", "DEMORIFF_WORKSPACE_ID"]);
+    assert.deepEqual(synthesis?.missing, ["ELEVENLABS_API_KEY"]);
   });
 });
 

@@ -275,12 +275,20 @@ export async function fail(
   jobId: string,
   workerId: string,
   error: string,
+  options: {
+    /**
+     * The failure will not clear up on its own — a vendor rejected the
+     * request, a voice's consent was withdrawn — so the job dead-letters
+     * now rather than repeating a certain failure through the backoff.
+     */
+    permanent?: boolean;
+  } = {},
 ): Promise<{ status: JobStatus; retryAt: Date | null }> {
   const db = getDb();
   const [job] = await db.select().from(s.jobs).where(eq(s.jobs.id, jobId)).limit(1);
   if (!job) return { status: "dead", retryAt: null };
 
-  const exhausted = job.attempts >= job.maxAttempts;
+  const exhausted = options.permanent || job.attempts >= job.maxAttempts;
   if (exhausted) {
     await db
       .update(s.jobs)

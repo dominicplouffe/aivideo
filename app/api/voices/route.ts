@@ -3,6 +3,7 @@ import { isDatabaseConfigured } from "@/lib/db/client";
 import { record } from "@/lib/audit/log";
 import { authorize, ForbiddenError } from "@/lib/auth/authorize";
 import { resolveActor, UnauthenticatedError } from "@/lib/auth/session";
+import { getProviders, providerReport } from "@/lib/providers";
 
 /**
  * Voices, and the consent action that matters most.
@@ -54,6 +55,10 @@ export async function GET(request: Request) {
         id: voice.id,
         name: voice.name,
         kind: voice.kind,
+        descriptor: voice.descriptor,
+        accent: voice.accent,
+        preview_url: voice.previewUrl,
+        available: voice.available,
         consented_at: voice.consentRecordedAt?.toISOString() ?? null,
         revoked_at: voice.revokedAt?.toISOString() ?? null,
       })),
@@ -66,6 +71,54 @@ export async function GET(request: Request) {
   }
 }
 
+/**
+ * Imports the vendor's studio library. `POST /api/voices {action: "sync"}`.
+ *
+ * Owners and admins, because it writes rows every workspace sees. Refused
+ * outright when synthesis is mocked: the mock's catalogue is three invented
+ * names, and importing them would put voices in the picker that no render
+ * could ever produce.
+ */
+async function sync(request: Request): Promise<NextResponse> {
+  let actor;
+  try {
+    actor = await resolveActor(request);
+    authorize(actor, "voice.manage", { workspaceId: actor.workspaceId });
+  } catch (error) {
+    const refusal = unauthorized(error);
+    if (refusal) return refusal;
+    throw error;
+  }
+
+  const synthesis = providerReport().find((entry) => entry.capability === "synthesis");
+  if (!synthesis?.live) {
+    return NextResponse.json(
+      {
+        error: `Synthesis is not configured, so there is no catalogue to import. Set ${
+          synthesis?.missing.join(" and ") || "a synthesis provider"
+        } first.`,
+      },
+      { status: 409 },
+    );
+  }
+
+  const catalogue = await getProviders().synthesis.listVoices();
+  const { syncStudioVoices } = await import("@/lib/db/repositories/voices");
+  const result = await syncStudioVoices(catalogue);
+
+  await record({
+    workspaceId: actor.workspaceId,
+    actor,
+    action: "voice.library.synced",
+    resourceType: "voice",
+    resourceId: null,
+    ip: request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? null,
+    metadata: { provider: getProviders().synthesis.name, ...result },
+  });
+
+  return NextResponse.json({ ...result, provider: getProviders().synthesis.name });
+}
+
 export async function POST(request: Request) {
   let body: { voice_id?: string; action?: string };
   try {
@@ -73,6 +126,15 @@ export async function POST(request: Request) {
   } catch {
     return NextResponse.json({ error: "Body must be valid JSON." }, { status: 400 });
   }
+
+  if (!isDatabaseConfigured()) {
+    return NextResponse.json(
+      { error: "Voices require a database; this deployment is running on fixtures." },
+      { status: 503 },
+    );
+  }
+
+  if (body.action === "sync") return sync(request);
 
   const voiceId = body.voice_id;
   const action = body.action;
@@ -82,15 +144,8 @@ export async function POST(request: Request) {
   }
   if (action !== "revoke" && action !== "reinstate") {
     return NextResponse.json(
-      { error: 'action must be "revoke" or "reinstate".' },
+      { error: 'action must be "sync", "revoke" or "reinstate".' },
       { status: 400 },
-    );
-  }
-
-  if (!isDatabaseConfigured()) {
-    return NextResponse.json(
-      { error: "Consent changes require a database; this deployment is running on fixtures." },
-      { status: 503 },
     );
   }
 

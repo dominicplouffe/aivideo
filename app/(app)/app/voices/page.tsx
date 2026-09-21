@@ -2,18 +2,17 @@ import type { Metadata } from "next";
 import { PageHeader, Panel } from "@/components/app/Shared";
 import { Icon } from "@/components/ui/Icon";
 import { VoiceClones } from "@/components/app/VoiceClones";
-import { getVoices } from "@/lib/data";
+import { StudioLibrary } from "@/components/app/StudioLibrary";
+import { viewerMay } from "@/lib/data";
 import { providerReport } from "@/lib/providers";
 
 export const metadata: Metadata = { title: "Voices" };
 
 export default async function VoicesPage() {
-  const voices = await getVoices();
-  const studio = voices.filter((v) => v.kind === "studio");
-
   // Whether synthesis resolved to a vendor or to the deterministic mock.
   // The page used to assert a licensed catalogue either way.
   const synthesis = providerReport().find((c) => c.capability === "synthesis");
+  const canManage = await viewerMay("voice.manage");
 
   return (
     <>
@@ -39,45 +38,11 @@ export default async function VoicesPage() {
           </div>
         </Panel>
 
-        <Panel
-          title="Studio library"
-          description="Voices offered by your synthesis provider"
-        >
-          {/*
-            This rendered four fixture voices — Ava, Marcus, Yuki and Sofia,
-            with accents, descriptors and a favourite star — under the claim
-            "Licensed for unlimited commercial use, worldwide". Nothing was
-            licensed, because nothing existed: none of the four was in the
-            voices table, so selecting one for a render would have failed to
-            find it. A workspace's studio voices are the rows it has.
-          */}
-          {studio.length === 0 ? (
-            <div className="px-5 py-10 text-center">
-              <p className="text-[0.875rem] text-fg-muted">No studio voices available.</p>
-              <p className="mx-auto mt-2 max-w-md text-[0.8125rem] leading-relaxed text-fg-subtle">
-                {synthesis?.live
-                  ? "Your synthesis provider has not published a voice to this workspace yet."
-                  : `Synthesis is not configured, so there is no catalogue to read. Set ${
-                      synthesis?.missing.join(" and ") || "a synthesis provider"
-                    } to enable it. Until then a video carries the voice on the recording.`}
-              </p>
-            </div>
-          ) : (
-            <div className="grid gap-3 p-5 sm:grid-cols-2 xl:grid-cols-4">
-              {studio.map((v) => (
-                <div
-                  key={v.id}
-                  className="flex flex-col gap-3 rounded-xl border border-[var(--line)] p-4 transition-colors hover:border-[var(--line-strong)]"
-                >
-                  <span className="inline-flex size-9 items-center justify-center rounded-full bg-[linear-gradient(135deg,var(--color-iris-600),var(--color-violet-500))]">
-                    <Icon name="play" className="size-3.5 text-white" />
-                  </span>
-                  <p className="text-[0.875rem] font-medium text-fg-strong">{v.name}</p>
-                </div>
-              ))}
-            </div>
-          )}
-        </Panel>
+        <StudioLibrary
+          canManage={canManage}
+          synthesisLive={synthesis?.live ?? false}
+          synthesisMissing={synthesis?.missing ?? []}
+        />
 
         {/*
           The pronunciation dictionary was removed rather than left in

@@ -27,6 +27,9 @@ function toRenderJob(job: Job, req?: RenderRequest): RenderJob {
     outputs: Object.fromEntries(
       outputs.map((o) => [o, result[o] ?? { status: done ? "ready" : "pending" }]),
     ) as RenderJob["outputs"],
+    ...((job.result as { narration?: unknown } | null)?.narration
+      ? { narration: (job.result as { narration: unknown }).narration }
+      : {}),
     error: job.lastError ?? undefined,
   };
 }

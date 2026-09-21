@@ -11,6 +11,7 @@ import {
 } from "@/components/app/studio/types";
 import type { TranscriptionResult } from "@/lib/providers/types";
 import type { Project } from "@/lib/app-data";
+import { wordKey } from "@/lib/segments";
 
 /** Builds a transcript from "word@start-end" shorthand, so tests stay legible. */
 function transcript(spec: string, durationSec?: number): TranscriptionResult {
@@ -186,6 +187,33 @@ test("a take with no speech still plays, start to end", () => {
   // No words means nothing was cut, so edited time is source time.
   assert.equal(sourceTimeAt(timeline, 0), 0);
   assert.ok(Math.abs((sourceTimeAt(timeline, 12.5) ?? 0) - 12.5) < 0.001);
+});
+
+test("a word cut by hand leaves the timeline and the file skips over it", () => {
+  const drafts = segmentTranscript(
+    transcript("Open@0-0.4 the@0.4-0.6 shipments@0.6-1.2 board.@1.2-1.8"),
+  );
+  const timeline = buildTimeline(projectWith(drafts), {
+    ...DEFAULT_EDIT_STATE,
+    cutWords: new Set([wordKey(0, 1)]),
+  });
+  assert.deepEqual(
+    timeline.map((w) => w.text),
+    ["Open", "shipments", "board."],
+  );
+  // "shipments" now starts at 0.4 in the edit and still at 0.6 in the file.
+  assert.ok(Math.abs((sourceTimeAt(timeline, 0.41) ?? 0) - 0.61) < 0.02);
+});
+
+test("hand cuts survive the trip through the saved edit state", () => {
+  const state = { ...DEFAULT_EDIT_STATE, cutWords: new Set([wordKey(2, 5), wordKey(0, 1)]) };
+  const stored = serializeEditState(state);
+  assert.deepEqual(stored.cutWords, [[0, 1], [2, 5]]);
+  assert.deepEqual([...hydrateEditState(stored).cutWords], [wordKey(0, 1), wordKey(2, 5)]);
+
+  // Anything that is not a pair of non-negative integers is dropped, not trusted.
+  const hydrated = hydrateEditState({ cutWords: [[1], ["a", 2], [-1, 0], [3, 4, 5], [1, 2]] });
+  assert.deepEqual([...hydrated.cutWords], [wordKey(1, 2)]);
 });
 
 test("keeping the fillers makes edited time and source time agree again", () => {

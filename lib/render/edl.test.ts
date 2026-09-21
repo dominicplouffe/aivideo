@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-  buildEdl, edlDuration, mapOutputToSource, mapSourceToOutput, validateEdl, type Edl, type EdlClip,
+  buildEdl, edlDuration, mapOutputToSource, mapSourceToOutput, segmentOutputSeconds, validateEdl,
+  withNarration, type Edl, type EdlClip,
 } from "./edl";
 import type { Project } from "@/lib/app-data";
+import { wordKey } from "@/lib/segments";
 
 /**
  * The EDL is where the editor's intent becomes arithmetic. Every test here
@@ -135,6 +137,52 @@ test("a chapter with no speech renders as recorded rather than vanishing", () =>
   // Nothing was said, so there is nothing to caption.
   assert.equal(edl.captions.length, 0);
   assert.deepEqual(validateEdl(edl), []);
+});
+
+test("cutting a word by hand splits the clip around it", () => {
+  const edl = buildEdl({
+    project: project(),
+    sourceUrl: "file://a.mp4",
+    removeFillers: false,
+    cutWords: new Set([wordKey(0, 1)]),
+  });
+  // seg_1 is "So click here." at 0–1.5; cutting "click" leaves the two
+  // halves either side of it, and seg_2 is untouched.
+  assert.deepEqual(
+    edl.clips.map((c) => [c.sourceStart, c.sourceEnd]),
+    [[0, 0.5], [1, 1.5], [5, 6.5]],
+  );
+  assert.equal(edl.durationSec, 2.5);
+  assert.ok(!edl.captions.some((cue) => /click/.test(cue.text)));
+  assert.deepEqual(validateEdl(edl), []);
+});
+
+test("narration lands where its chapter begins, and a removed chapter gets none", () => {
+  const edl = buildEdl({ project: project(), sourceUrl: "file://a.mp4", removeFillers: true });
+  // seg_1 survives from 0.5–1.5 (output 0–1); seg_2 from 5–5.5 and 6–6.5 (output 1–2).
+  const narrated = withNarration(edl, [
+    { segmentId: "seg_2", url: "storage://ws/b.wav", durationSec: 0.8, voiceId: "v1", tempo: 1.2 },
+    { segmentId: "seg_1", url: "storage://ws/a.wav", durationSec: 0.9, voiceId: "v1", tempo: 1 },
+    { segmentId: "seg_gone", url: "storage://ws/c.wav", durationSec: 1, voiceId: "v1" },
+  ]);
+  assert.deepEqual(
+    narrated.audio.map((t) => [t.kind, t.at, t.durationSec, t.voiceId, t.tempo]),
+    [
+      ["narration", 1, 0.8, "v1", 1.2],
+      // tempo 1 is the default and is not written.
+      ["narration", 0, 0.9, "v1", undefined],
+    ],
+  );
+  assert.equal(segmentOutputSeconds(edl, "seg_2"), 1);
+  assert.deepEqual(validateEdl(narrated), []);
+  // The original is untouched: adding narration returns a new EDL.
+  assert.equal(edl.audio.length, 0);
+});
+
+test("a tempo the mix cannot apply fails validation", () => {
+  const edl = buildEdl({ project: project(), sourceUrl: "file://a.mp4" });
+  const narrated = withNarration(edl, [{ segmentId: "seg_1", url: "u", durationSec: 1, tempo: 3 }]);
+  assert.match(validateEdl(narrated).join("\n"), /tempo/);
 });
 
 test("adjacent survivors merge into one clip rather than one clip per word", () => {

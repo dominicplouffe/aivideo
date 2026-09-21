@@ -163,6 +163,14 @@ test("narration is delayed to its place on the timeline", () => {
   assert.equal(filters[0], "[1:a]adelay=1250:all=1,volume=0dB[a0]");
 });
 
+test("a fitted narration is stretched before it is delayed", () => {
+  const { filters } = buildAudioFilters(
+    edl({ audio: [{ kind: "narration", url: "n", at: 2, durationSec: 2, gainDb: 0, tempo: 1.15 }] }),
+  );
+  // The stretch applies to the clip; the delay places the shortened clip.
+  assert.equal(filters[0], "[1:a]atempo=1.15,adelay=2000:all=1,volume=0dB[a0]");
+});
+
 test("music is ducked against the narration rather than sitting under it", () => {
   const { filters, out } = buildAudioFilters(
     edl({

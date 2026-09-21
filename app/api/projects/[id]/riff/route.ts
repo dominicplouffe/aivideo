@@ -7,7 +7,8 @@ import {
   offlineAssistant,
   type AssistantChapter,
 } from "@/lib/providers/assistant";
-import { hydrateEditState } from "@/components/app/studio/types";
+import { hydrateEditState, isWordRemoved, type EditState } from "@/components/app/studio/types";
+import type { Segment } from "@/lib/app-data";
 
 /**
  * Ask Riff about the cut.
@@ -23,12 +24,9 @@ export const maxDuration = 60;
 
 type Context = { params: Promise<{ id: string }> };
 
-/** A chapter's contribution to the finished runtime, fillers already cut. */
-function spokenSeconds(
-  words: { d: number; cut?: boolean }[],
-  removeFillers: boolean,
-): number {
-  return words.filter((w) => !(removeFillers && w.cut)).reduce((n, w) => n + w.d, 0);
+/** The words a chapter still speaks under this edit: fillers and hand cuts removed. */
+function spokenWords(words: Segment["words"], segIndex: number, state: EditState) {
+  return words.filter((w, wordIndex) => !isWordRemoved(state, segIndex, wordIndex, w));
 }
 
 export async function POST(request: Request, context: Context) {
@@ -56,16 +54,16 @@ export async function POST(request: Request, context: Context) {
 
   const state = hydrateEditState(project.editState);
 
-  const chapters: AssistantChapter[] = project.segments.map((segment, ordinal) => ({
-    ordinal,
-    title: segment.title,
-    durationSec: spokenSeconds(segment.words, state.removeFillers),
-    text: segment.words
-      .filter((w) => !(state.removeFillers && w.cut))
-      .map((w) => w.w)
-      .join(" "),
-    deleted: state.deletedSegments.has(ordinal),
-  }));
+  const chapters: AssistantChapter[] = project.segments.map((segment, ordinal) => {
+    const spoken = spokenWords(segment.words, ordinal, state);
+    return {
+      ordinal,
+      title: segment.title,
+      durationSec: spoken.reduce((n, w) => n + w.d, 0),
+      text: spoken.map((w) => w.w).join(" "),
+      deleted: state.deletedSegments.has(ordinal),
+    };
+  });
 
   const history = Array.isArray(body.history)
     ? (body.history as unknown[])

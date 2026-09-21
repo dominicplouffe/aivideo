@@ -53,7 +53,8 @@ function env(name: string): string {
 /** The credentials each capability needs before it can be anything but a mock. */
 const CREDENTIALS: Record<Capability, string[]> = {
   transcription: ["DEEPGRAM_API_KEY"],
-  synthesis: ["ELEVENLABS_API_KEY", "DEMORIFF_WORKSPACE_ID"],
+  // No workspace id here either: each synthesis request names its tenant.
+  synthesis: ["ELEVENLABS_API_KEY"],
   translation: ["ANTHROPIC_API_KEY"],
   masking: ["ANTHROPIC_API_KEY"],
   // Not a vendor: the durable queue, which needs somewhere to keep the jobs.
@@ -109,10 +110,7 @@ function resolve(): Resolved {
   note("transcription", providers.transcription.name, providers.transcription !== mockProviders.transcription);
 
   if (wants("synthesis")) {
-    providers.synthesis = createElevenLabsSynthesis({
-      apiKey: env("ELEVENLABS_API_KEY"),
-      workspaceId: env("DEMORIFF_WORKSPACE_ID"),
-    });
+    providers.synthesis = createElevenLabsSynthesis({ apiKey: env("ELEVENLABS_API_KEY") });
   }
   note("synthesis", providers.synthesis.name, providers.synthesis !== mockProviders.synthesis);
 

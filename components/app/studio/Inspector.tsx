@@ -10,6 +10,17 @@ import type { EditState } from "./types";
 
 type Tab = "scene" | "audio" | "brand" | "output" | "riff";
 
+/** A voice as GET /api/voices describes it. */
+export interface StudioVoice {
+  id: string;
+  name: string;
+  kind: "studio" | "clone";
+  descriptor: string | null;
+  accent: string | null;
+  available: boolean;
+  revoked_at: string | null;
+}
+
 const tabs: { id: Tab; label: string; icon: IconName }[] = [
   { id: "scene", label: "Scene", icon: "frame" },
   { id: "audio", label: "Audio", icon: "volume" },
@@ -21,15 +32,25 @@ const tabs: { id: Tab; label: string; icon: IconName }[] = [
 export function Inspector({
   project,
   segment,
+  segmentIndex,
   state,
   onState,
+  voices,
+  voiceId,
+  onVoice,
   ask,
   onAsked,
 }: {
   project: Project;
   segment: Segment | null;
+  /** The inspected chapter's index, for actions that name a chapter. */
+  segmentIndex: number | null;
   state: EditState;
   onState: (patch: Partial<EditState>) => void;
+  /** Voices this workspace may narrate with, and the one this project uses. */
+  voices: StudioVoice[];
+  voiceId: string | null;
+  onVoice: (voiceId: string | null) => void;
   /**
    * A question pushed in from elsewhere — the transcript's action chips.
    * Opens the Riff tab and sends it, so a chip in one panel and a message
@@ -68,7 +89,18 @@ export function Inspector({
 
       <div className="min-h-0 flex-1 overflow-y-auto">
         {tab === "scene" ? <SceneTab segment={segment} state={state} onState={onState} /> : null}
-        {tab === "audio" ? <AudioTab project={project} state={state} onState={onState} /> : null}
+        {tab === "audio" ? (
+          <AudioTab
+            project={project}
+            segment={segment}
+            segmentIndex={segmentIndex}
+            state={state}
+            onState={onState}
+            voices={voices}
+            voiceId={voiceId}
+            onVoice={onVoice}
+          />
+        ) : null}
         {tab === "brand" ? <BrandTab project={project} state={state} onState={onState} /> : null}
         {tab === "output" ? <OutputTab project={project} /> : null}
         {tab === "riff" ? (
@@ -147,30 +179,98 @@ function SceneTab({
 
 function AudioTab({
   project,
+  segment,
+  segmentIndex,
   state,
   onState,
+  voices,
+  voiceId,
+  onVoice,
 }: {
   project: Project;
+  segment: Segment | null;
+  segmentIndex: number | null;
   state: EditState;
   onState: (p: Partial<EditState>) => void;
+  voices: StudioVoice[];
+  voiceId: string | null;
+  onVoice: (voiceId: string | null) => void;
 }) {
+  // A voice that can no longer narrate — a studio voice the vendor withdrew,
+  // a clone whose consent was revoked — is listed only if it is the one
+  // already chosen, so the person sees why their render will refuse rather
+  // than a voice that silently vanished from the menu.
+  const studio = voices.filter((v) => v.kind === "studio" && (v.available || v.id === voiceId));
+  const clones = voices.filter((v) => v.kind === "clone" && (!v.revoked_at || v.id === voiceId));
+  const chosen = voices.find((v) => v.id === voiceId) ?? null;
+
   return (
     <div className="space-y-5 p-4">
       {/*
-        The narration picker is gone until synthesis is configured.
-
-        It was a <select> bound to local state that nothing saved — while
-        every other control in this panel autosaves, so a person who changed
-        the voice and reloaded found it changed back with no explanation.
-        Replacing a recorded voice needs a synthesis provider; without one
-        the video carries the voice on the recording, and there is nothing
-        to choose between.
+        The picker saves through the project, not local state: the version
+        before this one was a <select> nothing persisted, so a person who
+        changed the voice and reloaded found it changed back.
       */}
       <Group label="Narration">
-        <p className="text-[0.75rem] leading-relaxed text-fg-subtle">
-          This video uses the audio on your recording. Swapping in a studio
-          voice needs a speech synthesis provider configured.
-        </p>
+        {voices.length === 0 ? (
+          <p className="text-[0.75rem] leading-relaxed text-fg-subtle">
+            This video uses the audio on your recording. To narrate it with a
+            studio voice, import the library on the Voices page.
+          </p>
+        ) : (
+          <>
+            <label htmlFor="narration-voice" className="sr-only">
+              Narrating voice
+            </label>
+            <select
+              id="narration-voice"
+              value={voiceId ?? ""}
+              onChange={(e) => onVoice(e.target.value || null)}
+              className="w-full rounded-lg border border-[var(--line)] bg-ink-900 px-2.5 py-2 text-[0.8125rem] text-fg focus:border-iris-500/50 focus:outline-none"
+            >
+              <option value="">Voice on the recording</option>
+              {studio.length > 0 ? (
+                <optgroup label="Studio library">
+                  {studio.map((v) => (
+                    <option key={v.id} value={v.id}>
+                      {v.name}
+                      {v.accent ? ` · ${v.accent}` : ""}
+                      {v.available ? "" : " (no longer offered)"}
+                    </option>
+                  ))}
+                </optgroup>
+              ) : null}
+              {clones.length > 0 ? (
+                <optgroup label="Your clones">
+                  {clones.map((v) => (
+                    <option key={v.id} value={v.id}>
+                      {v.name}
+                      {v.revoked_at ? " (consent withdrawn)" : ""}
+                    </option>
+                  ))}
+                </optgroup>
+              ) : null}
+            </select>
+            <p className="mt-2 text-[0.75rem] leading-relaxed text-fg-subtle">
+              {chosen
+                ? `Renders will speak the transcript in ${chosen.name}'s voice${
+                    chosen.descriptor ? ` — ${chosen.descriptor}` : ""
+                  }. Your recording is kept; switch back to it here at any time.`
+                : "Renders keep the audio on your recording. Choose a voice to have the transcript read instead."}
+            </p>
+            {chosen ? (
+              <ChapterPreview
+                projectId={project.id}
+                segment={segment}
+                segmentIndex={segmentIndex}
+                voiceName={chosen.name}
+                // Re-arm when the words or the voice change: the clip that
+                // was playing described a different edit.
+                editKey={`${voiceId}:${segmentIndex}:${state.removeFillers}:${state.cutWords.size}:${state.deletedSegments.size}`}
+              />
+            ) : null}
+          </>
+        )}
       </Group>
 
       <Group label="Restoration">
@@ -188,6 +288,141 @@ function AudioTab({
       {/* The pronunciation dictionary claimed three specific overrides
           were applied, from a hardcoded sentence, beside a button with no
           handler. It belongs with synthesis and comes back with it. */}
+    </div>
+  );
+}
+
+/**
+ * Hear the inspected chapter in the chosen voice.
+ *
+ * One synthesis per chapter per voice, and the render reuses the clip, so
+ * this is the cheap way to find out whether a voice suits the script before
+ * spending a render on it. It also says whether the reading fits the
+ * chapter's footage — the thing the render will otherwise discover for you.
+ */
+function ChapterPreview({
+  projectId,
+  segment,
+  segmentIndex,
+  voiceName,
+  editKey,
+}: {
+  projectId: string;
+  segment: Segment | null;
+  segmentIndex: number | null;
+  voiceName: string;
+  editKey: string;
+}) {
+  const [state, setState] = useState<
+    | { kind: "idle" }
+    | { kind: "loading" }
+    | { kind: "playing" | "ready"; durationSec: number; availableSec: number; url: string }
+    | { kind: "error"; message: string }
+  >({ kind: "idle" });
+  const audio = useRef<HTMLAudioElement | null>(null);
+
+  // A different chapter or a changed edit invalidates what was fetched.
+  useEffect(() => {
+    audio.current?.pause();
+    setState({ kind: "idle" });
+  }, [editKey]);
+  useEffect(() => () => audio.current?.pause(), []);
+
+  if (segmentIndex === null || !segment) {
+    return (
+      <p className="mt-3 text-2xs text-fg-faint">
+        Select a chapter in the script or the timeline to preview it in this voice.
+      </p>
+    );
+  }
+  const title = `${String(segmentIndex + 1).padStart(2, "0")} ${segment.title}`;
+
+  const play = (url: string) => {
+    if (!audio.current) {
+      audio.current = new Audio();
+      audio.current.addEventListener("ended", () =>
+        setState((s) => (s.kind === "playing" ? { ...s, kind: "ready" } : s)),
+      );
+    }
+    audio.current.src = url;
+    void audio.current.play().catch(() =>
+      setState({ kind: "error", message: "The browser would not play the clip." }),
+    );
+  };
+
+  const preview = async () => {
+    if (state.kind === "playing") {
+      audio.current?.pause();
+      setState({ ...state, kind: "ready" });
+      return;
+    }
+    if (state.kind === "ready") {
+      play(state.url);
+      setState({ ...state, kind: "playing" });
+      return;
+    }
+    setState({ kind: "loading" });
+    try {
+      const response = await fetch(`/api/projects/${projectId}/narration`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ segment_index: segmentIndex }),
+      });
+      const body = (await response.json()) as {
+        error?: string;
+        audio_url?: string;
+        duration_sec?: number;
+        available_sec?: number;
+      };
+      if (!response.ok || !body.audio_url) throw new Error(body.error ?? "The preview did not come back.");
+      play(body.audio_url);
+      setState({
+        kind: "playing",
+        url: body.audio_url,
+        durationSec: body.duration_sec ?? 0,
+        availableSec: body.available_sec ?? 0,
+      });
+    } catch (cause) {
+      setState({ kind: "error", message: cause instanceof Error ? cause.message : String(cause) });
+    }
+  };
+
+  const fitted = state.kind === "playing" || state.kind === "ready" ? state : null;
+  const runsLong = fitted ? fitted.durationSec > fitted.availableSec * 1.03 : false;
+
+  return (
+    <div className="mt-3 rounded-xl border border-[var(--line)] bg-ink-900/60 p-3">
+      <div className="flex items-center gap-2.5">
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={state.kind === "loading"}
+          onClick={() => void preview()}
+          aria-label={state.kind === "playing" ? `Stop previewing ${title}` : `Preview ${title} in ${voiceName}'s voice`}
+        >
+          <Icon
+            name={state.kind === "playing" ? "pause" : "play"}
+            className={cn("size-3.5", state.kind === "loading" && "animate-pulse")}
+            strokeWidth={2}
+          />
+          {state.kind === "loading" ? "Synthesizing…" : state.kind === "playing" ? "Stop" : "Preview this chapter"}
+        </Button>
+        <span className="min-w-0 truncate text-2xs text-fg-subtle">{title}</span>
+      </div>
+      {fitted ? (
+        <p className={cn("mt-2 text-2xs leading-relaxed", runsLong ? "text-amber-300" : "text-fg-subtle")}>
+          {voiceName} reads it in {fitted.durationSec.toFixed(1)}s; the footage runs{" "}
+          {fitted.availableSec.toFixed(1)}s.
+          {runsLong
+            ? " The render will pace it to fit — cut a few words here if it sounds hurried."
+            : " It fits."}
+        </p>
+      ) : null}
+      {state.kind === "error" ? (
+        <p role="alert" className="mt-2 text-2xs text-rose-300">
+          {state.message}
+        </p>
+      ) : null}
     </div>
   );
 }

@@ -40,10 +40,10 @@ export const mockTranscription: TranscriptionProvider = {
 
 export const mockSynthesis: SynthesisProvider = {
   name: "mock-synthesis",
-  async synthesize({ text, voiceId }) {
+  async synthesize({ text, voiceId, workspaceId }) {
     const wordCount = text.trim().split(/\s+/).length;
     return {
-      audioUrl: `mock://audio/${voiceId}/${wordCount}`,
+      audioUrl: `mock://audio/${workspaceId}/${voiceId}/${wordCount}`,
       durationSec: wordCount * 0.38,
       sampleRate: 48000,
     };

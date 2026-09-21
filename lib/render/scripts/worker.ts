@@ -1,5 +1,17 @@
 import { randomUUID } from "node:crypto";
 import { closeDb, isDatabaseConfigured } from "@/lib/db/client";
+
+// The same files `next dev` and the migration script read, so `npm run
+// worker` in a checkout works with no exporting first. Variables already in
+// the environment win: a deployment that sets them for real is not
+// overridden by a stray local file.
+for (const file of [".env.local", ".env"]) {
+  try {
+    process.loadEnvFile(file);
+  } catch {
+    // Absent is fine — the variables may come from the real environment.
+  }
+}
 import { processWebhookOne } from "@/lib/webhooks/worker";
 import { streamAll } from "@/lib/audit/siem";
 import { processOne } from "../worker";
@@ -29,7 +41,9 @@ import { processOne } from "../worker";
 const POLL_MS = Number(process.env.RENDER_WORKER_POLL_MS ?? 2000);
 const AUDIT_STREAM_MS = Number(process.env.AUDIT_STREAM_INTERVAL_MS ?? 30_000);
 let nextStreamAt = 0;
-const workerId = process.env.RENDER_WORKER_ID ?? `render-${randomUUID().slice(0, 8)}`;
+// `||`, not `??`: `.env.example` ships the variable set to nothing, and an
+// empty name is not a name.
+const workerId = process.env.RENDER_WORKER_ID || `render-${randomUUID().slice(0, 8)}`;
 
 let running = true;
 

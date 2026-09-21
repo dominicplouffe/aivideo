@@ -2,7 +2,7 @@ import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { getDb } from "../client";
 import * as s from "../schema";
 import type { Project, Segment, ProjectStatus, OutputKind } from "@/lib/app-data";
-import { silentSpanSec } from "@/lib/segment-span";
+import { silentSpanSec, wordKey } from "@/lib/segments";
 import { slugify } from "@/lib/utils";
 
 /**
@@ -49,6 +49,15 @@ function toProject(
     ((r.editState as { deletedSegments?: number[] })?.deletedSegments ?? []) as number[],
   );
   const removeFillers = (r.editState as { removeFillers?: boolean })?.removeFillers ?? true;
+  const storedCuts = (r.editState as { cutWords?: unknown })?.cutWords;
+  const cutWords = new Set(
+    (Array.isArray(storedCuts) ? storedCuts : [])
+      .filter(
+        (pair): pair is [number, number] =>
+          Array.isArray(pair) && pair.length === 2 && pair.every((n) => Number.isInteger(n)),
+      )
+      .map(([segIndex, wordIndex]) => wordKey(segIndex, wordIndex)),
+  );
   const durationSec = segs.reduce((total, seg, i) => {
     if (deleted.has(i)) return total;
     if (seg.words.length === 0) {
@@ -57,7 +66,7 @@ function toProject(
       return span > 0 ? total + span + 0.35 : total;
     }
     const spoken = seg.words
-      .filter((w) => !(removeFillers && w.cut))
+      .filter((w, j) => !(removeFillers && w.cut) && !cutWords.has(wordKey(i, j)))
       .reduce((n, w) => n + w.d, 0);
     return total + spoken + 0.35;
   }, 0);
@@ -75,6 +84,7 @@ function toProject(
     owner: extras.ownerFixtureId,
     brandKit: extras.brandKitName,
     voice: extras.voiceLabel,
+    voiceId: r.voiceId ?? null,
     locales: extras.locales,
     outputs: extras.outputs,
     views: extras.views,
@@ -320,6 +330,20 @@ export async function saveEditState(
   const [updated] = await getDb()
     .update(s.projects)
     .set({ editState, updatedAt: new Date() })
+    .where(and(eq(s.projects.id, projectId), eq(s.projects.workspaceId, workspaceId)))
+    .returning({ id: s.projects.id });
+  return Boolean(updated);
+}
+
+/** Sets, or clears, the voice that narrates a project's renders. */
+export async function saveVoice(
+  workspaceId: string,
+  projectId: string,
+  voiceId: string | null,
+): Promise<boolean> {
+  const [updated] = await getDb()
+    .update(s.projects)
+    .set({ voiceId, updatedAt: new Date() })
     .where(and(eq(s.projects.id, projectId), eq(s.projects.workspaceId, workspaceId)))
     .returning({ id: s.projects.id });
   return Boolean(updated);

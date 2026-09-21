@@ -143,7 +143,7 @@ becomes real, with the rest staying on deterministic mocks.
 ```bash
 DEEPGRAM_API_KEY=...     # real transcription — the one the editor rests on
 ANTHROPIC_API_KEY=...    # the Riff assistant, translation, frame masking
-ELEVENLABS_API_KEY=...   # synthesized narration (also needs DEMORIFF_WORKSPACE_ID)
+ELEVENLABS_API_KEY=...   # synthesized narration
 ```
 
 `GET /api/providers` reports what each capability resolved to and what is

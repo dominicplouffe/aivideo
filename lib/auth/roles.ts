@@ -38,6 +38,7 @@ export const PERMISSIONS = [
   // Brand and voice
   "brand.edit",
   "voice.clone",
+  "voice.manage",
   "voice.revoke",
   // Distribution
   "share.create",
@@ -74,7 +75,7 @@ const MATRIX: Record<Role, readonly Permission[]> = {
     "project.create", "project.edit", "project.delete", "project.publish",
     "project.comment", "project.view", "render.submit",
     "agent.run", "agent.approve", "agent.credentials.manage",
-    "brand.edit", "voice.clone",
+    "brand.edit", "voice.clone", "voice.manage",
     "share.create", "share.revoke", "analytics.view",
     "member.invite", "member.remove", "member.role.change",
     "masking.policy.edit", "workspace.settings.edit",

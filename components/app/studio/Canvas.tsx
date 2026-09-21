@@ -5,8 +5,8 @@ import { cn, formatDuration, stablePercent } from "@/lib/utils";
 import { Icon } from "@/components/ui/Icon";
 import { MockApp } from "@/components/marketing/MockApp";
 import type { Project, Segment } from "@/lib/app-data";
-import { silentSpanSec } from "@/lib/segment-span";
-import type { EditState } from "./types";
+import { silentSpanSec, wordKey } from "@/lib/segments";
+import { isWordRemoved, type EditState } from "./types";
 
 export function Canvas({
   project,
@@ -273,7 +273,7 @@ export function TimelineStrip({
   const speech = useMemo(() => {
     const BUCKETS = 110;
     const words = project.segments.flatMap((segment, segIndex) =>
-      segment.words.map((word) => ({ ...word, segIndex })),
+      segment.words.map((word, wordIndex) => ({ ...word, segIndex, wordIndex })),
     );
 
     const span = Math.max(
@@ -287,7 +287,13 @@ export function TimelineStrip({
     for (const word of words) {
       const index = Math.min(BUCKETS - 1, Math.max(0, Math.floor(word.t / bucketSec)));
       bars[index].spoken += word.d;
-      if (word.cut || state.deletedSegments.has(word.segIndex)) bars[index].cut = true;
+      if (
+        word.cut ||
+        state.deletedSegments.has(word.segIndex) ||
+        state.cutWords.has(wordKey(word.segIndex, word.wordIndex))
+      ) {
+        bars[index].cut = true;
+      }
     }
 
     // Clamped at 1: several short words can overflow a bucket, and a bar
@@ -296,19 +302,19 @@ export function TimelineStrip({
       density: Math.min(1, bar.spoken / bucketSec),
       cut: bar.cut,
     }));
-  }, [project.segments, project.sourceDurationSec, state.deletedSegments]);
+  }, [project.segments, project.sourceDurationSec, state.deletedSegments, state.cutWords]);
 
   // A chapter's share of the strip is its running time under this edit.
   // Silent footage plays as recorded; see `silentSpanSec`.
-  const weightOf = (s: Segment) =>
+  const weightOf = (s: Segment, i: number) =>
     s.words.length === 0
       ? silentSpanSec(s)
-      : s.words.filter((w) => !(state.removeFillers && w.cut)).reduce((m, w) => m + w.d, 0);
-  const totalWeight = live.reduce((n, { s }) => n + weightOf(s), 0);
+      : s.words.filter((w, j) => !isWordRemoved(state, i, j, w)).reduce((m, w) => m + w.d, 0);
+  const totalWeight = live.reduce((n, { s, i }) => n + weightOf(s, i), 0);
 
   let acc = 0;
   const laid = live.map(({ s, i }) => {
-    const w = weightOf(s);
+    const w = weightOf(s, i);
     const start = acc;
     acc += w;
     return { s, i, start, width: w / Math.max(0.01, totalWeight) };

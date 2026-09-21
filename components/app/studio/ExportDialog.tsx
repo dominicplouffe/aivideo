@@ -10,6 +10,20 @@ import { site } from "@/lib/site";
 
 type Step = "configure" | "rendering" | "done" | "error";
 
+/** What the worker reports about a narrated render. See lib/render/narration.ts. */
+interface NarrationSummary {
+  voice: { id: string; name: string };
+  chapters: {
+    segIndex: number;
+    title: string;
+    availableSec: number;
+    spokenSec: number;
+    pace: number;
+    tempo: number;
+    overrunSec: number;
+  }[];
+}
+
 /**
  * `built: false` means the render worker does not produce this yet.
  *
@@ -51,6 +65,7 @@ export function ExportDialog({
   const [publishing, setPublishing] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
   const [stalled, setStalled] = useState(false);
+  const [narration, setNarration] = useState<NarrationSummary | null>(null);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
@@ -101,11 +116,13 @@ export function ExportDialog({
         progress?: number;
         error?: string;
         outputs?: Record<string, { status: string; url?: string }>;
+        narration?: NarrationSummary | null;
       };
 
       if (job.status === "completed") {
         setProgress(1);
         setVideoUrl(job.outputs?.video?.url ?? null);
+        setNarration(job.narration ?? null);
         setStep("done");
         return;
       }
@@ -326,9 +343,12 @@ export function ExportDialog({
                   </p>
                   <p className="mt-1 text-[0.8125rem] text-fg-muted">
                     {formatDuration(duration)} at {resolution}, cut to your edit.
+                    {narration ? ` Narrated by ${narration.voice.name}.` : ""}
                   </p>
                 </div>
               </div>
+
+              {narration ? <NarrationFit summary={narration} /> : null}
 
               {videoUrl ? (
                 <video
@@ -445,6 +465,49 @@ export function ExportDialog({
           ) : null}
         </footer>
       </div>
+    </div>
+  );
+}
+
+/**
+ * How each chapter's narration was fitted to its footage.
+ *
+ * Only the chapters that needed fitting are listed. A voice that read a
+ * chapter comfortably inside its footage is not news; one that had to be
+ * hurried, or still runs over, is what a person wants to know before they
+ * share the file — and the remedy, cutting words from that chapter, is in
+ * the panel behind this dialog.
+ */
+function NarrationFit({ summary }: { summary: NarrationSummary }) {
+  const fitted = summary.chapters.filter((c) => c.pace > 1 || c.tempo > 1 || c.overrunSec > 0);
+  if (fitted.length === 0) {
+    return (
+      <p className="text-[0.8125rem] text-fg-subtle">
+        Every chapter's narration fits inside its footage.
+      </p>
+    );
+  }
+  return (
+    <div className="rounded-xl border border-amber-500/25 bg-amber-500/[0.06] p-3.5">
+      <p className="text-[0.8125rem] font-medium text-amber-200">
+        {fitted.length === 1 ? "One chapter" : `${fitted.length} chapters`} read longer than the footage
+      </p>
+      <ul className="mt-2 space-y-1.5">
+        {fitted.map((c) => (
+          <li key={c.segIndex} className="text-2xs leading-relaxed text-amber-200/85">
+            <span className="font-medium text-amber-100">
+              {String(c.segIndex + 1).padStart(2, "0")} {c.title}
+            </span>{" "}
+            — {c.spokenSec.toFixed(1)}s of speech for {c.availableSec.toFixed(1)}s of footage
+            {c.pace > 1 ? `, read at ${c.pace.toFixed(2)}× pace` : ""}
+            {c.tempo > 1 ? `, stretched ${c.tempo.toFixed(2)}×` : ""}
+            {c.overrunSec > 0 ? `, still ${c.overrunSec.toFixed(1)}s over` : ""}.
+          </li>
+        ))}
+      </ul>
+      <p className="mt-2 text-2xs text-amber-200/70">
+        Cut a few words from those chapters in the Script panel and render again.
+      </p>
     </div>
   );
 }

@@ -1,5 +1,5 @@
-import type { Project, Segment } from "@/lib/app-data";
-import { silentSpanSec } from "@/lib/segment-span";
+import type { Project, Segment, TranscriptWord } from "@/lib/app-data";
+import { silentSpanSec, wordKey } from "@/lib/segments";
 
 export interface EditedWord {
   segIndex: number;
@@ -28,11 +28,27 @@ export interface EditedWord {
 export interface EditState {
   removeFillers: boolean;
   deletedSegments: Set<number>;
+  /**
+   * Words cut by hand, keyed with `wordKey`. Independent of the filler
+   * toggle: a filler is removed by the toggle whether or not it is here, and
+   * a word here is removed whatever the toggle says.
+   */
+  cutWords: Set<string>;
   studioSound: boolean;
   captions: boolean;
   music: boolean;
   presenter: boolean;
   zoomEnabled: boolean;
+}
+
+/** Whether this edit removes the word: a filler under the toggle, or a hand cut. */
+export function isWordRemoved(
+  state: Pick<EditState, "removeFillers" | "cutWords">,
+  segIndex: number,
+  wordIndex: number,
+  word: Pick<TranscriptWord, "cut">,
+): boolean {
+  return (state.removeFillers && Boolean(word.cut)) || state.cutWords.has(wordKey(segIndex, wordIndex));
 }
 
 /**
@@ -65,7 +81,7 @@ export function buildTimeline(project: Project, state: EditState): EditedWord[] 
       return;
     }
     seg.words.forEach((w, wordIndex) => {
-      if (state.removeFillers && w.cut) return;
+      if (isWordRemoved(state, segIndex, wordIndex, w)) return;
       out.push({
         segIndex,
         wordIndex,
@@ -99,6 +115,8 @@ export function timelineDuration(tl: EditedWord[]): number {
 export interface StoredEditState {
   removeFillers?: boolean;
   deletedSegments?: number[];
+  /** `[chapter index, word index]` pairs; see `wordKey`. */
+  cutWords?: [number, number][];
   studioSound?: boolean;
   captions?: boolean;
   music?: boolean;
@@ -109,6 +127,7 @@ export interface StoredEditState {
 export const DEFAULT_EDIT_STATE: EditState = {
   removeFillers: true,
   deletedSegments: new Set<number>(),
+  cutWords: new Set<string>(),
   studioSound: true,
   captions: true,
   music: true,
@@ -129,6 +148,18 @@ export function hydrateEditState(stored: unknown): EditState {
         ? raw.deletedSegments.filter((n): n is number => Number.isInteger(n) && n >= 0)
         : [],
     ),
+    cutWords: new Set(
+      Array.isArray(raw.cutWords)
+        ? raw.cutWords
+            .filter(
+              (pair): pair is [number, number] =>
+                Array.isArray(pair) &&
+                pair.length === 2 &&
+                pair.every((n) => Number.isInteger(n) && n >= 0),
+            )
+            .map(([segIndex, wordIndex]) => wordKey(segIndex, wordIndex))
+        : [],
+    ),
     studioSound: flag(raw.studioSound, DEFAULT_EDIT_STATE.studioSound),
     captions: flag(raw.captions, DEFAULT_EDIT_STATE.captions),
     music: flag(raw.music, DEFAULT_EDIT_STATE.music),
@@ -141,6 +172,9 @@ export function serializeEditState(state: EditState): StoredEditState {
   return {
     removeFillers: state.removeFillers,
     deletedSegments: [...state.deletedSegments].sort((a, b) => a - b),
+    cutWords: [...state.cutWords]
+      .map((key) => key.split(":").map(Number) as [number, number])
+      .sort((a, b) => a[0] - b[0] || a[1] - b[1]),
     studioSound: state.studioSound,
     captions: state.captions,
     music: state.music,

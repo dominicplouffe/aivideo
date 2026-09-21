@@ -209,6 +209,11 @@ export function buildAudioFilters(edl: Edl): { filters: string[]; out: string | 
     const label = `a${i}`;
     const delayMs = Math.round(track.at * 1000);
     const steps = [`[${inputIndex}:a]`];
+    // Tempo before delay: the stretch is to the clip, the delay is to where
+    // the shortened clip sits on the output timeline.
+    if (track.tempo !== undefined && Math.abs(track.tempo - 1) > 1e-3) {
+      steps.push(`atempo=${n(track.tempo)},`);
+    }
     if (delayMs > 0) steps.push(`adelay=${delayMs}:all=1,`);
     steps.push(`volume=${n(track.gainDb)}dB[${label}]`);
     filters.push(steps.join(""));

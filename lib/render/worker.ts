@@ -9,6 +9,7 @@ import { checkBeforeWork, markNoticeSent, meter } from "@/lib/billing/metering";
 import { emitEvent, type WebhookEventType } from "@/lib/webhooks/outbound";
 import { buildEdl, validateEdl, type Edl } from "./edl";
 import { compile, probe, runFfmpeg, toSrt } from "./ffmpeg";
+import { narrate, type NarrationReport } from "./narration";
 
 /**
  * The render worker.
@@ -37,6 +38,11 @@ export interface RenderWorkerOptions {
   workerId: string;
   /** Resolves a job's payload into an EDL. Injectable for tests. */
   resolveEdl?: (job: Job) => Promise<Edl>;
+  /**
+   * Adds the project's chosen voice to an EDL, or returns null when the
+   * project keeps the voice on its recording. Injectable for tests.
+   */
+  narrate?: (job: Job, edl: Edl) => Promise<{ edl: Edl; report: NarrationReport } | null>;
   /** Where intermediates live. Defaults to the system temp directory. */
   scratchRoot?: string;
   ffmpegBinary?: string;
@@ -72,7 +78,8 @@ async function stage(edl: Edl, dir: string): Promise<{ sourcePath: string; audio
 
   const audioPaths: string[] = [];
   for (const [i, track] of edl.audio.entries()) {
-    const target = path.join(dir, `audio-${i}.bin`);
+    // Named for what it is, for the same reason as the source above.
+    const target = path.join(dir, `audio-${i}${extensionOf(track.url) || ".bin"}`);
     await writeFile(target, await fetchBytes(track.url));
     audioPaths.push(target);
   }
@@ -372,7 +379,9 @@ export async function processOne(options: RenderWorkerOptions): Promise<RenderOu
 
   let dir: string | null = null;
   try {
-    const edl = await (options.resolveEdl ?? defaultResolveEdl)(job);
+    let edl = await (options.resolveEdl ?? defaultResolveEdl)(job);
+    const narrated = await (options.narrate ?? defaultNarrate)(job, edl);
+    if (narrated) edl = narrated.edl;
     await assertVoicesUsable(edl);
     await assertQuota(job);
 
@@ -406,6 +415,9 @@ export async function processOne(options: RenderWorkerOptions): Promise<RenderOu
     await complete(job.id, options.workerId, {
       video: { status: "ready", url: signed.url, key: `${key.workspaceId}/${key.path}` },
       ...(guide ? { guide } : {}),
+      // Which voice spoke, and how each chapter's reading was fitted to its
+      // footage. The export dialog reads this to say where a chapter ran long.
+      ...(narrated ? { narration: narrated.report } : {}),
       // Seconds, not minutes: metering in minutes means rounding, and
       // rounding in our favour on every render is a choice, not an accident.
       billedSeconds: result.durationSec,
@@ -481,7 +493,9 @@ export async function processOne(options: RenderWorkerOptions): Promise<RenderOu
     // attempts immediately rather than letting backoff repeat a certain
     // failure for the next twenty minutes.
     const permanent = error instanceof ProviderError && !error.retryable;
-    const outcome = await fail(job.id, options.workerId, permanent ? `permanent: ${message}` : message);
+    const outcome = await fail(job.id, options.workerId, permanent ? `permanent: ${message}` : message, {
+      permanent,
+    });
     // Announce a failure only once the queue has stopped retrying it. A
     // customer does not want three "render failed" alerts for one render
     // that eventually succeeded on the third attempt.
@@ -525,6 +539,40 @@ async function announce(
   } catch (error) {
     console.error(`[render] could not queue ${type} for ${job.id}:`, error);
   }
+}
+
+/**
+ * Narrates the job's project in its chosen voice, when it has one.
+ *
+ * Reads the project through the repository, like `defaultResolveEdl`. A job
+ * that carries only an EDL and no project — the worker's own tests, a
+ * re-render from a stored EDL — has no voice choice to honour and keeps the
+ * recording's audio.
+ */
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+async function defaultNarrate(job: Job, edl: Edl) {
+  const payload = job.payload as { projectId?: string };
+  // A job whose project id is not one of ours — a test's "prj_1", a
+  // pre-computed EDL from elsewhere — has no stored voice choice to read.
+  if (!payload.projectId || !UUID.test(payload.projectId)) return null;
+
+  const { isDatabaseConfigured } = await import("@/lib/db/client");
+  if (!isDatabaseConfigured()) return null;
+
+  const { getProjectById } = await import("@/lib/db/repositories/projects");
+  const project = await getProjectById(job.workspaceId, payload.projectId);
+  if (!project?.voiceId) return null;
+
+  const { getVoice } = await import("@/lib/db/repositories/voices");
+  const { getProviders } = await import("@/lib/providers");
+  return narrate({
+    edl,
+    project,
+    workspaceId: job.workspaceId,
+    synthesis: getProviders().synthesis,
+    lookupVoice: getVoice,
+  });
 }
 
 /**

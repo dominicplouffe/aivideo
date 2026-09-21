@@ -147,22 +147,105 @@ test("elevenlabs derives exact duration from the PCM byte count", async () => {
   const { adapter, writes } = recordingStorage();
   setStorage(adapter);
 
-  // One second of 16-bit mono at 44.1 kHz.
-  const oneSecond = new Uint8Array(44100 * 2);
+  // One second of 16-bit mono at the default 24 kHz.
+  const oneSecond = new Uint8Array(24000 * 2);
   const provider = new ElevenLabsSynthesis({
     apiKey: "k",
-    workspaceId: WORKSPACE,
     fetchImpl: async () => new Response(oneSecond, { status: 200 }),
   });
 
-  const result = await provider.synthesize({ text: "Click here.", voiceId: "v1", locale: "en-US" });
+  const result = await provider.synthesize({
+    text: "Click here.",
+    voiceId: "v1",
+    locale: "en-US",
+    workspaceId: WORKSPACE,
+  });
 
   assert.equal(result.durationSec, 1);
-  assert.equal(result.sampleRate, 44100);
+  assert.equal(result.sampleRate, 24000);
   assert.equal(result.audioUrl.startsWith("signed://synthesis/v1/"), true);
+  // The worker's reference: under the requesting tenant, and never expiring.
+  assert.equal(result.storageUrl?.startsWith(`storage://${WORKSPACE}/synthesis/v1/`), true);
+  assert.equal(result.storageUrl?.endsWith(".wav"), true);
   assert.equal(writes.length, 1);
-  assert.equal(writes[0].contentType, "audio/L16;rate=44100");
+  // Stored as WAV: a 44-byte header in front of the PCM, so ffmpeg can read it.
+  assert.equal(writes[0].contentType, "audio/wav");
+  assert.equal(writes[0].bytes, 44 + oneSecond.byteLength);
   setStorage(null);
+});
+
+test("elevenlabs falls back to the format every plan has when a higher one is refused", async () => {
+  const { adapter } = recordingStorage();
+  setStorage(adapter);
+  const formats: string[] = [];
+  const provider = new ElevenLabsSynthesis({
+    apiKey: "k",
+    outputFormat: "pcm_44100",
+    fetchImpl: async (url) => {
+      const format = new URL(String(url)).searchParams.get("output_format") ?? "";
+      formats.push(format);
+      if (format === "pcm_44100") {
+        return new Response(
+          JSON.stringify({ detail: { status: "output_format_not_allowed", message: "Output format 'pcm_44100' is only available on the Pro tier and above." } }),
+          { status: 403 },
+        );
+      }
+      return new Response(new Uint8Array(24000 * 2), { status: 200 });
+    },
+  });
+  const result = await provider.synthesize({ text: "Hi.", voiceId: "v1", locale: "en-US", workspaceId: WORKSPACE });
+  assert.deepEqual(formats, ["pcm_44100", "pcm_24000"]);
+  assert.equal(result.sampleRate, 24000);
+  assert.equal(result.durationSec, 1);
+  setStorage(null);
+});
+
+test("elevenlabs does not buy a clip it has already stored", async () => {
+  const { adapter, writes } = recordingStorage();
+  let vendorCalls = 0;
+  const stored = new Map<string, number>();
+  // A storage that remembers what was put, so the second call can find it.
+  adapter.put = async (key, body, contentType) => {
+    stored.set(key.path, body.byteLength);
+    writes.push({ key: `${key.workspaceId}/${key.path}`, bytes: body.byteLength, contentType });
+    return { key: key.path, bytes: body.byteLength, contentType, createdAt: new Date() };
+  };
+  adapter.head = async (key) => {
+    const bytes = stored.get(key.path);
+    return bytes === undefined ? null : { key: key.path, bytes, contentType: "audio/wav", createdAt: new Date() };
+  };
+  setStorage(adapter);
+
+  const provider = new ElevenLabsSynthesis({
+    apiKey: "k",
+    fetchImpl: async () => {
+      vendorCalls += 1;
+      return new Response(new Uint8Array(44100 * 2), { status: 200 });
+    },
+  });
+  const request = { text: "Click here.", voiceId: "v1", locale: "en-US", workspaceId: WORKSPACE };
+
+  const first = await provider.synthesize(request);
+  const again = await provider.synthesize(request);
+  assert.equal(vendorCalls, 1);
+  assert.equal(again.durationSec, first.durationSec);
+  assert.equal(again.storageUrl, first.storageUrl);
+
+  // A different pace is a different clip.
+  await provider.synthesize({ ...request, direction: { pace: 1.1 } });
+  assert.equal(vendorCalls, 2);
+  setStorage(null);
+});
+
+test("elevenlabs refuses to store audio under no tenant", async () => {
+  const provider = new ElevenLabsSynthesis({
+    apiKey: "k",
+    fetchImpl: async () => new Response(new Uint8Array(1024), { status: 200 }),
+  });
+  await assert.rejects(
+    () => provider.synthesize({ text: "x", voiceId: "v1", locale: "en-US", workspaceId: "" }),
+    (error: unknown) => error instanceof ProviderError && !error.retryable,
+  );
 });
 
 test("elevenlabs applies the direction the vendor can honour", async () => {
@@ -172,7 +255,6 @@ test("elevenlabs applies the direction the vendor can honour", async () => {
   let sent: Record<string, unknown> = {};
   const provider = new ElevenLabsSynthesis({
     apiKey: "k",
-    workspaceId: WORKSPACE,
     fetchImpl: async (_url, init) => {
       sent = JSON.parse(String(init?.body)) as Record<string, unknown>;
       return new Response(new Uint8Array(1024), { status: 200 });
@@ -183,6 +265,7 @@ test("elevenlabs applies the direction the vendor can honour", async () => {
     text: "Open the Brand Kit and press save.",
     voiceId: "v1",
     locale: "pt-BR",
+    workspaceId: WORKSPACE,
     direction: { pace: 4, pauseAfterMs: 900 },
     pronunciations: { save: "sayve" },
   });
@@ -198,7 +281,6 @@ test("elevenlabs refuses to clone a voice without a consent recording", async ()
   let vendorCalled = false;
   const provider = new ElevenLabsSynthesis({
     apiKey: "k",
-    workspaceId: WORKSPACE,
     fetchImpl: async () => {
       vendorCalled = true;
       return jsonResponse({ voice_id: "should-never-happen" });
@@ -218,7 +300,6 @@ test("elevenlabs submits both recordings when consent exists", async () => {
   let form: FormData | null = null;
   const provider = new ElevenLabsSynthesis({
     apiKey: "k",
-    workspaceId: WORKSPACE,
     fetchImpl: async (url, init) => {
       const href = String(url);
       seen.push(href);
@@ -244,11 +325,16 @@ test("elevenlabs submits both recordings when consent exists", async () => {
 test("elevenlabs maps vendor categories onto studio and clone voices", async () => {
   const provider = new ElevenLabsSynthesis({
     apiKey: "k",
-    workspaceId: WORKSPACE,
     fetchImpl: async () =>
       jsonResponse({
         voices: [
-          { voice_id: "a", name: "Avery", category: "premade", labels: { language: "en" } },
+          {
+            voice_id: "a",
+            name: "Avery",
+            category: "premade",
+            labels: { language: "en", accent: "american", description: "calm", use_case: "narration" },
+            preview_url: "https://cdn.example/a.mp3",
+          },
           { voice_id: "b", name: "Renata", category: "cloned", fine_tuning: { language: "pt" } },
         ],
       }),
@@ -256,7 +342,15 @@ test("elevenlabs maps vendor categories onto studio and clone voices", async () 
 
   const voices = await provider.listVoices();
   assert.deepEqual(voices, [
-    { id: "a", name: "Avery", locale: "en", kind: "studio" },
+    {
+      id: "a",
+      name: "Avery",
+      locale: "en",
+      kind: "studio",
+      descriptor: "calm, narration",
+      accent: "american",
+      previewUrl: "https://cdn.example/a.mp3",
+    },
     { id: "b", name: "Renata", locale: "pt", kind: "clone" },
   ]);
 });

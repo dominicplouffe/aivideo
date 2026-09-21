@@ -82,6 +82,19 @@ describe("job queue", { skip: RUN ? false : "DATABASE_URL not set" }, () => {
     assert.equal(won.length, 1, "exactly one worker may hold the job");
   });
 
+  it("dead-letters a permanent failure at once instead of retrying it", async () => {
+    const { job } = await enqueue({ workspaceId: WS, kind: "render", payload: {}, maxAttempts: 3 });
+    const claimed = await claim("w1", ["render"]);
+    assert.equal(claimed?.id, job.id);
+
+    const outcome = await fail(job.id, "w1", "the vendor rejected the request", { permanent: true });
+    assert.equal(outcome.status, "dead");
+    assert.equal(outcome.retryAt, null);
+    // Nothing left for a worker to pick up: the failure was certain.
+    assert.equal((await getJob(job.id))?.status, "dead");
+    assert.equal(await claim("w2", ["render"]), null);
+  });
+
   it("hands different jobs to different workers rather than blocking", async () => {
     for (let i = 0; i < 5; i++) {
       await enqueue({ workspaceId: WS, kind: RENDER, payload: { n: i } });

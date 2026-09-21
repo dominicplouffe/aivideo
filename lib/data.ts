@@ -641,43 +641,16 @@ export async function getIdentifiedAccounts(days = 30): Promise<IdentifiedAccoun
   }
 }
 
-/* --------------------------------------------------------------- voices */
-
-export interface VoiceSummary {
-  id: string;
-  name: string;
-  kind: "studio" | "clone";
-  consentRecordedAt: string | null;
-  revokedAt: string | null;
-}
+/* ---------------------------------------------------------- permissions */
 
 /**
- * The workspace's voices.
- *
- * The voices page rendered a four-voice fixture — Ava, Marcus, Yuki and a
- * clone with a recorded consent date — as a "studio library licensed for
- * unlimited commercial use, worldwide". None of them existed, none could be
- * rendered with, and the clone's consent record described a person who does
- * not exist. What a workspace actually has is what is in this table.
+ * Whether the signed-in person holds a permission. For pages that decide
+ * what to offer — a button that would only ever answer 403 is a button that
+ * should not be drawn.
  */
-export async function getVoices(): Promise<VoiceSummary[]> {
-  const { allowed: may, actor } = await guard("project.view");
-  if (!may || !actor || !isDatabaseConfigured()) return [];
-
-  try {
-    const { listVoicesForWorkspace } = await import("@/lib/db/repositories/voices");
-    const rows = await listVoicesForWorkspace(actor.workspaceId);
-    return rows.map((v) => ({
-      id: v.id,
-      name: v.name,
-      kind: v.kind,
-      consentRecordedAt: v.consentRecordedAt?.toISOString() ?? null,
-      revokedAt: v.revokedAt?.toISOString() ?? null,
-    }));
-  } catch (error) {
-    console.error("[data] voice read failed:", error);
-    return [];
-  }
+export async function viewerMay(permission: Permission): Promise<boolean> {
+  const { allowed: may, actor } = await guard(permission);
+  return may && actor !== null;
 }
 
 /* ----------------------------------------------------------- brand kits */

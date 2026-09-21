@@ -97,6 +97,7 @@ export async function POST(request: Request) {
       sourceUrl: `storage://${actor.workspaceId}/${mediaKeyFor(recording)}`,
       removeFillers: state.removeFillers,
       deletedSegments: state.deletedSegments,
+      cutWords: state.cutWords,
       captions: state.captions,
       zoomEnabled: state.zoomEnabled,
       resolution: (body.video?.resolution as "1080p") ?? "1080p",
@@ -144,6 +145,7 @@ export async function GET(request: Request) {
       progress: job.progress,
       minutes_billed: job.minutesBilled,
       outputs: job.outputs,
+      narration: job.narration ?? null,
     });
   } catch {
     return NextResponse.json({ error: "Unknown render job." }, { status: 404 });

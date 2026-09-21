@@ -48,21 +48,43 @@ export interface SynthesisRequest {
   text: string;
   voiceId: string;
   locale: string;
+  /** Whose audio this is. Synthesized clips are stored under this tenant. */
+  workspaceId: string;
   /** Per-span direction: pace, emphasis and pauses. */
   direction?: { pace?: number; emphasis?: string[]; pauseAfterMs?: number };
   pronunciations?: Record<string, string>;
 }
 
 export interface SynthesisResult {
+  /** A signed read URL, for playing the clip back in a browser. It expires. */
   audioUrl: string;
+  /**
+   * `storage://<workspaceId>/<path>`, for the render worker. It does not
+   * expire, which matters: a render queued behind a backlog must not fetch
+   * a link that died while it waited.
+   */
+  storageUrl?: string;
   durationSec: number;
   sampleRate: number;
+}
+
+/** A voice as the vendor describes it. */
+export interface CatalogueVoice {
+  id: string;
+  name: string;
+  locale: string;
+  kind: "studio" | "clone";
+  /** The vendor's one-line character note, e.g. "calm, narration". */
+  descriptor?: string;
+  accent?: string;
+  /** A short sample hosted by the vendor. */
+  previewUrl?: string;
 }
 
 export interface SynthesisProvider {
   readonly name: string;
   synthesize(req: SynthesisRequest): Promise<SynthesisResult>;
-  listVoices(): Promise<{ id: string; name: string; locale: string; kind: "studio" | "clone" }[]>;
+  listVoices(): Promise<CatalogueVoice[]>;
   cloneVoice(input: { sampleUrl: string; consentPhraseUrl: string; ownerId: string }): Promise<{ voiceId: string }>;
 }
 
@@ -171,6 +193,8 @@ export interface RenderJob {
   progress: number;
   minutesBilled: number;
   outputs: Partial<Record<RenderOutput, { status: string; url?: string }>>;
+  /** Present when the render was narrated in a chosen voice. Shape: lib/render/narration.ts. */
+  narration?: unknown;
   error?: string;
 }
 

@@ -12,7 +12,10 @@ import type { SynthesisProvider, SynthesisRequest, SynthesisResult } from "./typ
  * synthesized span to place it on the timeline, and duration is the one thing
  * a compressed stream will not tell you without decoding it. PCM is a
  * division: bytes / (rate x 2). Shipping a decoder to recover a number the
- * format could have given us for free is not a trade worth making.
+ * format could have given us for free is not a trade worth making. The bytes
+ * are stored inside a WAV header, though: raw PCM has no way to say what it
+ * is, and ffmpeg handed a headerless file guesses a container and fails.
+ * Forty-four bytes of header cost nothing and make the clip self-describing.
  *
  * **Cloning refuses without consent.** The database already enforces this —
  * `voices_clone_requires_consent` rejects a clone row with no consent record —
@@ -23,10 +26,13 @@ import type { SynthesisProvider, SynthesisRequest, SynthesisResult } from "./typ
 
 export interface ElevenLabsConfig {
   apiKey: string;
-  /** Storage tenant for synthesized audio. */
-  workspaceId: string;
   model?: string;
-  /** PCM only — see the note above. */
+  /**
+   * PCM only — see the note above. 24 kHz by default: the vendor offers it
+   * on every plan, where 44.1 kHz needs a Pro subscription, and speech at
+   * 24 kHz is indistinguishable from 44.1 in a video mix. A higher format
+   * the plan refuses falls back to 24 kHz rather than failing the render.
+   */
   outputFormat?: "pcm_16000" | "pcm_22050" | "pcm_24000" | "pcm_44100";
   baseUrl?: string;
   timeoutMs?: number;
@@ -41,10 +47,50 @@ interface ElevenLabsVoice {
   category?: string;
   labels?: Record<string, string>;
   fine_tuning?: { language?: string };
+  preview_url?: string;
 }
 
 /** PCM from ElevenLabs is 16-bit mono, so two bytes carry one sample. */
 const BYTES_PER_SAMPLE = 2;
+/** The canonical header `wrapPcmInWav` writes. */
+const WAV_HEADER_BYTES = 44;
+/** Offered on every ElevenLabs plan. See `ElevenLabsConfig.outputFormat`. */
+const DEFAULT_FORMAT = "pcm_24000" as const;
+
+/** The vendor's "that output format is not on your plan" answer. */
+function isFormatRefusal(error: unknown): boolean {
+  return (
+    error instanceof ProviderError &&
+    error.detail.status === 403 &&
+    /output_format_not_allowed|only available on the/i.test(error.message)
+  );
+}
+
+/** Wraps 16-bit mono PCM in a canonical 44-byte WAV header. */
+export function wrapPcmInWav(pcm: Uint8Array, sampleRate: number): Uint8Array {
+  const channels = 1;
+  const blockAlign = channels * BYTES_PER_SAMPLE;
+  const out = new Uint8Array(WAV_HEADER_BYTES + pcm.byteLength);
+  const view = new DataView(out.buffer);
+  const ascii = (offset: number, text: string) => {
+    for (let i = 0; i < text.length; i++) out[offset + i] = text.charCodeAt(i);
+  };
+  ascii(0, "RIFF");
+  view.setUint32(4, 36 + pcm.byteLength, true);
+  ascii(8, "WAVE");
+  ascii(12, "fmt ");
+  view.setUint32(16, 16, true); // PCM format chunk size
+  view.setUint16(20, 1, true); // linear PCM
+  view.setUint16(22, channels, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * blockAlign, true);
+  view.setUint16(32, blockAlign, true);
+  view.setUint16(34, BYTES_PER_SAMPLE * 8, true);
+  ascii(36, "data");
+  view.setUint32(40, pcm.byteLength, true);
+  out.set(pcm, WAV_HEADER_BYTES);
+  return out;
+}
 
 function sampleRateOf(format: string): number {
   const rate = Number(format.split("_")[1]);
@@ -93,9 +139,6 @@ export class ElevenLabsSynthesis implements SynthesisProvider {
     if (!config.apiKey) {
       throw new Error("ElevenLabsSynthesis requires an API key (ELEVENLABS_API_KEY).");
     }
-    if (!config.workspaceId) {
-      throw new Error("ElevenLabsSynthesis requires a workspace id to scope stored audio.");
-    }
   }
 
   private get base() {
@@ -143,9 +186,58 @@ export class ElevenLabsSynthesis implements SynthesisProvider {
   }
 
   async synthesize(req: SynthesisRequest): Promise<SynthesisResult> {
-    const format = this.config.outputFormat ?? "pcm_44100";
+    if (!req.workspaceId) {
+      // Refused rather than defaulted: a clip stored under no tenant is a
+      // clip nobody can be billed for and nobody can be sure to delete.
+      throw new ProviderError("Synthesis needs the workspace the audio belongs to.", {
+        provider: this.name,
+        retryable: false,
+      });
+    }
+    const format = this.config.outputFormat ?? DEFAULT_FORMAT;
+    try {
+      return await this.synthesizeAs(req, format);
+    } catch (error) {
+      // The plan does not include the configured format. The clip is worth
+      // more than the sample rate, so take the one every plan has.
+      if (format !== DEFAULT_FORMAT && isFormatRefusal(error)) {
+        return this.synthesizeAs(req, DEFAULT_FORMAT);
+      }
+      throw error;
+    }
+  }
+
+  private async synthesizeAs(
+    req: SynthesisRequest,
+    format: NonNullable<ElevenLabsConfig["outputFormat"]>,
+  ): Promise<SynthesisResult> {
     const sampleRate = sampleRateOf(format);
     const text = applyDirection(req);
+    const pace = req.direction?.pace ? Math.min(1.2, Math.max(0.7, req.direction.pace)) : 1;
+
+    // Content-addressed: the same words in the same voice at the same pace
+    // are the same clip. Re-rendering an unchanged chapter, or previewing a
+    // voice twice, reads the clip already stored instead of buying it again.
+    const digest = createHash("sha256")
+      .update(`${req.voiceId}\u0000${req.locale}\u0000${format}\u0000${pace}\u0000${text}`)
+      .digest("hex")
+      .slice(0, 32);
+    const key = {
+      workspaceId: req.workspaceId,
+      path: `synthesis/${req.voiceId}/${digest}.wav`,
+    };
+    const storage = getStorage();
+
+    const cached = await storage.head(key).catch(() => null);
+    if (cached && cached.bytes > WAV_HEADER_BYTES) {
+      const signed = await storage.signedReadUrl(key, this.config.signedUrlTtlSec ?? 3600);
+      return {
+        audioUrl: signed.url,
+        storageUrl: `storage://${key.workspaceId}/${key.path}`,
+        durationSec: (cached.bytes - WAV_HEADER_BYTES) / (sampleRate * BYTES_PER_SAMPLE),
+        sampleRate,
+      };
+    }
 
     const voiceSettings: Record<string, unknown> = {
       stability: 0.45,
@@ -155,7 +247,7 @@ export class ElevenLabsSynthesis implements SynthesisProvider {
     if (req.direction?.pace) {
       // The vendor accepts 0.7 to 1.2; anything outside that is refused, so
       // clamp rather than let a slider in the UI fail the render.
-      voiceSettings.speed = Math.min(1.2, Math.max(0.7, req.direction.pace));
+      voiceSettings.speed = pace;
     }
 
     const body = {
@@ -182,23 +274,12 @@ export class ElevenLabsSynthesis implements SynthesisProvider {
       });
     }
 
-    // Content-addressed: re-synthesizing an unchanged span overwrites the
-    // same object instead of littering storage with identical clips.
-    const digest = createHash("sha256")
-      .update(`${req.voiceId}\u0000${req.locale}\u0000${format}\u0000${text}`)
-      .digest("hex")
-      .slice(0, 32);
-    const key = {
-      workspaceId: this.config.workspaceId,
-      path: `synthesis/${req.voiceId}/${digest}.pcm`,
-    };
-
-    const storage = getStorage();
-    await storage.put(key, audio, `audio/L16;rate=${sampleRate}`);
+    await storage.put(key, wrapPcmInWav(audio, sampleRate), "audio/wav");
     const signed = await storage.signedReadUrl(key, this.config.signedUrlTtlSec ?? 3600);
 
     return {
       audioUrl: signed.url,
+      storageUrl: `storage://${key.workspaceId}/${key.path}`,
       durationSec: audio.byteLength / (sampleRate * BYTES_PER_SAMPLE),
       sampleRate,
     };
@@ -211,16 +292,27 @@ export class ElevenLabsSynthesis implements SynthesisProvider {
     });
     const payload = (await response.json()) as { voices?: ElevenLabsVoice[] };
 
-    return (payload.voices ?? []).map((voice) => ({
-      id: voice.voice_id,
-      name: voice.name,
-      locale: voice.fine_tuning?.language ?? voice.labels?.language ?? "en",
-      // "premade" voices are licensed by the vendor; everything else was made
-      // from somebody's recording and carries a consent obligation.
-      kind: (voice.category === "premade" || voice.category === undefined
-        ? "studio"
-        : "clone") as "studio" | "clone",
-    }));
+    return (payload.voices ?? []).map((voice) => {
+      const labels = voice.labels ?? {};
+      // The vendor tags a voice with a few words each for description and
+      // use case; together they read as the one-line note a picker wants.
+      const descriptor = [labels.description, labels.use_case]
+        .filter((part): part is string => Boolean(part))
+        .join(", ");
+      return {
+        id: voice.voice_id,
+        name: voice.name,
+        locale: voice.fine_tuning?.language ?? labels.language ?? "en",
+        // "premade" voices are licensed by the vendor; everything else was made
+        // from somebody's recording and carries a consent obligation.
+        kind: (voice.category === "premade" || voice.category === undefined
+          ? "studio"
+          : "clone") as "studio" | "clone",
+        ...(descriptor ? { descriptor } : {}),
+        ...(labels.accent ? { accent: labels.accent } : {}),
+        ...(voice.preview_url ? { previewUrl: voice.preview_url } : {}),
+      };
+    });
   }
 
   async cloneVoice(input: { sampleUrl: string; consentPhraseUrl: string; ownerId: string }) {

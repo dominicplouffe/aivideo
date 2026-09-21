@@ -649,6 +649,13 @@ export const voices = pgTable(
     name: text("name").notNull(),
     descriptor: text("descriptor"),
     accent: text("accent"),
+    // The vendor's own sample of the voice, so a person can hear it before
+    // choosing it without paying for a synthesis call.
+    previewUrl: text("preview_url"),
+    // False once the vendor stops offering a studio voice. The row stays
+    // while a project points at it, so that project's choice is visible
+    // and its render fails with a reason, but nothing new may choose it.
+    available: boolean("available").notNull().default(true),
     kind: voiceKindEnum("kind").notNull().default("studio"),
     // Consent is a property of the person, not the workspace. Revoking it
     // must stop future renders, so it is stored with the voice itself.

@@ -120,6 +120,20 @@
       "when": 1789995915452,
       "tag": "0016_authkit_organization",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1790021927049,
+      "tag": "0017_voice_preview",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1790022816758,
+      "tag": "0018_voice_available",
+      "breakpoints": true
     }
   ]
 }

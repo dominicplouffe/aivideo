@@ -1,5 +1,5 @@
 import type { TranscriptionResult } from "@/lib/providers/types";
-import { silentSpanSec } from "@/lib/segment-span";
+import { silentSpanSec } from "@/lib/segments";
 
 /**
  * Turns a word-level transcript into the chapters the Studio edits.

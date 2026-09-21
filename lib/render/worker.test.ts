@@ -10,8 +10,9 @@ import * as s from "@/lib/db/schema";
 import { eraseWorkspace } from "@/lib/db/erase";
 import { claim, enqueue, getJob } from "@/lib/jobs/queue";
 import { LocalStorage, setStorage } from "@/lib/storage";
+import { getProviders, setProviders } from "@/lib/providers";
 import { processOne } from "./worker";
-import { runFfmpeg } from "./ffmpeg";
+import { probe, runFfmpeg } from "./ffmpeg";
 import type { Edl } from "./edl";
 
 /**
@@ -160,6 +161,71 @@ describe("render worker", { skip: RUN ? false : "DATABASE_URL and ffmpeg are bot
 
     await db.delete(s.voices).where(eq(s.voices.workspaceId, WS));
     await db.delete(s.members).where(eq(s.members.workspaceId, WS));
+  });
+
+  it("narrates a project in its chosen voice and replaces the recording's audio", async () => {
+    const db = getDb();
+    const [voice] = await db.insert(s.voices).values({
+      workspaceId: WS, providerVoiceId: "el_test_studio", name: "Test Studio", kind: "studio",
+    }).returning();
+    const [project] = await db.insert(s.projects).values({
+      workspaceId: WS, slug: "narrated", title: "Narrated", status: "ready", voiceId: voice.id, sourceDurationSec: 12,
+    }).returning();
+    await db.insert(s.segments).values([
+      { projectId: project.id, ordinal: 0, title: "One", startSec: 0, endSec: 3,
+        words: [{ w: "Hello", t: 0, d: 1.5 }, { w: "there.", t: 1.5, d: 1.5 }] },
+      { projectId: project.id, ordinal: 1, title: "Two", startSec: 6, endSec: 9,
+        words: [{ w: "Then", t: 6, d: 1.5 }, { w: "save.", t: 7.5, d: 1.5 }] },
+    ]);
+
+    // A synthesizer that hands back one second of tone per request, so the
+    // render has real audio to mix without a vendor in the loop.
+    const clip = path.join(dir, "narration.wav");
+    await runFfmpeg(["-y", "-f", "lavfi", "-i", "sine=frequency=440:duration=1", "-ar", "44100", "-ac", "1", clip]);
+    const spoken: string[] = [];
+    setProviders({
+      ...getProviders(),
+      synthesis: {
+        name: "stub-synthesis",
+        async synthesize(req) {
+          spoken.push(req.text);
+          return { audioUrl: `file://${clip}`, storageUrl: `file://${clip}`, durationSec: 1, sampleRate: 44100 };
+        },
+        async listVoices() { return []; },
+        async cloneVoice() { throw new Error("not used"); },
+      },
+    });
+
+    try {
+      const sourcePath = await sourceVideo();
+      const { job } = await enqueue({
+        workspaceId: WS,
+        kind: "render",
+        payload: { projectId: project.id, sourceUrl: `file://${sourcePath}`, outputs: ["video"] },
+      });
+      const outcome = await processOne({ workerId: "w1", scratchRoot: dir });
+      assert.equal(outcome?.status, "completed", outcome?.error);
+
+      // One reading per chapter, from its words.
+      assert.deepEqual(spoken, ["Hello there.", "Then save."]);
+
+      const stored = await getJob(job.id);
+      const result = stored?.result as { narration?: { voice: { name: string }; chapters: unknown[] } };
+      assert.equal(result.narration?.voice.name, "Test Studio");
+      assert.equal(result.narration?.chapters.length, 2);
+
+      // The source had no audio at all; the finished file speaks.
+      const bytes = await new LocalStorage(path.join(dir, "storage"), "test-secret").get({
+        workspaceId: WS, path: `renders/${job.id}/render.mp4`,
+      });
+      const rendered = path.join(dir, "narrated.mp4");
+      await import("node:fs/promises").then((fs) => fs.writeFile(rendered, bytes));
+      assert.equal((await probe(rendered)).hasAudio, true);
+    } finally {
+      setProviders(null);
+      await db.delete(s.projects).where(eq(s.projects.workspaceId, WS));
+      await db.delete(s.voices).where(eq(s.voices.workspaceId, WS));
+    }
   });
 
   it("announces a completed render when the submitter asked for one", async () => {

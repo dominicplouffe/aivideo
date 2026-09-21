@@ -82,6 +82,12 @@ export interface Project {
    * never finished uploading is a 404 per thumbnail.
    */
   hasMedia?: boolean;
+  /**
+   * The voice that narrates renders of this project, or null for the voice
+   * on the recording. `voice` above is that voice's display label; this is
+   * the id the picker and the renderer work with.
+   */
+  voiceId?: string | null;
   /** The Studio's saved decisions. Absent means "nobody has edited this yet". */
   editState?: Record<string, unknown> | null;
 }

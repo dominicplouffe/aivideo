@@ -1,5 +1,5 @@
 import type { Project, Segment } from "@/lib/app-data";
-import { silentSpanSec } from "@/lib/segment-span";
+import { silentSpanSec, wordKey } from "@/lib/segments";
 import type { MaskedRegion } from "@/lib/providers/types";
 
 /**
@@ -70,6 +70,13 @@ export interface EdlAudio {
   at: number;
   durationSec: number;
   gainDb: number;
+  /**
+   * Playback speed applied in the mix, 1 being as synthesized. Narration
+   * that runs longer than the footage it describes is fitted first by the
+   * vendor's own pacing and then, within a narrow range, by this — so a
+   * chapter's voice ends before the next chapter's begins.
+   */
+  tempo?: number;
   /** Narration ducks music by this much while it plays. */
   ducksBy?: number;
   /**
@@ -179,6 +186,7 @@ interface SourceWord {
   end: number;
   cut: boolean;
   segIndex: number;
+  wordIndex: number;
 }
 
 function sourceWords(segments: Segment[]): SourceWord[] {
@@ -188,15 +196,15 @@ function sourceWords(segments: Segment[]): SourceWord[] {
       // Silent footage plays as recorded; see `silentSpanSec`. One range,
       // no text: it becomes a clip and never a caption.
       if (silentSpanSec(seg) > 0) {
-        out.push({ text: "", start: seg.start, end: seg.end, cut: false, segIndex });
+        out.push({ text: "", start: seg.start, end: seg.end, cut: false, segIndex, wordIndex: 0 });
       }
       return;
     }
     let t = seg.start;
-    for (const word of seg.words) {
-      out.push({ text: word.w, start: t, end: t + word.d, cut: Boolean(word.cut), segIndex });
+    seg.words.forEach((word, wordIndex) => {
+      out.push({ text: word.w, start: t, end: t + word.d, cut: Boolean(word.cut), segIndex, wordIndex });
       t += word.d;
-    }
+    });
   });
   return out;
 }
@@ -207,6 +215,8 @@ export interface BuildEdlInput {
   locale?: string;
   removeFillers?: boolean;
   deletedSegments?: Set<number>;
+  /** Words cut by hand, keyed with `wordKey`. */
+  cutWords?: Set<string>;
   captions?: boolean;
   zoomEnabled?: boolean;
   /** Regions from the masking provider, in source time. */
@@ -241,6 +251,7 @@ export function buildEdl(input: BuildEdlInput): Edl {
     locale = project.locales[0] ?? "en-US",
     removeFillers = true,
     deletedSegments = new Set<number>(),
+    cutWords = new Set<string>(),
     captions = true,
     zoomEnabled = true,
     resolution = "1080p",
@@ -248,7 +259,12 @@ export function buildEdl(input: BuildEdlInput): Edl {
   } = input;
 
   const words = sourceWords(project.segments);
-  const kept = words.filter((w) => !deletedSegments.has(w.segIndex) && !(removeFillers && w.cut));
+  const kept = words.filter(
+    (w) =>
+      !deletedSegments.has(w.segIndex) &&
+      !(removeFillers && w.cut) &&
+      !cutWords.has(wordKey(w.segIndex, w.wordIndex)),
+  );
 
   // Merge adjacent survivors. A gap opens a new clip; so does a segment
   // boundary, so captions and narration can be anchored per segment.
@@ -342,21 +358,15 @@ export function buildEdl(input: BuildEdlInput): Edl {
     flush();
   }
 
-  // Narration lands where its segment begins on the finished timeline.
-  const audio: EdlAudio[] = [];
-  for (const clip of input.narration ?? []) {
-    const seg = project.segments[clip.segIndex];
-    const first = seg ? clips.find((c) => c.label === seg.id) : undefined;
-    if (!first) continue;
-    audio.push({
-      kind: "narration",
+  const audio: EdlAudio[] = narrationTracks(
+    clips,
+    (input.narration ?? []).map((clip) => ({
+      segmentId: project.segments[clip.segIndex]?.id ?? "",
       url: clip.url,
-      at: first.outputStart,
       durationSec: clip.durationSec,
-      gainDb: 0,
-      voiceId: clip.voiceId ?? project.voice,
-    });
-  }
+      voiceId: clip.voiceId ?? project.voiceId ?? undefined,
+    })),
+  );
   if (input.musicUrl) {
     audio.push({
       kind: "music",
@@ -401,6 +411,55 @@ export function buildEdl(input: BuildEdlInput): Edl {
     },
     durationSec,
   };
+}
+
+/** A synthesized reading of one chapter, ready to be placed on the timeline. */
+export interface NarrationClip {
+  segmentId: string;
+  url: string;
+  durationSec: number;
+  voiceId?: string;
+  tempo?: number;
+}
+
+/**
+ * Narration lands where its chapter begins on the finished timeline.
+ *
+ * One home for that rule, used both when an EDL is first built and when a
+ * worker adds narration to an EDL it was handed. A chapter the edit removed
+ * has no surviving clip and gets no narration: there is nothing on screen
+ * for the voice to describe.
+ */
+export function narrationTracks(clips: EdlClip[], narration: NarrationClip[]): EdlAudio[] {
+  const audio: EdlAudio[] = [];
+  for (const clip of narration) {
+    const first = clips.find((c) => c.label === clip.segmentId);
+    if (!first) continue;
+    audio.push({
+      kind: "narration",
+      url: clip.url,
+      at: first.outputStart,
+      durationSec: clip.durationSec,
+      gainDb: 0,
+      ...(clip.voiceId ? { voiceId: clip.voiceId } : {}),
+      ...(clip.tempo && clip.tempo !== 1 ? { tempo: clip.tempo } : {}),
+    });
+  }
+  return audio;
+}
+
+/** The same EDL with narration added, ahead of any music so the mix ducks it. */
+export function withNarration(edl: Edl, narration: NarrationClip[]): Edl {
+  const music = edl.audio.filter((track) => track.kind === "music");
+  const existing = edl.audio.filter((track) => track.kind === "narration");
+  return { ...edl, audio: [...existing, ...narrationTracks(edl.clips, narration), ...music] };
+}
+
+/** How long a chapter's surviving footage runs on the finished timeline. */
+export function segmentOutputSeconds(edl: Edl, segmentId: string): number {
+  return edl.clips
+    .filter((clip) => clip.label === segmentId)
+    .reduce((total, clip) => total + (clip.sourceEnd - clip.sourceStart), 0);
 }
 
 /**
@@ -448,6 +507,12 @@ export function validateEdl(edl: Edl): string[] {
     if (zoom.at > edl.durationSec) problems.push(`Zoom at ${zoom.at}s is past the end.`);
     if (zoom.anchor.x < 0 || zoom.anchor.x > 1 || zoom.anchor.y < 0 || zoom.anchor.y > 1) {
       problems.push("Zoom anchor must be normalised to 0..1.");
+    }
+  }
+
+  for (const track of edl.audio) {
+    if (track.tempo !== undefined && (track.tempo < 0.5 || track.tempo > 2)) {
+      problems.push(`An audio track's tempo of ${track.tempo} is outside what the mix can apply.`);
     }
   }
 

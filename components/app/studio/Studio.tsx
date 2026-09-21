@@ -9,7 +9,7 @@ import { StatusPill } from "@/components/app/Shared";
 import type { Project } from "@/lib/app-data";
 import { Canvas, TimelineStrip } from "./Canvas";
 import { Transcript } from "./Transcript";
-import { Inspector } from "./Inspector";
+import { Inspector, type StudioVoice } from "./Inspector";
 import { ExportDialog } from "./ExportDialog";
 import {
   buildTimeline,
@@ -43,6 +43,24 @@ export function Studio({
   const [saved, setSaved] = useState<"idle" | "saving" | "saved" | "error">("idle");
   // A question pushed from the transcript's chips into the Riff panel.
   const [ask, setAsk] = useState<{ text: string; at: number } | null>(null);
+  // The voices this workspace may narrate with, and which one this project
+  // uses. Fetched here rather than in the Audio tab so the header can name
+  // the voice before that tab has ever been opened.
+  const [voices, setVoices] = useState<StudioVoice[]>([]);
+  const [voiceId, setVoiceId] = useState<string | null>(project.voiceId ?? null);
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/voices")
+      .then((r) => (r.ok ? r.json() : { data: [] }))
+      .then((body: { data?: StudioVoice[] }) => {
+        if (!cancelled) setVoices(body.data ?? []);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  const narrator = voiceId ? voices.find((v) => v.id === voiceId) ?? null : null;
   const raf = useRef<number | null>(null);
   const last = useRef<number>(0);
 
@@ -51,7 +69,8 @@ export function Studio({
   const active = useMemo(() => wordAt(timeline, time), [timeline, time]);
   const activeSegIndex = active?.segIndex ?? null;
   const activeSegment = activeSegIndex !== null ? project.segments[activeSegIndex] : null;
-  const inspected = selected !== null ? project.segments[selected] : activeSegment;
+  const inspectedIndex = selected ?? activeSegIndex;
+  const inspected = inspectedIndex !== null ? project.segments[inspectedIndex] : null;
 
   /* ---------------- playback loop ---------------- */
   useEffect(() => {
@@ -127,6 +146,38 @@ export function Studio({
     [],
   );
 
+  // Saved at once, not coalesced with the edit: it is one deliberate choice,
+  // and the person wants to know it took.
+  const chooseVoice = useCallback(
+    async (next: string | null) => {
+      const previous = voiceId;
+      setVoiceId(next);
+      setSaved("saving");
+      try {
+        const response = await fetch(`/api/projects/${project.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ voice_id: next }),
+        });
+        if (!response.ok) throw new Error();
+        setSaved("saved");
+      } catch {
+        setVoiceId(previous);
+        setSaved("error");
+      }
+    },
+    [project.id, voiceId],
+  );
+
+  const setWordsCut = useCallback((keys: string[], cut: boolean) => {
+    setState((s) => {
+      const next = new Set(s.cutWords);
+      for (const key of keys) cut ? next.add(key) : next.delete(key);
+      return { ...s, cutWords: next };
+    });
+    setDirty(true);
+  }, []);
+
   const seek = useCallback((t: number) => setTime(Math.max(0, Math.min(t, duration))), [duration]);
 
   /* ---------------- keyboard ---------------- */
@@ -181,6 +232,16 @@ export function Studio({
           <div className="flex items-center gap-2">
             <h1 className="truncate text-[0.9375rem] font-medium text-fg-strong">{project.title}</h1>
             <StatusPill status={project.status} />
+            {narrator ? (
+              // Said in the header, not only in a tab: a render of this
+              // project will not carry the voice on the recording.
+              // The same tokens as the Ready pill beside it: cyan-300 is
+              // remapped for the light theme, cyan-200 is not.
+              <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-cyan-500/35 bg-cyan-500/10 px-2 py-0.5 text-2xs font-medium text-cyan-300">
+                <Icon name="mic" className="size-3" strokeWidth={2} />
+                Narrated by {narrator.name}
+              </span>
+            ) : null}
           </div>
           <p className="flex items-center gap-2.5 text-2xs text-fg-faint">
             <span>{project.collection}</span>
@@ -277,6 +338,7 @@ export function Studio({
             onSeek={seek}
             onSelectSegment={setSelected}
             onToggleSegment={toggleSegment}
+            onCutWords={setWordsCut}
             onToggleFillers={() => patch({ removeFillers: !state.removeFillers })}
             onAsk={(text) => setAsk({ text, at: Date.now() })}
           />
@@ -311,8 +373,12 @@ export function Studio({
           <Inspector
             project={project}
             segment={inspected}
+            segmentIndex={inspectedIndex}
             state={state}
             onState={patch}
+            voices={voices}
+            voiceId={voiceId}
+            onVoice={(next) => void chooseVoice(next)}
             ask={ask}
             onAsked={() => setAsk(null)}
           />
@@ -331,6 +397,7 @@ export function Studio({
             onSeek={seek}
             onSelectSegment={setSelected}
             onToggleSegment={toggleSegment}
+            onCutWords={setWordsCut}
             onToggleFillers={() => patch({ removeFillers: !state.removeFillers })}
           />
         </div>
