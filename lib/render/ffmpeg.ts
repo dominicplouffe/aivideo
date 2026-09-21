@@ -65,6 +65,37 @@ export function buildCutFilters(edl: Edl): { filters: string[]; out: string } {
 }
 
 /**
+ * Cuts the source's own audio the same way the video was cut.
+ *
+ * This is the one that makes a person's voice come out the other end. The
+ * audio graph was built entirely around *synthesized* narration — tracks
+ * from the EDL, mixed and ducked — and when there were none it emitted
+ * `-an`, so a screen recording of somebody talking rendered silent. The
+ * recording had audio the whole way through; nothing ever asked for it.
+ *
+ * `asetpts=PTS-STARTPTS` is the audio counterpart of the video's `setpts`:
+ * without it the concatenated stream keeps the original timestamps and
+ * drifts out of sync by the length of everything that was removed.
+ */
+export function buildSourceAudioFilters(edl: Edl): { filters: string[]; out: string } {
+  const filters: string[] = [];
+  const labels: string[] = [];
+
+  edl.clips.forEach((clip, i) => {
+    const label = `sa${i}`;
+    filters.push(
+      `[0:a]atrim=start=${n(clip.sourceStart)}:end=${n(clip.sourceEnd)},asetpts=PTS-STARTPTS[${label}]`,
+    );
+    labels.push(`[${label}]`);
+  });
+
+  if (labels.length === 1) return { filters, out: "sa0" };
+
+  filters.push(`${labels.join("")}concat=n=${labels.length}:v=0:a=1[sacat]`);
+  return { filters, out: "sacat" };
+}
+
+/**
  * Builds the zoom expression for `zoompan`.
  *
  * A keyframe is a push in, a hold, and a release. Expressed as one nested
@@ -241,6 +272,13 @@ export interface CompileOptions {
   audioPaths?: string[];
   /** Where to write burned-in captions. Omit to skip them. */
   subtitlePath?: string;
+  /**
+   * Whether the source file actually carries an audio stream.
+   *
+   * A probed fact, not a guess: referencing `[0:a]` on a file that has none
+   * makes FFmpeg fail the whole graph, so this cannot default to true.
+   */
+  sourceHasAudio?: boolean;
   /** Overwrite an existing output. */
   overwrite?: boolean;
 }
@@ -248,6 +286,34 @@ export interface CompileOptions {
 /** Escapes a path for use inside a filter argument. */
 function escapeFilterPath(path: string): string {
   return path.replace(/\\/g, "\\\\").replace(/:/g, "\\:").replace(/'/g, "\\'");
+}
+
+/**
+ * The audio for an edit that has no synthesized narration.
+ *
+ * Source audio, cut to match the video, with any music bed ducked under it.
+ * Falls back to the existing music-only path when the source is silent, and
+ * to no audio at all when there is neither.
+ */
+function buildSourceAudioMix(
+  edl: Edl,
+  sourceHasAudio: boolean,
+): { filters: string[]; out: string | null } {
+  if (!sourceHasAudio) return buildAudioFilters(edl);
+
+  const source = buildSourceAudioFilters(edl);
+  const music = edl.audio.find((track) => track.kind === "music");
+  if (!music) return pad(source.filters, source.out, edl.durationSec);
+
+  const inputIndex = edl.audio.indexOf(music) + 1;
+  const filters = [
+    ...source.filters,
+    `[${inputIndex}:a]volume=${n(music.gainDb)}dB[mbed]`,
+    `[${source.out}]asplit=2[msc][msk]`,
+    `[mbed][msc]sidechaincompress=threshold=0.03:ratio=${n(Math.max(2, music.ducksBy ?? 8))}:attack=20:release=300[mduck]`,
+    `[msk][mduck]amix=inputs=2:normalize=0[smixed]`,
+  ];
+  return pad(filters, "smixed", edl.durationSec);
 }
 
 export function compile(edl: Edl, options: CompileOptions): FfmpegPlan {
@@ -286,7 +352,13 @@ export function compile(edl: Edl, options: CompileOptions): FfmpegPlan {
     current = "vburn";
   }
 
-  const audio = buildAudioFilters(edl);
+  // Narration replaces the original voice; that is the point of a studio
+  // voice. With no narration, the source's own audio is what the video is,
+  // and dropping it is how a walkthrough comes back silent.
+  const hasNarration = edl.audio.some((track) => track.kind !== "music");
+  const audio = hasNarration
+    ? buildAudioFilters(edl)
+    : buildSourceAudioMix(edl, Boolean(options.sourceHasAudio));
   filters.push(...audio.filters);
 
   const args: string[] = [];

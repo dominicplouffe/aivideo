@@ -57,7 +57,9 @@ const CREDENTIALS: Record<Capability, string[]> = {
   translation: ["ANTHROPIC_API_KEY"],
   masking: ["ANTHROPIC_API_KEY"],
   // Not a vendor: the durable queue, which needs somewhere to keep the jobs.
-  render: ["DATABASE_URL", "DEMORIFF_WORKSPACE_ID"],
+  // No workspace id: each request carries its own, so one deployment can
+  // serve more than one tenant.
+  render: ["DATABASE_URL"],
 };
 
 function missingFor(capability: Capability): string[] {

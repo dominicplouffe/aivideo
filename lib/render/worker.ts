@@ -53,9 +53,21 @@ export interface RenderOutcome {
   error?: string;
 }
 
+/**
+ * The file extension a URL implies.
+ *
+ * FFmpeg picks a demuxer partly from the filename, and a WebM written to
+ * `source.mp4` is a container mismatch it reports as a decode error twenty
+ * lines deep. Query strings are stripped first: `?sig=…` is not an extension.
+ */
+function extensionOf(url: string): string {
+  const withoutQuery = url.split(/[?#]/)[0];
+  return path.extname(withoutQuery);
+}
+
 /** Downloads an EDL's source and audio into the scratch directory. */
 async function stage(edl: Edl, dir: string): Promise<{ sourcePath: string; audioPaths: string[] }> {
-  const sourcePath = path.join(dir, "source" + (path.extname(new URL(edl.source.url, "file:///").pathname) || ".mp4"));
+  const sourcePath = path.join(dir, "source" + (extensionOf(edl.source.url) || ".mp4"));
   await writeFile(sourcePath, await fetchBytes(edl.source.url));
 
   const audioPaths: string[] = [];
@@ -71,6 +83,27 @@ async function stage(edl: Edl, dir: string): Promise<{ sourcePath: string; audio
 /** Reads a `file://`, `http(s)://` or storage-signed URL into memory. */
 async function fetchBytes(url: string): Promise<Uint8Array> {
   if (url.startsWith("file://")) return new Uint8Array(await readFile(new URL(url)));
+
+  // `storage://<workspaceId>/<path>` — the scheme for media that has no
+  // public URL and should not be given one. A recording lives behind a
+  // session cookie, and the worker already holds the storage credentials;
+  // making it round-trip through HTTP would mean publishing every customer's
+  // screen for the duration of a render.
+  if (url.startsWith("storage://")) {
+    const rest = url.slice("storage://".length);
+    const slash = rest.indexOf("/");
+    if (slash < 1 || slash === rest.length - 1) {
+      throw new ProviderError(`Malformed storage URL: ${url}`, {
+        provider: "render-worker",
+        retryable: false,
+      });
+    }
+    return getStorage().get({
+      workspaceId: rest.slice(0, slash),
+      path: rest.slice(slash + 1),
+    });
+  }
+
   const response = await fetch(url);
   if (!response.ok) {
     throw new ProviderError(`Could not fetch render input ${url}: ${response.status}.`, {
@@ -117,8 +150,18 @@ export async function renderEdl(
       await writeFile(subtitlePath, toSrt(edl), "utf8");
     }
 
+    // Probed, not assumed: the graph references `[0:a]` when the source has
+    // audio, and referencing it on a silent file fails the whole render.
+    const source = await probe(sourcePath, options.ffprobeBinary);
+
     const outputPath = path.join(dir, `render.${edl.output.container}`);
-    const plan = compile(edl, { sourcePath, outputPath, audioPaths, subtitlePath });
+    const plan = compile(edl, {
+      sourcePath,
+      outputPath,
+      audioPaths,
+      subtitlePath,
+      sourceHasAudio: source.hasAudio,
+    });
 
     await runFfmpeg(plan.args, {
       binary: options.ffmpegBinary,
@@ -133,6 +176,43 @@ export async function renderEdl(
   } catch (error) {
     await rm(dir, { recursive: true, force: true });
     throw error;
+  }
+}
+
+/**
+ * Files the finished video against its project.
+ *
+ * Best-effort on purpose. The video exists and is already in storage by the
+ * time this runs; failing the job here would tell a customer their render
+ * failed while holding the file it produced.
+ */
+async function recordAsset(job: Job, edl: Edl, storageKey: string): Promise<void> {
+  try {
+    const { isDatabaseConfigured } = await import("@/lib/db/client");
+    if (!isDatabaseConfigured()) return;
+
+    // The repository, not `lib/data`. The data access layer is `server-only`
+    // and authorizes against a signed-in actor; this process is neither in a
+    // React render nor acting for a person, and importing it here throws
+    // before it can do anything useful.
+    const { getProjectById } = await import("@/lib/db/repositories/projects");
+    const project = await getProjectById(job.workspaceId, edl.projectId);
+    if (!project) return;
+
+    const { recordRenderedAsset } = await import("@/lib/db/repositories/assets");
+    await recordRenderedAsset({
+      workspaceId: job.workspaceId,
+      projectId: edl.projectId,
+      kind: "video",
+      locale: edl.locale,
+      storageKey,
+      // The project's slug, which a person chose and can read. Minted once
+      // and never changed, so an embed published today still resolves after
+      // tomorrow's re-render.
+      publicSlug: project.slug,
+    });
+  } catch (error) {
+    console.error(`[render] could not file the asset for job ${job.id}:`, error);
   }
 }
 
@@ -231,6 +311,12 @@ export async function processOne(options: RenderWorkerOptions): Promise<RenderOu
     };
     await getStorage().put(key, new Uint8Array(await readFile(result.outputPath)), "video/mp4");
     const signed = await getStorage().signedReadUrl(key);
+
+    // An asset row, so the finished video outlives the job that made it.
+    // Without this, a render existed only inside a queue row — the share
+    // page, the embed and the library had no way to find the file, and a
+    // purged job took the only pointer to it with it.
+    await recordAsset(job, edl, `${key.workspaceId}/${key.path}`);
 
     await complete(job.id, options.workerId, {
       video: { status: "ready", url: signed.url, key: `${key.workspaceId}/${key.path}` },
@@ -378,8 +464,10 @@ async function defaultResolveEdl(job: Job): Promise<Edl> {
     );
   }
 
-  const { getProject } = await import("@/lib/data");
-  const project = await getProject(payload.projectId);
+  // See the note in `recordAsset`: the worker reads through the repository,
+  // never through the server-only data access layer.
+  const { getProjectById } = await import("@/lib/db/repositories/projects");
+  const project = await getProjectById(job.workspaceId, payload.projectId);
   if (!project) {
     throw new ProviderError(`Render job references unknown project ${payload.projectId}.`, {
       provider: "render-worker",

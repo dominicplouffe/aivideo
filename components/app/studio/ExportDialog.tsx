@@ -1,19 +1,27 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { cn, formatDuration } from "@/lib/utils";
 import { Icon, type IconName } from "@/components/ui/Icon";
 import { Button } from "@/components/ui/Button";
 import { localeMatrix, type Project } from "@/lib/app-data";
 import { site } from "@/lib/site";
 
-type Step = "configure" | "rendering" | "done";
+type Step = "configure" | "rendering" | "done" | "error";
 
-const formats: { id: string; label: string; meta: string; icon: IconName }[] = [
-  { id: "video", label: "Demo video", meta: "MP4 · H.264 · 4K60", icon: "play" },
-  { id: "guide", label: "Step-by-step guide", meta: "Markdown + screenshots", icon: "doc" },
-  { id: "interactive", label: "Interactive tour", meta: "Embeddable · 6 KB runtime", icon: "cursor" },
-  { id: "clips", label: "Social cuts", meta: "6 clips · 9:16 + 1:1", icon: "scissors" },
+/**
+ * `built: false` means the render worker does not produce this yet.
+ *
+ * Offering all four and delivering one was the previous behaviour, and it
+ * was worse than offering one: a person picked "Social cuts", watched a
+ * progress bar, and got a list saying "ready" next to a file that did not
+ * exist. Unavailable is a thing software is allowed to be; lying is not.
+ */
+const formats: { id: string; label: string; meta: string; icon: IconName; built: boolean }[] = [
+  { id: "video", label: "Demo video", meta: "MP4 · H.264 · cut, zoomed, captioned", icon: "play", built: true },
+  { id: "guide", label: "Step-by-step guide", meta: "Markdown + screenshots", icon: "doc", built: false },
+  { id: "interactive", label: "Interactive tour", meta: "Embeddable · 6 KB runtime", icon: "cursor", built: false },
+  { id: "clips", label: "Social cuts", meta: "9:16 and 1:1 cutdowns", icon: "scissors", built: false },
 ];
 
 const ratios = ["16:9", "9:16", "1:1", "4:5"];
@@ -29,12 +37,17 @@ export function ExportDialog({
   onClose: () => void;
 }) {
   const [step, setStep] = useState<Step>("configure");
-  const [picked, setPicked] = useState<string[]>(["video", "guide", "interactive"]);
+  const [picked, setPicked] = useState<string[]>(["video"]);
   const [ratio, setRatio] = useState<string[]>(["16:9"]);
-  const [resolution, setResolution] = useState("2160p");
-  const [locales, setLocales] = useState<string[]>(["en-US", "de-DE", "ja-JP"]);
+  // 1080p, not 4K. The default should be the one most people want and
+  // nobody regrets waiting for.
+  const [resolution, setResolution] = useState("1080p");
+  const [locales, setLocales] = useState<string[]>(["en-US"]);
   const [progress, setProgress] = useState(0);
   const [copied, setCopied] = useState(false);
+  const [videoUrl, setVideoUrl] = useState<string | null>(null);
+  const [failure, setFailure] = useState<string | null>(null);
+  const [stalled, setStalled] = useState(false);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
@@ -42,19 +55,77 @@ export function ExportDialog({
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  useEffect(() => {
-    if (step !== "rendering") return;
-    let i = 0;
-    const id = setInterval(() => {
-      i += 1;
-      setProgress(i / 45);
-      if (i >= 45) {
-        clearInterval(id);
+  /**
+   * Submits the render and follows it to the end.
+   *
+   * The previous version counted to 45 on a timer and declared success.
+   * This one submits a job, polls it, and reports what actually happened —
+   * including the failure, in the worker's own words, because a render that
+   * failed for a reason you can read is a render you can fix.
+   */
+  const submit = async () => {
+    setStep("rendering");
+    setProgress(0.04);
+    setFailure(null);
+    setStalled(false);
+
+    let jobId: string;
+    try {
+      const response = await fetch("/api/renders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          project_id: project.id,
+          outputs: picked,
+          locales,
+          video: { resolution, fps: 30, aspects: ratio },
+        }),
+      });
+      const body = (await response.json()) as { id?: string; error?: string };
+      if (!response.ok || !body.id) throw new Error(body.error ?? "The render was refused.");
+      jobId = body.id;
+    } catch (cause) {
+      setFailure(cause instanceof Error ? cause.message : String(cause));
+      setStep("error");
+      return;
+    }
+
+    const startedAt = Date.now();
+    const poll = async (): Promise<void> => {
+      const response = await fetch(`/api/renders?id=${jobId}`);
+      const job = (await response.json()) as {
+        status?: string;
+        progress?: number;
+        error?: string;
+        outputs?: Record<string, { status: string; url?: string }>;
+      };
+
+      if (job.status === "completed") {
+        setProgress(1);
+        setVideoUrl(job.outputs?.video?.url ?? null);
         setStep("done");
+        return;
       }
-    }, 45);
-    return () => clearInterval(id);
-  }, [step]);
+      if (job.status === "failed") {
+        setFailure(job.error ?? "The render failed.");
+        setStep("error");
+        return;
+      }
+
+      // Queued for a while with nobody claiming it means no worker is
+      // running. Saying so beats a progress bar that never moves.
+      if (job.status === "queued" && Date.now() - startedAt > 15_000) setStalled(true);
+      setProgress((p) => Math.min(0.92, Math.max(p, job.progress ?? 0) + 0.02));
+      timer.current = window.setTimeout(poll, 1500);
+    };
+
+    timer.current = window.setTimeout(poll, 1200);
+  };
+
+  const timer = useRef<number | null>(null);
+  useEffect(() => () => {
+    if (timer.current) window.clearTimeout(timer.current);
+  }, []);
 
   const toggle = (list: string[], set: (v: string[]) => void, id: string) =>
     set(list.includes(id) ? list.filter((x) => x !== id) : [...list, id]);
@@ -73,7 +144,7 @@ export function ExportDialog({
       >
         <header className="flex shrink-0 items-center justify-between border-b border-[var(--line)] px-5 py-3.5">
           <h2 className="text-[0.9375rem] font-medium text-fg-strong">
-            {step === "done" ? "Published" : "Export and publish"}
+            {step === "done" ? "Rendered" : step === "error" ? "Render failed" : "Export"}
           </h2>
           <button
             type="button"
@@ -96,11 +167,14 @@ export function ExportDialog({
                       <button
                         key={f.id}
                         type="button"
+                        disabled={!f.built}
+                        title={f.built ? undefined : "Not built yet"}
                         onClick={() => toggle(picked, setPicked, f.id)}
                         aria-pressed={on}
                         className={cn(
                           "flex items-center gap-3 rounded-xl border px-3.5 py-3 text-left transition-colors",
-                          on ? "border-iris-500/45 bg-iris-500/[0.08]" : "border-[var(--line)] hover:border-[var(--line-strong)]",
+                          on ? "border-iris-500/45 bg-iris-500/[0.08]" : "border-[var(--line)]",
+                          f.built ? "hover:border-[var(--line-strong)]" : "cursor-not-allowed opacity-45",
                         )}
                       >
                         <Icon
@@ -110,7 +184,9 @@ export function ExportDialog({
                         />
                         <span className="min-w-0 flex-1">
                           <span className="block text-[0.8125rem] font-medium text-fg">{f.label}</span>
-                          <span className="block truncate text-2xs text-fg-faint">{f.meta}</span>
+                          <span className="block truncate text-2xs text-fg-faint">
+                            {f.built ? f.meta : "Not built yet"}
+                          </span>
                         </span>
                         {on ? <Icon name="check" className="size-3.5 shrink-0 text-mint-400" strokeWidth={2.6} /> : null}
                       </button>
@@ -138,14 +214,26 @@ export function ExportDialog({
 
               <Section label="Languages">
                 <div className="flex flex-wrap gap-1.5">
-                  {localeMatrix.map((l) => (
-                    <Pill key={l.code} on={locales.includes(l.code)} onClick={() => toggle(locales, setLocales, l.code)}>
-                      {l.label}
-                    </Pill>
-                  ))}
+                  {localeMatrix.map((l) => {
+                    // A translated cut needs a synthesized voice to speak it,
+                    // so a locale is only offerable where synthesis is. The
+                    // picker used to offer twelve and render one.
+                    const available = l.code === locales[0];
+                    return (
+                      <Pill
+                        key={l.code}
+                        on={locales.includes(l.code)}
+                        disabled={!available}
+                        onClick={() => toggle(locales, setLocales, l.code)}
+                      >
+                        {l.label}
+                      </Pill>
+                    );
+                  })}
                 </div>
                 <p className="mt-2 text-2xs text-fg-faint">
-                  Localized versions never consume additional video minutes.
+                  Other languages need a speech synthesis provider configured. Only the source
+                  language is rendered here.
                 </p>
               </Section>
 
@@ -155,10 +243,10 @@ export function ExportDialog({
                     {billedMinutes} video minutes will be billed
                   </p>
                   <p className="mt-0.5 text-2xs text-fg-faint">
-                    {formatDuration(duration)} finished · {locales.length} languages · guides and tours free
+                    {formatDuration(duration)} finished · billed from the encoded output, not this estimate
                   </p>
                 </div>
-                <span className="font-mono text-2xs text-fg-faint">76 min left</span>
+
               </div>
             </div>
           ) : null}
@@ -173,11 +261,28 @@ export function ExportDialog({
                   />
                 </div>
                 <p className="mt-4 text-center text-[0.875rem] text-fg">
-                  Rendering {picked.length} outputs across {locales.length} languages…
+                  {stalled ? "Waiting for a render worker…" : "Encoding your video…"}
                 </p>
                 <p className="mt-1.5 text-center font-mono text-2xs text-fg-faint">
-                  {Math.round(progress * 100)}% · running in parallel
+                  {Math.round(progress * 100)}%
                 </p>
+                {stalled ? (
+                  <p className="mt-4 rounded-xl border border-amber-500/25 bg-amber-500/[0.07] p-3.5 text-center text-2xs leading-relaxed text-amber-200">
+                    The job is queued, but nothing has picked it up. Renders run in a separate
+                    process — start one with <code className="font-mono">npm run worker</code> and
+                    this will continue on its own.
+                  </p>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
+
+          {step === "error" ? (
+            <div className="flex items-start gap-3.5 rounded-xl border border-rose-500/30 bg-rose-500/[0.07] p-4">
+              <Icon name="alert" className="mt-0.5 size-5 shrink-0 text-rose-300" strokeWidth={2.2} />
+              <div className="min-w-0">
+                <p className="text-[0.9375rem] font-medium text-fg-strong">The render did not finish</p>
+                <p className="mt-1 break-words text-[0.8125rem] text-fg-muted">{failure}</p>
               </div>
             </div>
           ) : null}
@@ -188,13 +293,21 @@ export function ExportDialog({
                 <Icon name="check" className="mt-0.5 size-5 shrink-0 text-mint-400" strokeWidth={2.6} />
                 <div>
                   <p className="text-[0.9375rem] font-medium text-fg-strong">
-                    {picked.length} outputs published in {locales.length} languages
+                    Your video is rendered
                   </p>
                   <p className="mt-1 text-[0.8125rem] text-fg-muted">
-                    Existing embeds updated in place — no URLs changed.
+                    {formatDuration(duration)} at {resolution}, cut to your edit.
                   </p>
                 </div>
               </div>
+
+              {videoUrl ? (
+                <video
+                  src={videoUrl}
+                  controls
+                  className="w-full rounded-xl border border-[var(--line)] bg-black"
+                />
+              ) : null}
 
               <Section label="Share link">
                 <div className="flex gap-2">
@@ -225,21 +338,24 @@ export function ExportDialog({
                 </pre>
               </Section>
 
-              <Section label="Files">
-                <ul className="divide-y divide-[var(--line)] overflow-hidden rounded-xl border border-[var(--line)]">
-                  {picked.map((p) => {
-                    const f = formats.find((x) => x.id === p)!;
-                    return (
-                      <li key={p} className="flex items-center gap-3 bg-ink-950 px-3.5 py-2.5">
-                        <Icon name={f.icon} className="size-3.5 shrink-0 text-fg-faint" strokeWidth={1.9} />
-                        <span className="min-w-0 flex-1 truncate text-[0.8125rem] text-fg">{f.label}</span>
-                        <span className="font-mono text-2xs text-fg-faint">ready</span>
-                        <Icon name="download" className="size-3.5 shrink-0 text-iris-300" strokeWidth={2} />
-                      </li>
-                    );
-                  })}
-                </ul>
-              </Section>
+              {videoUrl ? (
+                <Section label="File">
+                  <a
+                    href={videoUrl}
+                    download={`${project.slug}.mp4`}
+                    className="flex items-center gap-3 rounded-xl border border-[var(--line)] bg-ink-950 px-3.5 py-2.5 transition-colors hover:border-[var(--line-strong)]"
+                  >
+                    <Icon name="play" className="size-3.5 shrink-0 text-fg-faint" strokeWidth={1.9} />
+                    <span className="min-w-0 flex-1 truncate font-mono text-[0.75rem] text-fg">
+                      {project.slug}.mp4
+                    </span>
+                    <Icon name="download" className="size-3.5 shrink-0 text-iris-300" strokeWidth={2} />
+                  </a>
+                  <p className="mt-2 text-2xs text-fg-faint">
+                    The link is signed and expires; re-open this dialog for a fresh one.
+                  </p>
+                </Section>
+              ) : null}
             </div>
           ) : null}
         </div>
@@ -248,10 +364,16 @@ export function ExportDialog({
           {step === "configure" ? (
             <>
               <Button variant="ghost" size="sm" onClick={onClose}>Cancel</Button>
-              <Button size="sm" disabled={picked.length === 0} onClick={() => setStep("rendering")}>
+              <Button size="sm" disabled={picked.length === 0} onClick={submit}>
                 <Icon name="rocket" className="size-4" strokeWidth={1.9} />
-                Render and publish
+                Render
               </Button>
+            </>
+          ) : null}
+          {step === "error" ? (
+            <>
+              <Button variant="ghost" size="sm" onClick={onClose}>Close</Button>
+              <Button size="sm" onClick={() => setStep("configure")}>Back</Button>
             </>
           ) : null}
           {step === "done" ? (
@@ -277,15 +399,27 @@ function Section({ label, children }: { label: string; children: React.ReactNode
   );
 }
 
-function Pill({ on, onClick, children }: { on: boolean; onClick: () => void; children: React.ReactNode }) {
+function Pill({
+  on,
+  onClick,
+  disabled,
+  children,
+}: {
+  on: boolean;
+  onClick: () => void;
+  disabled?: boolean;
+  children: React.ReactNode;
+}) {
   return (
     <button
       type="button"
       onClick={onClick}
+      disabled={disabled}
       aria-pressed={on}
       className={cn(
         "rounded-lg border px-2.5 py-1 text-2xs font-medium transition-colors",
-        on ? "border-iris-500/45 bg-iris-500/12 text-iris-300" : "border-[var(--line)] text-fg-subtle hover:text-fg",
+        on ? "border-iris-500/45 bg-iris-500/12 text-iris-300" : "border-[var(--line)] text-fg-subtle",
+        disabled ? "cursor-not-allowed opacity-40" : !on && "hover:text-fg",
       )}
     >
       {children}

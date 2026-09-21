@@ -34,7 +34,13 @@ function toRenderJob(job: Job, req?: RenderRequest): RenderJob {
 export class QueuedRenderProvider implements RenderProvider {
   readonly name = "postgres-queue";
 
-  constructor(private readonly workspaceId: string) {}
+  /**
+   * `defaultWorkspaceId` is a fallback for callers that have none — the
+   * render worker's own test harness, mostly. Every request from the
+   * application carries its own, because the alternative bills one tenant
+   * for another's video.
+   */
+  constructor(private readonly defaultWorkspaceId = "") {}
 
   async submit(req: RenderRequest): Promise<RenderJob> {
     // Nothing is metered at submit time. The billed amount is the finished
@@ -44,8 +50,13 @@ export class QueuedRenderProvider implements RenderProvider {
     // job, and both are worse than waiting a few minutes for a real number.
     const minutesBilled = 0;
 
+    const workspaceId = req.workspaceId || this.defaultWorkspaceId;
+    if (!workspaceId) {
+      throw new Error("A render needs a workspace to belong to.");
+    }
+
     const { job } = await enqueue({
-      workspaceId: this.workspaceId,
+      workspaceId,
       kind: "render",
       payload: {
         projectId: req.projectId,
@@ -53,6 +64,8 @@ export class QueuedRenderProvider implements RenderProvider {
         locales: req.locales,
         brandKitId: req.brandKitId,
         video: req.video ?? null,
+        // The edit as it was when the button was pressed. See RenderRequest.
+        edl: req.edl ?? null,
         minutesBilled,
       },
       idempotencyKey: req.idempotencyKey,

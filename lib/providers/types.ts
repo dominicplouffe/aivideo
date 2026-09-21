@@ -144,6 +144,23 @@ export interface RenderRequest {
   video?: { resolution: "720p" | "1080p" | "1440p" | "2160p"; fps: 30 | 60; aspects: string[] };
   webhookUrl?: string;
   idempotencyKey?: string;
+  /**
+   * Which workspace this render belongs to.
+   *
+   * Carried on the request rather than fixed when the provider is built.
+   * A provider configured with one workspace id from the environment is a
+   * provider that bills the wrong tenant the first time anybody runs two.
+   */
+  workspaceId?: string;
+  /**
+   * A fully resolved edit decision list.
+   *
+   * When the caller has one — and the Studio always does — it travels with
+   * the job. The alternative is for the worker to rebuild it from the
+   * project hours later, by which time somebody has edited the project and
+   * the render no longer matches what they pressed the button on.
+   */
+  edl?: unknown;
 }
 
 export interface RenderJob {

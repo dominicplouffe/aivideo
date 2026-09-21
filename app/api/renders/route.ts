@@ -1,10 +1,14 @@
 import { NextResponse } from "next/server";
 import { getProviders, type RenderOutput } from "@/lib/providers";
-import { getProject } from "@/lib/app-data";
+import { getProject } from "@/lib/data";
 import { isDatabaseConfigured } from "@/lib/db/client";
-import { authorize, ForbiddenError } from "@/lib/auth/authorize";
+import { authorize, ForbiddenError, type Actor } from "@/lib/auth/authorize";
 import { resolveActor, UnauthenticatedError } from "@/lib/auth/session";
 import { checkDestination, describeRefusal } from "@/lib/webhooks/destinations";
+import { getRecording, mediaKeyFor } from "@/lib/db/repositories/recordings";
+import { hydrateEditState } from "@/components/app/studio/types";
+import { buildEdl } from "@/lib/render/edl";
+import type { Project } from "@/lib/app-data";
 
 const VALID_OUTPUTS: RenderOutput[] = ["video", "guide", "interactive", "clips"];
 
@@ -29,9 +33,10 @@ export async function POST(request: Request) {
   // and — via webhook_url — makes this worker dial a destination somebody
   // else chose. Every sibling route resolves an actor; this one did not,
   // which made it the anonymous door into all three.
+  let actor: Actor | null = null;
   if (isDatabaseConfigured()) {
     try {
-      const actor = await resolveActor(request);
+      actor = await resolveActor(request);
       authorize(actor, "render.submit", { workspaceId: actor.workspaceId });
     } catch (error) {
       if (error instanceof UnauthenticatedError) {
@@ -44,7 +49,11 @@ export async function POST(request: Request) {
     }
   }
 
-  if (!body.project_id || !getProject(body.project_id)) {
+  // Through the data access layer. This read used to go to the fixtures,
+  // which meant a project you had actually recorded came back as "Unknown
+  // project_id" while three demo rows rendered perfectly.
+  const project: Project | null = body.project_id ? await getProject(body.project_id) : null;
+  if (!project) {
     return NextResponse.json({ error: "Unknown project_id." }, { status: 404 });
   }
 
@@ -67,15 +76,45 @@ export async function POST(request: Request) {
     );
   }
 
+  // The EDL is resolved here, not in the worker, and travels with the job.
+  // It is the edit as it stood when the button was pressed; a worker that
+  // rebuilds it an hour later renders whatever the project has become since.
+  let edl: unknown = null;
+  if (actor && project.recordingId) {
+    const recording = await getRecording(actor.workspaceId, project.recordingId);
+    if (!recording?.mediaKey) {
+      return NextResponse.json(
+        { error: "That project's recording has no media to render." },
+        { status: 409 },
+      );
+    }
+
+    const state = hydrateEditState(project.editState);
+    edl = buildEdl({
+      project,
+      // Not a signed URL: the worker reads storage directly. See the
+      // `storage://` branch in lib/render/worker.ts.
+      sourceUrl: `storage://${actor.workspaceId}/${mediaKeyFor(recording)}`,
+      removeFillers: state.removeFillers,
+      deletedSegments: state.deletedSegments,
+      captions: state.captions,
+      zoomEnabled: state.zoomEnabled,
+      resolution: (body.video?.resolution as "1080p") ?? "1080p",
+      fps: (body.video?.fps as 30) ?? 30,
+    });
+  }
+
   const providers = getProviders();
   const job = await providers.render.submit({
-    projectId: body.project_id,
+    projectId: project.id,
     outputs,
     locales: body.locales ?? ["en-US"],
     brandKitId: body.brand_kit ?? "kit_meridian_primary",
     video: body.video as never,
     webhookUrl: body.webhook_url,
     idempotencyKey: request.headers.get("Idempotency-Key") ?? undefined,
+    workspaceId: actor?.workspaceId,
+    edl,
   });
 
   return NextResponse.json(

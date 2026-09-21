@@ -6,7 +6,8 @@ import path from "node:path";
 import test from "node:test";
 import type { Edl } from "./edl";
 import {
-  anchorExpression, buildAudioFilters, buildCutFilters, buildMaskFilters, compile, diagnose,
+  anchorExpression, buildAudioFilters, buildCutFilters, buildMaskFilters,
+  buildSourceAudioFilters, compile, diagnose,
   parseProgress, probe, runFfmpeg, srtTimestamp, toSrt, zoomExpression,
 } from "./ffmpeg";
 import { renderEdl } from "./worker";
@@ -312,4 +313,53 @@ test("an invalid edl is refused before a worker spends a minute on it", async ()
     () => renderEdl(edl({ clips: [], durationSec: 0 })),
     (error: unknown) => error instanceof Error && /invalid EDL/.test(error.message),
   );
+});
+
+test("the source's own audio is cut to match the video", () => {
+  const { filters, out } = buildSourceAudioFilters(
+    edl({
+      clips: [
+        { sourceStart: 0, sourceEnd: 2, outputStart: 0 },
+        { sourceStart: 5, sourceEnd: 7, outputStart: 2 },
+      ],
+      durationSec: 4,
+    }),
+  );
+
+  assert.equal(filters.length, 3, "one atrim per clip, plus the concat");
+  assert.match(filters[0], /\[0:a\]atrim=start=0:end=2,asetpts=PTS-STARTPTS\[sa0\]/);
+  assert.match(filters[1], /\[0:a\]atrim=start=5:end=7,asetpts=PTS-STARTPTS\[sa1\]/);
+  // Without asetpts the stream keeps its original timestamps and drifts out
+  // of sync by the length of everything removed — three seconds, here.
+  assert.match(filters[2], /concat=n=2:v=0:a=1\[sacat\]/);
+  assert.equal(out, "sacat");
+});
+
+test("a recording with audio and no narration is not rendered silent", () => {
+  // The bug this guards: the audio graph was built for synthesized
+  // narration, so an ordinary screen recording came out with no sound.
+  const one = edl({ clips: [{ sourceStart: 0, sourceEnd: 4, outputStart: 0 }], durationSec: 4 });
+  const plan = compile(one, {
+    sourcePath: "/tmp/in.webm",
+    outputPath: "/tmp/out.mp4",
+    sourceHasAudio: true,
+  });
+
+  assert.ok(!plan.args.includes("-an"), "audio is not disabled");
+  assert.ok(plan.args.includes("-c:a"), "an audio codec is chosen");
+  const graph = plan.args[plan.args.indexOf("-filter_complex") + 1];
+  assert.match(graph, /\[0:a\]atrim/);
+});
+
+test("a silent source is still rendered, without audio", () => {
+  const one = edl({ clips: [{ sourceStart: 0, sourceEnd: 4, outputStart: 0 }], durationSec: 4 });
+  const plan = compile(one, {
+    sourcePath: "/tmp/in.webm",
+    outputPath: "/tmp/out.mp4",
+    sourceHasAudio: false,
+  });
+
+  assert.ok(plan.args.includes("-an"), "no audio stream is mapped");
+  const graph = plan.args[plan.args.indexOf("-filter_complex") + 1];
+  assert.ok(!graph.includes("[0:a]"), "the graph never references a stream that is not there");
 });
