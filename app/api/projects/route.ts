@@ -83,7 +83,7 @@ export async function POST(request: Request) {
   const guard = await requireActor(request, "project.create");
   if ("response" in guard) return guard.response;
 
-  let body: { recording_id?: unknown; title?: unknown; description?: unknown };
+  let body: { recording_id?: unknown; title?: unknown; description?: unknown; collection?: unknown };
   try {
     body = (await request.json()) as typeof body;
   } catch {
@@ -120,6 +120,7 @@ export async function POST(request: Request) {
     title,
     description: typeof body.description === "string" ? body.description.slice(0, 500) : null,
     sourceDurationSec: recording?.durationSec ?? null,
+    collection: typeof body.collection === "string" ? body.collection.slice(0, 80) : null,
   });
 
   await recordQuietly({

@@ -1,14 +1,19 @@
 import type { Metadata } from "next";
 import { PageHeader, Panel } from "@/components/app/Shared";
 import { Icon } from "@/components/ui/Icon";
-import { voices } from "@/lib/app-data";
 import { VoiceClones } from "@/components/app/VoiceClones";
-import { cn } from "@/lib/utils";
+import { getVoices } from "@/lib/data";
+import { providerReport } from "@/lib/providers";
 
 export const metadata: Metadata = { title: "Voices" };
 
-export default function VoicesPage() {
+export default async function VoicesPage() {
+  const voices = await getVoices();
   const studio = voices.filter((v) => v.kind === "studio");
+
+  // Whether synthesis resolved to a vendor or to the deterministic mock.
+  // The page used to assert a licensed catalogue either way.
+  const synthesis = providerReport().find((c) => c.capability === "synthesis");
 
   return (
     <>
@@ -34,42 +39,44 @@ export default function VoicesPage() {
           </div>
         </Panel>
 
-        <Panel title="Studio library" description="Licensed for unlimited commercial use, worldwide">
-          <div className="grid gap-3 p-5 sm:grid-cols-2 xl:grid-cols-4">
-            {studio.map((v) => (
-              <div
-                key={v.id}
-                className={cn(
-                  "flex flex-col gap-3 rounded-xl border p-4 transition-colors hover:border-[var(--line-strong)]",
-                  v.favourite ? "border-iris-500/35 bg-iris-500/[0.06]" : "border-[var(--line)]",
-                )}
-              >
-                <div className="flex items-start justify-between">
+        <Panel
+          title="Studio library"
+          description="Voices offered by your synthesis provider"
+        >
+          {/*
+            This rendered four fixture voices — Ava, Marcus, Yuki and Sofia,
+            with accents, descriptors and a favourite star — under the claim
+            "Licensed for unlimited commercial use, worldwide". Nothing was
+            licensed, because nothing existed: none of the four was in the
+            voices table, so selecting one for a render would have failed to
+            find it. A workspace's studio voices are the rows it has.
+          */}
+          {studio.length === 0 ? (
+            <div className="px-5 py-10 text-center">
+              <p className="text-[0.875rem] text-fg-muted">No studio voices available.</p>
+              <p className="mx-auto mt-2 max-w-md text-[0.8125rem] leading-relaxed text-fg-subtle">
+                {synthesis?.live
+                  ? "Your synthesis provider has not published a voice to this workspace yet."
+                  : `Synthesis is not configured, so there is no catalogue to read. Set ${
+                      synthesis?.missing.join(" and ") || "a synthesis provider"
+                    } to enable it. Until then a video carries the voice on the recording.`}
+              </p>
+            </div>
+          ) : (
+            <div className="grid gap-3 p-5 sm:grid-cols-2 xl:grid-cols-4">
+              {studio.map((v) => (
+                <div
+                  key={v.id}
+                  className="flex flex-col gap-3 rounded-xl border border-[var(--line)] p-4 transition-colors hover:border-[var(--line-strong)]"
+                >
                   <span className="inline-flex size-9 items-center justify-center rounded-full bg-[linear-gradient(135deg,var(--color-iris-600),var(--color-violet-500))]">
                     <Icon name="play" className="size-3.5 text-white" />
                   </span>
-                  <Icon
-                    name="star"
-                    className={cn("size-4", v.favourite ? "text-amber-400" : "text-fg-faint")}
-                  />
+                  <p className="text-[0.875rem] font-medium text-fg-strong">{v.name}</p>
                 </div>
-                <div>
-                  <p className="text-[0.875rem] font-medium text-fg-strong">
-                    {v.name} <span className="font-mono text-2xs text-fg-faint">{v.accent}</span>
-                  </p>
-                  <p className="mt-0.5 text-[0.75rem] leading-snug text-fg-subtle">{v.descriptor}</p>
-                </div>
-              </div>
-            ))}
-          </div>
-          {/* "Showing 8 of 260" counted a catalogue that does not exist
-              here; these eight are the seeded sample. */}
-          <div className="border-t border-[var(--line)] px-5 py-4 text-center">
-            <p className="text-[0.8125rem] text-fg-subtle">
-              A sample of the studio library. The full catalogue comes from your synthesis
-              provider once one is configured.
-            </p>
-          </div>
+              ))}
+            </div>
+          )}
         </Panel>
 
         {/*

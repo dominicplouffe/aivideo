@@ -6,7 +6,7 @@ import { cn, formatBytes, formatDuration } from "@/lib/utils";
 import { Icon, type IconName } from "@/components/ui/Icon";
 import { Button } from "@/components/ui/Button";
 import { Panel } from "./Shared";
-import { brandKits, voices, collections, projects } from "@/lib/app-data";
+
 
 type Mode = "record" | "import" | "agent";
 type Phase = "setup" | "live" | "review" | "processing";
@@ -19,7 +19,7 @@ interface CapturedEvent {
 
 /* ============================================================ */
 
-export function Recorder() {
+export function Recorder({ collections = [] }: { collections?: string[] }) {
   const params = useSearchParams();
   const router = useRouter();
   const initialMode = (params.get("mode") as Mode) ?? "record";
@@ -51,7 +51,7 @@ export function Recorder() {
           ))}
         </div>
 
-        {mode === "record" ? <RecordFlow onDone={(id) => router.push(`/app/studio/${id}`)} /> : null}
+        {mode === "record" ? <RecordFlow collections={collections} onDone={(id) => router.push(`/app/studio/${id}`)} /> : null}
         {mode === "import" ? <ImportFlow onDone={(id) => router.push(`/app/studio/${id}`)} /> : null}
         {mode === "agent" ? <AgentFlow /> : null}
       </div>
@@ -115,7 +115,13 @@ async function measure(url: string | null): Promise<TakeShape> {
   });
 }
 
-function RecordFlow({ onDone }: { onDone: (projectId: string) => void }) {
+function RecordFlow({
+  onDone,
+  collections,
+}: {
+  onDone: (projectId: string) => void;
+  collections: string[];
+}) {
   const [phase, setPhase] = useState<Phase>("setup");
   const [error, setError] = useState<string | null>(null);
   const [elapsed, setElapsed] = useState(0);
@@ -132,9 +138,7 @@ function RecordFlow({ onDone }: { onDone: (projectId: string) => void }) {
   const [withMic, setWithMic] = useState(true);
   const [withSystemAudio, setWithSystemAudio] = useState(true);
   const [masking, setMasking] = useState(true);
-  const [brandKit, setBrandKit] = useState(brandKits[0].id);
-  const [voice, setVoice] = useState(voices[0].id);
-  const [collection, setCollection] = useState(collections[0]);
+  const [collection, setCollection] = useState("");
   const [title, setTitle] = useState("");
 
   const streamRef = useRef<MediaStream | null>(null);
@@ -316,7 +320,11 @@ function RecordFlow({ onDone }: { onDone: (projectId: string) => void }) {
       const project = await fetch("/api/projects", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ recording_id: recordingId, title: title.trim() }),
+        body: JSON.stringify({
+          recording_id: recordingId,
+          title: title.trim(),
+          collection: collection.trim() || undefined,
+        }),
       });
       if (!project.ok) throw new Error(await messageFrom(project));
       const body = (await project.json()) as { project: { id: string } };
@@ -398,8 +406,7 @@ function RecordFlow({ onDone }: { onDone: (projectId: string) => void }) {
         <SetupSidebar
           title={title} setTitle={setTitle}
           collection={collection} setCollection={setCollection}
-          brandKit={brandKit} setBrandKit={setBrandKit}
-          voice={voice} setVoice={setVoice}
+          collections={collections}
         />
       </div>
     );
@@ -989,13 +996,25 @@ function Toggle({
   );
 }
 
+/**
+ * Title and collection — the two settings this form can actually keep.
+ *
+ * It also offered a brand-kit picker and a voice picker, both populated from
+ * fixtures, so a new workspace was shown three brand kits and four voices it
+ * did not have. Worse, `POST /api/projects` never read either value: somebody
+ * could choose "Meridian Dark" and "Ava — warm, precise" and the project was
+ * created with neither. Collection was discarded the same way and is now
+ * written at creation.
+ *
+ * The pickers come back when brand kits and voices are real per workspace.
+ */
 function SetupSidebar({
-  title, setTitle, collection, setCollection, brandKit, setBrandKit, voice, setVoice,
+  title, setTitle, collection, setCollection, collections,
 }: {
   title: string; setTitle: (v: string) => void;
   collection: string; setCollection: (v: string) => void;
-  brandKit: string; setBrandKit: (v: string) => void;
-  voice: string; setVoice: (v: string) => void;
+  /** Collections already in use in this workspace, offered as suggestions. */
+  collections: string[];
 }) {
   return (
     <Panel title="Project settings">
@@ -1009,31 +1028,20 @@ function SetupSidebar({
           />
         </Field>
         <Field label="Collection">
-          <select
+          {/* A free-text field with suggestions, not a fixed list: the five
+              options here were a fixture, so every workspace was offered
+              "Product launches" and "Release notes" whether it used them or
+              not, and could not name a collection of its own. */}
+          <input
             value={collection}
             onChange={(e) => setCollection(e.target.value)}
-            className="h-10 w-full rounded-xl border border-[var(--line)] bg-ink-900 px-3 text-[0.8125rem] text-fg focus:border-iris-500/50 focus:outline-none"
-          >
-            {collections.map((c) => <option key={c}>{c}</option>)}
-          </select>
-        </Field>
-        <Field label="Brand kit">
-          <select
-            value={brandKit}
-            onChange={(e) => setBrandKit(e.target.value)}
-            className="h-10 w-full rounded-xl border border-[var(--line)] bg-ink-900 px-3 text-[0.8125rem] text-fg focus:border-iris-500/50 focus:outline-none"
-          >
-            {brandKits.map((k) => <option key={k.id} value={k.id}>{k.name}</option>)}
-          </select>
-        </Field>
-        <Field label="Voice">
-          <select
-            value={voice}
-            onChange={(e) => setVoice(e.target.value)}
-            className="h-10 w-full rounded-xl border border-[var(--line)] bg-ink-900 px-3 text-[0.8125rem] text-fg focus:border-iris-500/50 focus:outline-none"
-          >
-            {voices.map((v) => <option key={v.id} value={v.id}>{v.name} — {v.descriptor}</option>)}
-          </select>
+            list="recorder-collections"
+            placeholder="Optional — e.g. Onboarding"
+            className="h-10 w-full rounded-xl border border-[var(--line)] bg-ink-900 px-3.5 text-[0.8125rem] text-fg placeholder:text-fg-faint focus:border-iris-500/50 focus:outline-none"
+          />
+          <datalist id="recorder-collections">
+            {collections.map((c) => <option key={c} value={c} />)}
+          </datalist>
         </Field>
       </div>
     </Panel>

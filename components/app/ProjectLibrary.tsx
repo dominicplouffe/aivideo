@@ -7,7 +7,14 @@ import { cn, formatDuration, formatNumber, relativeTime } from "@/lib/utils";
 import { Icon } from "@/components/ui/Icon";
 import { Button } from "@/components/ui/Button";
 import { StatusPill, Avatar, EmptyState } from "./Shared";
-import { collections, members, currentUser, type Project, type ProjectStatus } from "@/lib/app-data";
+import type { Project, ProjectStatus } from "@/lib/app-data";
+
+/** A workspace member, for the owner badge on each card. */
+export interface LibraryMember {
+  id: string;
+  name: string;
+  email: string;
+}
 
 const statuses: (ProjectStatus | "all")[] = [
   "all", "published", "ready", "processing", "stale", "draft", "failed",
@@ -63,12 +70,37 @@ function RetryButton({ projectId }: { projectId: string }) {
   );
 }
 
-export function ProjectLibrary({ projects }: { projects: Project[] }) {
+/** A stable hue per address, so two people never share an avatar colour. */
+function hueFor(email: string): number {
+  return [...email].reduce((n, c) => (n * 31 + c.charCodeAt(0)) % 360, 7);
+}
+
+export function ProjectLibrary({
+  projects,
+  members = [],
+}: {
+  projects: Project[];
+  /** This workspace's members, for the owner badge. */
+  members?: LibraryMember[];
+}) {
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState<ProjectStatus | "all">("all");
   const [collection, setCollection] = useState<string>("all");
   const [view, setView] = useState<"grid" | "list">("grid");
   const [sort, setSort] = useState<"updated" | "views" | "title">("updated");
+
+  /**
+   * The collections actually in use, not a fixed list.
+   *
+   * This was the five-item `collections` fixture, so the filter offered
+   * "Product launches", "Help center", "Sales enablement", "Onboarding" and
+   * "Release notes" to every workspace — selecting any of them in a
+   * workspace that used none produced an empty list and no explanation.
+   */
+  const collections = useMemo(
+    () => [...new Set(projects.map((p) => p.collection).filter(Boolean))].sort(),
+    [projects],
+  );
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -206,7 +238,7 @@ export function ProjectLibrary({ projects }: { projects: Project[] }) {
         ) : view === "grid" ? (
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
             {filtered.map((p) => {
-              const owner = members.find((m) => m.id === p.owner) ?? currentUser;
+              const owner = members.find((m) => m.id === p.owner) ?? null;
               return (
                 <Link key={p.id} href={`/app/studio/${p.id}`} className="group block">
                   <article className="flex h-full flex-col overflow-hidden rounded-2xl border border-[var(--line)] bg-ink-950 transition-colors hover:border-[var(--line-strong)]">
@@ -257,7 +289,9 @@ export function ProjectLibrary({ projects }: { projects: Project[] }) {
                         {p.description}
                       </p>
                       <div className="mt-auto flex items-center gap-2 border-t border-[var(--line)] pt-3">
-                        <Avatar name={owner.name} hue={owner.hue} size={22} />
+                        {owner ? (
+                          <Avatar name={owner.name} hue={hueFor(owner.email)} size={22} />
+                        ) : null}
                         <span className="text-2xs text-fg-faint">{relativeTime(p.updatedAt)}</span>
                         <span className="ml-auto flex items-center gap-1">
                           {p.outputs.map((o) => (

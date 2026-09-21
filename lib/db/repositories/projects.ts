@@ -234,6 +234,8 @@ export async function createProject(input: {
   title: string;
   description?: string | null;
   sourceDurationSec?: number | null;
+  /** Free text, chosen by the person recording. Null means uncategorised. */
+  collection?: string | null;
 }): Promise<Project> {
   const db = getDb();
   const base = slugify(input.title) || "untitled-recording";
@@ -264,6 +266,10 @@ export async function createProject(input: {
       // point nobody does.
       status: "processing",
       sourceDurationSec: input.sourceDurationSec ?? null,
+      // Written at creation. The recorder has always asked for this and the
+      // create path has always discarded it, so every project arrived
+      // uncategorised however carefully somebody filled the form in.
+      collection: input.collection?.trim() || null,
     })
     .returning();
 

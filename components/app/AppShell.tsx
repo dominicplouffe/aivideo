@@ -29,7 +29,6 @@ const primary: NavEntry[] = [
 const studio: NavEntry[] = [
   { label: "Brand kits", href: "/app/brand", icon: "palette" },
   { label: "Voices", href: "/app/voices", icon: "mic" },
-  { label: "Presenters", href: "/app/avatars", icon: "avatar" },
   { label: "Localization", href: "/app/localization", icon: "globe" },
 ];
 

@@ -627,3 +627,112 @@ export async function getIdentifiedAccounts(days = 30): Promise<IdentifiedAccoun
     return [];
   }
 }
+
+/* --------------------------------------------------------------- voices */
+
+export interface VoiceSummary {
+  id: string;
+  name: string;
+  kind: "studio" | "clone";
+  consentRecordedAt: string | null;
+  revokedAt: string | null;
+}
+
+/**
+ * The workspace's voices.
+ *
+ * The voices page rendered a four-voice fixture — Ava, Marcus, Yuki and a
+ * clone with a recorded consent date — as a "studio library licensed for
+ * unlimited commercial use, worldwide". None of them existed, none could be
+ * rendered with, and the clone's consent record described a person who does
+ * not exist. What a workspace actually has is what is in this table.
+ */
+export async function getVoices(): Promise<VoiceSummary[]> {
+  const { allowed: may, actor } = await guard("project.view");
+  if (!may || !actor || !isDatabaseConfigured()) return [];
+
+  try {
+    const { listVoicesForWorkspace } = await import("@/lib/db/repositories/voices");
+    const rows = await listVoicesForWorkspace(actor.workspaceId);
+    return rows.map((v) => ({
+      id: v.id,
+      name: v.name,
+      kind: v.kind,
+      consentRecordedAt: v.consentRecordedAt?.toISOString() ?? null,
+      revokedAt: v.revokedAt?.toISOString() ?? null,
+    }));
+  } catch (error) {
+    console.error("[data] voice read failed:", error);
+    return [];
+  }
+}
+
+/* ----------------------------------------------------------- brand kits */
+
+/**
+ * The workspace's brand kits.
+ *
+ * The page rendered three fixture kits with palettes, lock badges and a
+ * "48 videos inherit this kit" count, none of which existed in any
+ * workspace. The `brand_kits` table has been there since the first
+ * migration; nothing read it until now.
+ */
+export async function getBrandKits() {
+  const { allowed: may, actor } = await guard("project.view");
+  if (!may || !actor || !isDatabaseConfigured()) return [];
+
+  try {
+    const { listBrandKits } = await import("@/lib/db/repositories/brand-kits");
+    return await listBrandKits(actor.workspaceId);
+  } catch (error) {
+    console.error("[data] brand kit read failed:", error);
+    return [];
+  }
+}
+
+/* --------------------------------------------------------- localization */
+
+export interface LocaleRow {
+  id: string;
+  projectId: string;
+  projectTitle: string;
+  code: string;
+  status: "none" | "queued" | "rendering" | "published" | "stale";
+  progress: number | null;
+  updatedAt: string;
+}
+
+/**
+ * Every language configured across this workspace's projects.
+ *
+ * The localization page rendered a twelve-row fixture with statuses
+ * attached, identically on every workspace — German published and reviewed
+ * by a named person, Japanese 68% rendered, French stale. The `locales`
+ * table it should have been reading had never had a row written to it.
+ */
+export async function getLocales(): Promise<LocaleRow[]> {
+  const { allowed: may, actor } = await guard("project.view");
+  if (!may || !actor || !isDatabaseConfigured()) return [];
+
+  try {
+    const [{ listLocalesForWorkspace }, projects] = await Promise.all([
+      import("@/lib/db/repositories/locales"),
+      getProjects(),
+    ]);
+    const rows = await listLocalesForWorkspace(actor.workspaceId);
+    const titles = new Map(projects.map((p) => [p.id, p.title]));
+
+    return rows.map((row) => ({
+      id: row.id,
+      projectId: row.projectId,
+      projectTitle: titles.get(row.projectId) ?? "Untitled",
+      code: row.code,
+      status: row.status,
+      progress: row.progress,
+      updatedAt: row.updatedAt,
+    }));
+  } catch (error) {
+    console.error("[data] locale read failed:", error);
+    return [];
+  }
+}

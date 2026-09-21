@@ -7,7 +7,7 @@ import { Icon } from "@/components/ui/Icon";
 import { Button } from "@/components/ui/Button";
 import { LogoMark } from "@/components/brand/Logo";
 import { MockApp } from "@/components/marketing/MockApp";
-import { localeMatrix, type Project } from "@/lib/app-data";
+import type { Project } from "@/lib/app-data";
 
 export function SharePage({
   project,

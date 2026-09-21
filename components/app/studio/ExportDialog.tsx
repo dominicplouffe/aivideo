@@ -4,7 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import { cn, formatDuration } from "@/lib/utils";
 import { Icon, type IconName } from "@/components/ui/Icon";
 import { Button } from "@/components/ui/Button";
-import { localeMatrix, type Project } from "@/lib/app-data";
+import type { Project } from "@/lib/app-data";
+import { LOCALES } from "@/lib/locales";
 import { site } from "@/lib/site";
 
 type Step = "configure" | "rendering" | "done" | "error";
@@ -242,7 +243,7 @@ export function ExportDialog({
 
               <Section label="Languages">
                 <div className="flex flex-wrap gap-1.5">
-                  {localeMatrix.map((l) => {
+                  {LOCALES.map((l) => {
                     // A translated cut needs a synthesized voice to speak it,
                     // so a locale is only offerable where synthesis is. The
                     // picker used to offer twelve and render one.

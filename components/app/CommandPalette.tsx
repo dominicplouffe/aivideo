@@ -40,7 +40,6 @@ const staticCommands: Command[] = [
   { id: "analytics", label: "Go to analytics", icon: "chart", group: "Navigate", href: "/app/analytics" },
   { id: "brand", label: "Go to brand kits", icon: "palette", group: "Navigate", href: "/app/brand" },
   { id: "voices", label: "Go to voices", icon: "mic", group: "Navigate", href: "/app/voices" },
-  { id: "avatars", label: "Go to presenters", icon: "avatar", group: "Navigate", href: "/app/avatars" },
   { id: "localization", label: "Go to localization", icon: "globe", group: "Navigate", href: "/app/localization" },
   { id: "team", label: "Manage team", icon: "users", group: "Workspace", href: "/app/team" },
   { id: "billing", label: "Billing and usage", icon: "creditCard", group: "Workspace", href: "/app/billing" },

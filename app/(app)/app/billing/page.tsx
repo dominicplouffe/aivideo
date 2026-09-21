@@ -3,7 +3,6 @@ import { getProjects, getUsage } from "@/lib/data";
 import { PageHeader, Panel, StatTile } from "@/components/app/Shared";
 import { Button } from "@/components/ui/Button";
 import { Icon } from "@/components/ui/Icon";
-import { workspace } from "@/lib/app-data";
 import { plans } from "@/lib/pricing";
 import { cn } from "@/lib/utils";
 
@@ -31,9 +30,12 @@ export default async function BillingPage() {
   const usedMinutes = usage ? Math.round(usage.usedSeconds / 60) : 0;
   const totalMinutes = usage ? Math.round(usage.allowanceSeconds / 60) : 0;
   const pct = usage ? Math.min(100, usage.fractionUsed * 100) : 0;
+  // The workspace's own plan, or the free plan for an account with no
+  // metering yet. This fell back to the fixture's "Team", so a workspace on
+  // the free plan was shown a paid one and its price.
+  const planName = usage?.plan ?? "free";
   const current =
-    plans.find((p) => p.name.toLowerCase() === (usage?.plan ?? workspace.plan).toLowerCase()) ??
-    plans[0];
+    plans.find((p) => p.name.toLowerCase() === planName.toLowerCase()) ?? plans[0];
 
   return (
     <>
@@ -49,7 +51,7 @@ export default async function BillingPage() {
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <StatTile
             label="Current plan"
-            value={usage?.plan ?? workspace.plan}
+            value={planName}
             icon="creditCard"
             sub={`$${current.monthly}/mo · billed monthly`}
           />

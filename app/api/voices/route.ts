@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 import { isDatabaseConfigured } from "@/lib/db/client";
-import { voices as voiceFixtures } from "@/lib/app-data";
 import { record } from "@/lib/audit/log";
 import { authorize, ForbiddenError } from "@/lib/auth/authorize";
 import { resolveActor, UnauthenticatedError } from "@/lib/auth/session";
@@ -29,51 +28,42 @@ function unauthorized(error: unknown): NextResponse | null {
 /**
  * Lists voices available to the workspace. Mirrors GET /v1/voices.
  *
- * From the database when there is one, so `revoked_at` is the real answer.
- * The fixture list is the fallback for a deployment running without one —
- * but it used to be the *only* answer, which meant the voices page could
- * not show that a clone had been revoked through this very endpoint.
+ * From the database, so `revoked_at` is the real answer.
+ *
+ * An empty workspace returns an empty list. This used to fall through to a
+ * four-voice fixture whenever the real query found nothing — so a brand-new
+ * account was told it had Ava, Marcus, Yuki and a cloned voice with a
+ * recorded consent date, none of which existed, and any of which could be
+ * selected for a render that would then fail to find them.
  */
 export async function GET(request: Request) {
-  if (isDatabaseConfigured()) {
-    try {
-      const actor = await resolveActor(request);
-      authorize(actor, "project.view", { workspaceId: actor.workspaceId });
-
-      const { listVoicesForWorkspace } = await import("@/lib/db/repositories/voices");
-      const rows = await listVoicesForWorkspace(actor.workspaceId);
-
-      if (rows.length > 0) {
-        return NextResponse.json({
-          object: "list",
-          data: rows.map((voice) => ({
-            id: voice.id,
-            name: voice.name,
-            kind: voice.kind,
-            consented_at: voice.consentRecordedAt?.toISOString() ?? null,
-            revoked_at: voice.revokedAt?.toISOString() ?? null,
-          })),
-          has_more: false,
-        });
-      }
-    } catch (error) {
-      const refusal = unauthorized(error);
-      if (refusal) return refusal;
-      throw error;
-    }
+  if (!isDatabaseConfigured()) {
+    return NextResponse.json({ error: "Voices require a database." }, { status: 503 });
   }
 
-  const data = voiceFixtures.map((voice) => ({
-    id: voice.id,
-    name: voice.name,
-    descriptor: voice.descriptor,
-    accent: voice.accent,
-    kind: voice.kind,
-    languages: voice.languages,
-    consented_at: voice.consented ?? null,
-    revoked_at: null,
-  }));
-  return NextResponse.json({ object: "list", data, has_more: false });
+  try {
+    const actor = await resolveActor(request);
+    authorize(actor, "project.view", { workspaceId: actor.workspaceId });
+
+    const { listVoicesForWorkspace } = await import("@/lib/db/repositories/voices");
+    const rows = await listVoicesForWorkspace(actor.workspaceId);
+
+    return NextResponse.json({
+      object: "list",
+      data: rows.map((voice) => ({
+        id: voice.id,
+        name: voice.name,
+        kind: voice.kind,
+        consented_at: voice.consentRecordedAt?.toISOString() ?? null,
+        revoked_at: voice.revokedAt?.toISOString() ?? null,
+      })),
+      has_more: false,
+    });
+  } catch (error) {
+    const refusal = unauthorized(error);
+    if (refusal) return refusal;
+    throw error;
+  }
 }
 
 export async function POST(request: Request) {

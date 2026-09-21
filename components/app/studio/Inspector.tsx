@@ -4,7 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import { Icon, type IconName } from "@/components/ui/Icon";
 import { Button } from "@/components/ui/Button";
-import { brandKits, voices, localeMatrix, type Project, type Segment } from "@/lib/app-data";
+import type { Project, Segment } from "@/lib/app-data";
+import { localeLabel } from "@/lib/locales";
 import type { EditState } from "./types";
 
 type Tab = "scene" | "audio" | "brand" | "output" | "riff";
@@ -193,6 +194,21 @@ function AudioTab({
 
 /* ---------------------------------------------------------- brand */
 
+/**
+ * The brand tab.
+ *
+ * This rendered a fixture brand kit for every project in every workspace: a
+ * name, a "used by 48 videos" count, a lock icon claiming an admin had
+ * locked it, a five-swatch palette, and five "Applied" readouts naming an
+ * intro, an outro, a caption style, a cursor treatment and a music bed. None
+ * of it was stored anywhere and none of it reached the renderer, so a person
+ * reading this panel was told their video would carry a visual identity that
+ * nothing would apply.
+ *
+ * The `brand_kits` table exists and has no repository yet. Until it does,
+ * this says so. The two override switches stay because they are real —
+ * they write to the project's edit state and the renderer reads them.
+ */
 function BrandTab({
   project,
   state,
@@ -202,46 +218,25 @@ function BrandTab({
   state: EditState;
   onState: (p: Partial<EditState>) => void;
 }) {
-  const kit = brandKits.find((k) => k.name === project.brandKit) ?? brandKits[0];
   return (
     <div className="space-y-5 p-4">
       <Group label="Brand kit">
-        <div className="flex items-center gap-2.5 rounded-xl border border-[var(--line)] bg-ink-900 p-3">
-          <span className="inline-flex size-8 items-center justify-center rounded-lg bg-gradient-to-br from-cyan-400 to-iris-500 text-[0.6875rem] font-bold text-white">
-            M
-          </span>
-          <span className="min-w-0 flex-1">
-            <span className="block truncate text-[0.8125rem] font-medium text-fg-strong">{kit.name}</span>
-            <span className="block text-2xs text-fg-faint">{kit.usedBy} videos</span>
-          </span>
-          {kit.locked ? (
-            <Icon name="lock" className="size-3.5 shrink-0 text-mint-400" strokeWidth={2} />
-          ) : null}
-        </div>
-        {kit.locked ? (
-          <p className="mt-2 text-2xs leading-relaxed text-fg-faint">
-            Locked by an admin. Exports that would violate it are blocked rather than corrected.
-          </p>
-        ) : null}
-      </Group>
-
-      <Group label="Palette">
-        <div className="flex gap-1.5">
-          {kit.colors.map((c) => (
-            <span key={c} className="flex-1">
-              <span className="block h-8 rounded-lg border border-white/8" style={{ background: c }} />
-              <span className="mt-1 block font-mono text-[0.5rem] text-fg-faint">{c}</span>
+        {project.brandKit ? (
+          <div className="flex items-center gap-2.5 rounded-xl border border-[var(--line)] bg-ink-900 p-3">
+            <span className="inline-flex size-8 items-center justify-center rounded-lg bg-gradient-to-br from-cyan-400 to-iris-500 text-[0.6875rem] font-bold text-white">
+              {project.brandKit.charAt(0).toUpperCase()}
             </span>
-          ))}
-        </div>
-      </Group>
-
-      <Group label="Applied">
-        <Readout label="Intro" value={kit.intro} />
-        <Readout label="Outro" value={kit.outro} />
-        <Readout label="Captions" value={kit.captionStyle} />
-        <Readout label="Cursor" value={kit.cursor} />
-        <Readout label="Music" value={kit.music} />
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-[0.8125rem] font-medium text-fg-strong">
+                {project.brandKit}
+              </span>
+            </span>
+          </div>
+        ) : (
+          <p className="text-[0.75rem] leading-relaxed text-fg-faint">
+            No brand kit is applied to this project. Exports use the source footage as recorded.
+          </p>
+        )}
       </Group>
 
       <Group label="Overrides">
@@ -316,7 +311,7 @@ function OutputTab({ project }: { project: Project }) {
               <div key={code} className="flex items-center gap-2.5">
                 <span className="w-12 font-mono text-2xs text-fg-faint">{code}</span>
                 <span className="flex-1 truncate text-[0.75rem] text-fg-muted">
-                  {localeMatrix.find((l) => l.code === code)?.label ?? code}
+                  {localeLabel(code)}
                 </span>
               </div>
             ))}

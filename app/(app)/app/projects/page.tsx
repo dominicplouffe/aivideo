@@ -3,13 +3,12 @@ import { PageHeader } from "@/components/app/Shared";
 import { ProjectLibrary } from "@/components/app/ProjectLibrary";
 import { Button } from "@/components/ui/Button";
 import { Icon } from "@/components/ui/Icon";
-import { getProjects, dataSource } from "@/lib/data";
+import { getProjects, getTeam } from "@/lib/data";
 
 export const metadata: Metadata = { title: "Projects" };
 
 export default async function ProjectsPage() {
-  const projects = await getProjects();
-  const source = dataSource();
+  const [projects, team] = await Promise.all([getProjects(), getTeam()]);
 
   return (
     <>
@@ -29,12 +28,10 @@ export default async function ProjectsPage() {
           </>
         }
       />
-      {source === "postgres" ? (
-        <p className="border-b border-[var(--line)] px-4 py-2 font-mono text-2xs text-mint-400 md:px-8">
-          {projects.length} projects served from Postgres
-        </p>
-      ) : null}
-      <ProjectLibrary projects={projects} />
+      <ProjectLibrary
+        projects={projects}
+        members={team.map((m) => ({ id: m.id, name: m.name, email: m.email }))}
+      />
     </>
   );
 }
