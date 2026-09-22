@@ -99,7 +99,10 @@ export function Studio({
   const [planError, setPlanError] = useState<string | null>(null);
   const planKey = `${JSON.stringify(serializeEditState(state))}|${voiceId ?? ""}`;
   const planStale = plan !== null && plan.key !== planKey;
-  const previewing = planStatus === "on" && plan !== null && !planStale;
+  // A stale plan keeps playing. The audio has the words as they were when
+  // it was planned, which the person knows; dropping back to the recorded
+  // voice on every keystroke would make the preview unusable while editing.
+  const previewing = planStatus === "on" && plan !== null;
 
   const fetchPlan = useCallback(async () => {
     const key = planKey;
@@ -418,6 +421,8 @@ export function Studio({
         stale: planStale,
         error: planError,
         voiceName: narrator?.name ?? "the chosen voice",
+        // The button refreshes an out-of-date plan; turning the preview off
+        // is the separate control beside it.
         onToggle: () => {
           if (planStatus === "on" && !planStale) {
             setPlanStatus("off");
@@ -425,6 +430,10 @@ export function Studio({
           } else {
             void fetchPlan();
           }
+        },
+        onOff: () => {
+          setPlanStatus("off");
+          setTime(0);
         },
         audio: previewing && plan ? plan.audio : [],
         playbackRate: planClipAt?.speed ?? 1,

@@ -14,7 +14,10 @@ export interface NarratedPreviewControl {
   stale: boolean;
   error: string | null;
   voiceName: string;
+  /** Plan it, refresh it when stale, or turn it off when fresh. */
   onToggle: () => void;
+  /** Turn the preview off regardless of staleness. */
+  onOff: () => void;
   /** The readings to play over the picture, on the edited timeline. Empty when off. */
   audio: { segmentId: string; url: string; at: number; durationSec: number }[];
   /** The video's rate for the clip under the playhead. */
@@ -62,7 +65,7 @@ export function Canvas({
 
   const video = useRef<HTMLVideoElement>(null);
 
-  const previewing = narration?.status === "on" && !narration.stale && narration.audio.length > 0;
+  const previewing = narration?.status === "on" && narration.audio.length > 0;
   const holding = previewing && narration.holding;
 
   // Play and pause follow the Studio's transport rather than the video's own
@@ -278,29 +281,42 @@ export function Canvas({
                   narration.status === "error"
                     ? narration.error ?? "The preview failed."
                     : narration.stale && narration.status === "on"
-                      ? "The edit changed since this preview was planned."
+                      ? "You have edited since this was planned. The audio still says the old words; click to regenerate the changed chapters."
                       : `Play the edit as it will render, read by ${narration.voiceName}.`
                 }
                 aria-pressed={previewing}
                 className={cn(
                   "inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg border px-2.5 text-2xs font-medium transition-colors",
-                  previewing
-                    ? "border-cyan-500/40 bg-cyan-500/12 text-cyan-300 hover:bg-cyan-500/20"
-                    : narration.status === "error"
-                      ? "border-rose-500/40 text-rose-300 hover:bg-rose-500/10"
-                      : "border-[var(--line)] text-fg-subtle hover:border-[var(--line-strong)] hover:text-fg",
+                  previewing && narration.stale
+                    ? "border-amber-500/40 bg-amber-500/12 text-amber-300 hover:bg-amber-500/20"
+                    : previewing
+                      ? "border-cyan-500/40 bg-cyan-500/12 text-cyan-300 hover:bg-cyan-500/20"
+                      : narration.status === "error"
+                        ? "border-rose-500/40 text-rose-300 hover:bg-rose-500/10"
+                        : "border-[var(--line)] text-fg-subtle hover:border-[var(--line-strong)] hover:text-fg",
                 )}
               >
-                <Icon name="mic" className={cn("size-3.5", narration.status === "loading" && "animate-pulse")} strokeWidth={2} />
+                <Icon name={previewing && narration.stale ? "refresh" : "mic"} className={cn("size-3.5", narration.status === "loading" && "animate-pulse")} strokeWidth={2} />
                 {narration.status === "loading"
                   ? "Planning…"
-                  : previewing
-                    ? "Narrated"
-                    : narration.status === "on" && narration.stale
-                      ? "Refresh preview"
+                  : previewing && narration.stale
+                    ? "Narrated · edits not in audio yet"
+                    : previewing
+                      ? "Narrated"
                       : narration.status === "error"
                         ? "Preview failed"
                         : "Hear it narrated"}
+              </button>
+            ) : null}
+            {narration && previewing ? (
+              <button
+                type="button"
+                onClick={narration.onOff}
+                title="Back to the recorded voice"
+                aria-label="Turn the narrated preview off"
+                className="inline-flex h-8 shrink-0 items-center rounded-lg border border-[var(--line)] px-2 text-2xs text-fg-faint transition-colors hover:border-[var(--line-strong)] hover:text-fg"
+              >
+                Off
               </button>
             ) : null}
 
