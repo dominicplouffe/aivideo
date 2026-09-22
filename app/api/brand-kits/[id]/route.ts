@@ -80,7 +80,9 @@ export async function DELETE(request: Request, context: Context) {
   const guard = await requireActor(request, "brand.edit");
   if ("response" in guard) return guard.response;
   const { id } = await context.params;
-  const kit = await getBrandKit(guard.actor.workspaceId, id);
+  // From the listing, not the single read: only the listing counts the
+  // projects wearing the kit, and that number is the point of the reply.
+  const kit = (await listBrandKits(guard.actor.workspaceId)).find((k) => k.id === id);
   if (!kit) return NextResponse.json({ error: "No such kit." }, { status: 404 });
 
   // Projects pointing at it fall back to no kit: the column is `set null`
