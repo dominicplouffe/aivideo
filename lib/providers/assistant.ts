@@ -52,7 +52,6 @@ export interface EditProposal {
   /** Chapter ordinals to drop from the cut. Replaces the current set. */
   deletedSegments?: number[];
   captions?: boolean;
-  music?: boolean;
   zoomEnabled?: boolean;
 }
 
@@ -97,7 +96,6 @@ const REPLY_SCHEMA: Record<string, unknown> = {
           description: "Chapter ordinals to drop, zero-based. Replaces the current set entirely.",
         },
         captions: { type: "boolean" },
-        music: { type: "boolean" },
         zoom_enabled: { type: "boolean" },
       },
       additionalProperties: false,
@@ -176,7 +174,6 @@ function normalise(raw: unknown, chapterCount: number): EditProposal | undefined
 
   if (typeof input.remove_fillers === "boolean") out.removeFillers = input.remove_fillers;
   if (typeof input.captions === "boolean") out.captions = input.captions;
-  if (typeof input.music === "boolean") out.music = input.music;
   if (typeof input.zoom_enabled === "boolean") out.zoomEnabled = input.zoom_enabled;
 
   if (Array.isArray(input.deleted_segments)) {

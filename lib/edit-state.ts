@@ -74,7 +74,6 @@ export interface EditState {
   wordEdits: Map<string, WordEdit>;
   studioSound: boolean;
   captions: boolean;
-  music: boolean;
   presenter: boolean;
   zoomEnabled: boolean;
 }
@@ -113,7 +112,6 @@ export interface StoredEditState {
   wordEdits?: StoredWordEdit[];
   studioSound?: boolean;
   captions?: boolean;
-  music?: boolean;
   presenter?: boolean;
   zoomEnabled?: boolean;
 }
@@ -132,7 +130,6 @@ export const DEFAULT_EDIT_STATE: EditState = {
   wordEdits: new Map<string, WordEdit>(),
   studioSound: true,
   captions: true,
-  music: true,
   presenter: false,
   zoomEnabled: true,
 };
@@ -242,7 +239,6 @@ export function hydrateEditState(stored: unknown): EditState {
     wordEdits,
     studioSound: flag(raw.studioSound, DEFAULT_EDIT_STATE.studioSound),
     captions: flag(raw.captions, DEFAULT_EDIT_STATE.captions),
-    music: flag(raw.music, DEFAULT_EDIT_STATE.music),
     presenter: flag(raw.presenter, DEFAULT_EDIT_STATE.presenter),
     zoomEnabled: flag(raw.zoomEnabled, DEFAULT_EDIT_STATE.zoomEnabled),
   };
@@ -278,7 +274,6 @@ export function serializeEditState(state: EditState): StoredEditState {
       .sort((a, b) => a.s - b.s || a.w - b.w),
     studioSound: state.studioSound,
     captions: state.captions,
-    music: state.music,
     presenter: state.presenter,
     zoomEnabled: state.zoomEnabled,
   };

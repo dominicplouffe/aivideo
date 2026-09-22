@@ -5,6 +5,7 @@ import * as s from "@/lib/db/schema";
 import { getPublishedAsset, getPublishedAssetByProject } from "@/lib/db/repositories/assets";
 import { getStorage } from "@/lib/storage";
 import type { Project } from "@/lib/app-data";
+import { resolveBrand, type ResolvedBrand } from "@/lib/brand";
 
 /**
  * Resolves a public share slug.
@@ -28,6 +29,18 @@ export interface ResolvedShare {
   /** A signed, expiring URL for the rendered file. */
   videoUrl: string;
   publishedAt: string | null;
+  /** Whose page this is, and how it is dressed. */
+  brand: ShareBrand;
+}
+
+/**
+ * The share page's dressing: the workspace's name, and the project's kit
+ * when it wears one. The logo is a signed URL like the video, because the
+ * page is public and the logo route is not.
+ */
+export interface ShareBrand {
+  workspaceName: string;
+  kit: { name: string; tokens: ResolvedBrand; logoUrl: string | null } | null;
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -59,7 +72,27 @@ export async function resolveShare(slug: string): Promise<ResolvedShare | null> 
     project,
     videoUrl: signed.url,
     publishedAt: asset.publishedAt?.toISOString() ?? null,
+    brand: await shareBrand(asset.workspaceId, project),
   };
+}
+
+async function shareBrand(workspaceId: string, project: Project): Promise<ShareBrand> {
+  const [workspace] = await getDb()
+    .select({ name: s.workspaces.name })
+    .from(s.workspaces)
+    .where(eq(s.workspaces.id, workspaceId))
+    .limit(1);
+  const workspaceName = workspace?.name ?? "";
+  if (!project.brandKitId) return { workspaceName, kit: null };
+
+  const { getBrandKit } = await import("@/lib/db/repositories/brand-kits");
+  const kit = await getBrandKit(workspaceId, project.brandKitId);
+  if (!kit) return { workspaceName, kit: null };
+  const tokens = resolveBrand(kit.tokens);
+  const logoUrl = tokens.logo
+    ? (await getStorage().signedReadUrl({ workspaceId, path: tokens.logo.key }, SHARE_URL_TTL_SECONDS)).url
+    : null;
+  return { workspaceName, kit: { name: kit.name, tokens, logoUrl } };
 }
 
 /** Every published slug, for the sitemap and for static generation. */

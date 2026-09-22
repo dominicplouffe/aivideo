@@ -6,6 +6,8 @@ import { Icon } from "@/components/ui/Icon";
 import { MockApp } from "@/components/marketing/MockApp";
 import type { Project, Segment } from "@/lib/app-data";
 import type { EditState } from "./types";
+import { BrandCaption, BrandLogo, useBrandFont } from "@/components/app/brand/BrandPreview";
+import { DEFAULT_FONT, type ResolvedBrand } from "@/lib/brand";
 
 /** The narrated preview's control and playback state, from the Studio. */
 export interface NarratedPreviewControl {
@@ -38,6 +40,7 @@ export function Canvas({
   sourceTime,
   narration,
   pinning,
+  brand = null,
   onScrub,
   onTogglePlay,
 }: {
@@ -56,9 +59,12 @@ export function Canvas({
   narration?: NarratedPreviewControl;
   /** A word is waiting to be pinned to the frame under the playhead. */
   pinning?: { label: string; onConfirm: () => void; onCancel: () => void };
+  /** The project's brand kit, resolved, so captions and the logo look here as they will in the export. */
+  brand?: { tokens: ResolvedBrand; logoUrl: string | null } | null;
   onScrub: (t: number) => void;
   onTogglePlay: () => void;
 }) {
+  useBrandFont(brand?.tokens.font ?? DEFAULT_FONT);
   const zoom = state.zoomEnabled ? segment?.zoom : undefined;
   const scale = zoom?.scale ?? 1;
   const origin = zoom ? `${zoom.x}% ${zoom.y}%` : "50% 50%";
@@ -140,7 +146,12 @@ export function Canvas({
       {/* viewport */}
       <div className="flex min-h-0 flex-1 items-center justify-center bg-ink-1000 p-4 md:p-6">
         <div className="relative w-full max-w-4xl">
-          <div className="relative aspect-video overflow-hidden rounded-xl border border-[var(--line-strong)] bg-[#0B0D14] shadow-[0_24px_70px_-30px_rgba(0,0,0,0.9)]">
+          <div
+            className="relative aspect-video overflow-hidden rounded-xl border border-[var(--line-strong)] bg-[#0B0D14] shadow-[0_24px_70px_-30px_rgba(0,0,0,0.9)]"
+            // A size container, so a kit's caption scales with the frame here
+            // exactly as the burned-in one scales with the export.
+            style={{ containerType: "inline-size", fontFamily: brand ? `"${brand.tokens.font}", Inter, system-ui, sans-serif` : undefined }}
+          >
             <div
               className="absolute inset-0 transition-transform duration-[900ms] ease-[cubic-bezier(0.16,1,0.3,1)]"
               style={{ transform: `scale(${scale})`, transformOrigin: origin }}
@@ -210,14 +221,19 @@ export function Canvas({
               </span>
             ) : null}
 
-            {/* caption */}
+            {/* caption, and the kit's logo, drawn as the renderer draws them */}
             {state.captions && captionText ? (
-              <div className="absolute inset-x-0 bottom-3 flex justify-center px-6">
-                <span className="max-w-[80%] rounded-lg bg-black/68 px-3 py-1.5 text-center text-[0.75rem] leading-snug font-medium text-white/93 backdrop-blur-sm">
-                  {captionText}
-                </span>
-              </div>
+              brand ? (
+                <BrandCaption brand={brand.tokens} text={captionText} />
+              ) : (
+                <div className="absolute inset-x-0 bottom-3 flex justify-center px-6">
+                  <span className="max-w-[80%] rounded-lg bg-black/68 px-3 py-1.5 text-center text-[0.75rem] leading-snug font-medium text-white/93 backdrop-blur-sm">
+                    {captionText}
+                  </span>
+                </div>
+              )
             ) : null}
+            {brand?.logoUrl ? <BrandLogo url={brand.logoUrl} position={brand.tokens.logoPosition} /> : null}
 
             {/* play overlay */}
             {!playing ? (

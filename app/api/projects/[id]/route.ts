@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { isDatabaseConfigured } from "@/lib/db/client";
 import { needsDatabase, requireActor } from "@/lib/api/guard";
-import { getProjectById, saveEditState, saveVoice } from "@/lib/db/repositories/projects";
+import { getProjectById, saveBrandKit, saveEditState, saveVoice } from "@/lib/db/repositories/projects";
 import { recordQuietly } from "@/lib/audit/log";
 import { parseStoredSceneTiming, parseStoredSyncPoint, parseStoredWordEdit } from "@/lib/edit-state";
 
@@ -38,7 +38,7 @@ export async function GET(request: Request, context: Context) {
  * without this, one stray field from a future branch becomes permanent in
  * every customer's row, and a large one becomes permanent everywhere.
  */
-const FLAGS = ["removeFillers", "studioSound", "captions", "music", "presenter", "zoomEnabled"] as const;
+const FLAGS = ["removeFillers", "studioSound", "captions", "presenter", "zoomEnabled"] as const;
 
 /** A chapter list longer than this is not an edit, it is a mistake. */
 const MAX_SEGMENTS = 2000;
@@ -132,7 +132,7 @@ export async function PATCH(request: Request, context: Context) {
   const guard = await requireActor(request, "project.edit");
   if ("response" in guard) return guard.response;
 
-  let body: { edit_state?: unknown; voice_id?: unknown };
+  let body: { edit_state?: unknown; voice_id?: unknown; brand_kit_id?: unknown };
   try {
     body = (await request.json()) as typeof body;
   } catch {
@@ -141,8 +141,12 @@ export async function PATCH(request: Request, context: Context) {
 
   const hasEdit = body.edit_state !== undefined;
   const hasVoice = body.voice_id !== undefined;
-  if (!hasEdit && !hasVoice) {
-    return NextResponse.json({ error: "Send edit_state, voice_id, or both." }, { status: 422 });
+  const hasKit = body.brand_kit_id !== undefined;
+  if (!hasEdit && !hasVoice && !hasKit) {
+    return NextResponse.json({ error: "Send edit_state, voice_id, brand_kit_id, or several." }, { status: 422 });
+  }
+  if (hasKit && body.brand_kit_id !== null && !(typeof body.brand_kit_id === "string" && UUID.test(body.brand_kit_id))) {
+    return NextResponse.json({ error: "brand_kit_id must be a kit id or null." }, { status: 422 });
   }
 
   const editState = hasEdit ? sanitize(body.edit_state) : null;
@@ -204,6 +208,29 @@ export async function PATCH(request: Request, context: Context) {
       metadata: { voiceId, voiceName: voice?.name ?? null },
     });
     response.voice = voice;
+  }
+
+  if (hasKit) {
+    const kitId = body.brand_kit_id as string | null;
+    let kitName: string | null = null;
+    if (kitId) {
+      // A kit of this workspace, checked here rather than at render time.
+      const { getBrandKit } = await import("@/lib/db/repositories/brand-kits");
+      const kit = await getBrandKit(guard.actor.workspaceId, kitId);
+      if (!kit) return NextResponse.json({ error: "No such brand kit." }, { status: 404 });
+      kitName = kit.name;
+    }
+    const saved = await saveBrandKit(guard.actor.workspaceId, id, kitId);
+    if (!saved) return NextResponse.json({ error: "No such project." }, { status: 404 });
+    await recordQuietly({
+      workspaceId: guard.actor.workspaceId,
+      actor: guard.actor,
+      action: "project.brand_kit_changed",
+      resourceType: "project",
+      resourceId: id,
+      metadata: { brandKitId: kitId, name: kitName },
+    });
+    response.brand_kit_id = kitId;
   }
 
   return NextResponse.json(response);

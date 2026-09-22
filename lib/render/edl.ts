@@ -1,3 +1,14 @@
+import {
+  CARD_SECONDS,
+  DEFAULT_CAPTION_STYLE,
+  DEFAULT_COLORS,
+  DEFAULT_FONT,
+  type BrandColors,
+  type BrandFont,
+  type CaptionStyle,
+  type LogoPosition,
+  type ResolvedBrand,
+} from "@/lib/brand";
 import type { Project, Segment } from "@/lib/app-data";
 import { silentSpanSec, wordKey } from "@/lib/segments";
 import { chapterSpan, resolveWords, type SceneTiming, type WordEdit } from "@/lib/edit-state";
@@ -124,15 +135,47 @@ export interface Edl {
   masks: EdlMask[];
   captions: EdlCaption[];
   audio: EdlAudio[];
-  brand: {
-    colors: string[];
-    font: string;
-    captionStyle: string;
-    introSec: number;
-    outroSec: number;
-  };
-  /** Finished duration. Derived from `clips`, never stored independently. */
+  brand: EdlBrand;
+  /** Duration of the cut. Derived from `clips`, never stored independently; the brand's cards add to it, see `totalDurationSec`. */
   durationSec: number;
+}
+
+/**
+ * The brand as the encoder needs it: resolved, with the logo as a URL the
+ * worker can fetch and the cards' text already decided.
+ */
+export interface EdlBrand {
+  font: BrandFont;
+  colors: BrandColors;
+  captionStyle: CaptionStyle;
+  /** The logo file and its corner, or null for none. */
+  logo: { url: string; position: LogoPosition } | null;
+  /** The card before the cut, or null for none. */
+  intro: { title: string; line: string; durationSec: number } | null;
+  /** The card after the cut, or null for none. */
+  outro: { line: string; durationSec: number } | null;
+}
+
+/** The brand an EDL carries when its project wears no kit. */
+export function plainBrand(): EdlBrand {
+  return { font: DEFAULT_FONT, colors: { ...DEFAULT_COLORS }, captionStyle: DEFAULT_CAPTION_STYLE, logo: null, intro: null, outro: null };
+}
+
+/** A kit, resolved, as an EDL brand block. `logoUrl` is wherever the worker can fetch the logo from. */
+export function brandForRender(brand: ResolvedBrand, options: { logoUrl: string | null; title: string }): EdlBrand {
+  return {
+    font: brand.font,
+    colors: brand.colors,
+    captionStyle: brand.captionStyle,
+    logo: brand.logo && options.logoUrl ? { url: options.logoUrl, position: brand.logoPosition } : null,
+    intro: brand.intro ? { title: options.title, line: brand.intro, durationSec: CARD_SECONDS } : null,
+    outro: brand.outro ? { line: brand.outro, durationSec: CARD_SECONDS } : null,
+  };
+}
+
+/** The cut plus the cards around it: what the finished file will run to. */
+export function totalDurationSec(edl: Edl): number {
+  return edl.durationSec + (edl.brand.intro?.durationSec ?? 0) + (edl.brand.outro?.durationSec ?? 0);
 }
 
 const RESOLUTIONS: Record<string, { width: number; height: number }> = {
@@ -266,7 +309,8 @@ export interface BuildEdlInput {
   /** Synthesized narration, one clip per surviving segment. */
   narration?: { segIndex: number; url: string; durationSec: number; voiceId?: string }[];
   musicUrl?: string;
-  brand?: { colors: string[]; font: string; captionStyle: string };
+  /** The project's brand kit, resolved for the encoder. Absent means no kit. */
+  brand?: EdlBrand;
   resolution?: keyof typeof RESOLUTIONS;
   fps?: 30 | 60;
 }
@@ -450,13 +494,7 @@ export function buildEdl(input: BuildEdlInput): Edl {
     masks,
     captions: cues,
     audio,
-    brand: {
-      colors: input.brand?.colors ?? ["#6E56F8", "#22D3EE", "#0B0D14", "#F5F7FF"],
-      font: input.brand?.font ?? "Inter",
-      captionStyle: input.brand?.captionStyle ?? "Lower third, 80% opacity",
-      introSec: 0,
-      outroSec: 0,
-    },
+    brand: input.brand ?? plainBrand(),
     durationSec,
   };
 }

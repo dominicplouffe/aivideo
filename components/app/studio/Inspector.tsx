@@ -7,6 +7,10 @@ import { Button } from "@/components/ui/Button";
 import type { Project, Segment } from "@/lib/app-data";
 import { localeLabel } from "@/lib/locales";
 import { chapterSpan, DEFAULT_SCENE_TIMING, MAX_LEAD_IN_SEC, MIN_CHAPTER_SEC, type EditState, type SceneTiming } from "./types";
+import Link from "next/link";
+import { resolveBrand } from "@/lib/brand";
+import { BrandPreview, kitLogoUrl } from "@/components/app/brand/BrandPreview";
+import type { KitRecord } from "@/components/app/brand/BrandKitsEditor";
 
 type Tab = "scene" | "audio" | "brand" | "output" | "riff";
 
@@ -38,6 +42,9 @@ export function Inspector({
   voices,
   voiceId,
   onVoice,
+  brandKits,
+  brandKitId,
+  onBrandKit,
   ask,
   onAsked,
 }: {
@@ -51,6 +58,10 @@ export function Inspector({
   voices: StudioVoice[];
   voiceId: string | null;
   onVoice: (voiceId: string | null) => void;
+  /** The workspace's brand kits, and the one this project wears. */
+  brandKits: KitRecord[];
+  brandKitId: string | null;
+  onBrandKit: (kitId: string | null) => void;
   /**
    * A question pushed in from elsewhere — the transcript's action chips.
    * Opens the Riff tab and sends it, so a chip in one panel and a message
@@ -109,7 +120,9 @@ export function Inspector({
             onVoice={onVoice}
           />
         ) : null}
-        {tab === "brand" ? <BrandTab project={project} state={state} onState={onState} /> : null}
+        {tab === "brand" ? (
+          <BrandTab project={project} kits={brandKits} kitId={brandKitId} onKit={onBrandKit} state={state} onState={onState} />
+        ) : null}
         {tab === "output" ? <OutputTab project={project} /> : null}
         {tab === "riff" ? (
           <RiffTab project={project} onState={onState} ask={ask} onAsked={onAsked} />
@@ -436,7 +449,6 @@ function AudioTab({
           on={state.studioSound}
           onChange={(v) => onState({ studioSound: v })}
         />
-        <SwitchRow label="Music bed" hint="Ambient, −26 dB" on={state.music} onChange={(v) => onState({ music: v })} />
         {/* Loudness and peak were two constants that changed with a
             checkbox rather than with the audio. Nothing measures them yet. */}
       </Group>
@@ -586,55 +598,143 @@ function ChapterPreview({
 /* ---------------------------------------------------------- brand */
 
 /**
- * The brand tab.
+ * The brand tab: which kit this project wears.
  *
- * This rendered a fixture brand kit for every project in every workspace: a
- * name, a "used by 48 videos" count, a lock icon claiming an admin had
- * locked it, a five-swatch palette, and five "Applied" readouts naming an
- * intro, an outro, a caption style, a cursor treatment and a music bed. None
- * of it was stored anywhere and none of it reached the renderer, so a person
- * reading this panel was told their video would carry a visual identity that
- * nothing would apply.
- *
- * The `brand_kits` table exists and has no repository yet. Until it does,
- * this says so. The two override switches stay because they are real —
- * they write to the project's edit state and the renderer reads them.
+ * The picker saves through the project, like the voice picker, and the
+ * canvas redraws its captions and logo the moment a kit is chosen, so what
+ * this tab says and what the frame shows are never two different things.
+ * A locked kit is applied as it is: the captions switch is shown but held.
  */
 function BrandTab({
   project,
+  kits,
+  kitId,
+  onKit,
   state,
   onState,
 }: {
   project: Project;
+  kits: KitRecord[];
+  kitId: string | null;
+  onKit: (kitId: string | null) => void;
   state: EditState;
   onState: (p: Partial<EditState>) => void;
 }) {
+  const chosen = kitId ? kits.find((k) => k.id === kitId) ?? null : null;
+  const brand = resolveBrand(chosen?.tokens);
+  const held = Boolean(chosen?.locked);
+
   return (
     <div className="space-y-5 p-4">
       <Group label="Brand kit">
-        {project.brandKit ? (
-          <div className="flex items-center gap-2.5 rounded-xl border border-[var(--line)] bg-ink-900 p-3">
-            <span className="inline-flex size-8 items-center justify-center rounded-lg bg-gradient-to-br from-cyan-400 to-iris-500 text-[0.6875rem] font-bold text-white">
-              {project.brandKit.charAt(0).toUpperCase()}
-            </span>
-            <span className="min-w-0 flex-1">
-              <span className="block truncate text-[0.8125rem] font-medium text-fg-strong">
-                {project.brandKit}
-              </span>
-            </span>
-          </div>
-        ) : (
-          <p className="text-[0.75rem] leading-relaxed text-fg-faint">
-            No brand kit is applied to this project. Exports use the source footage as recorded.
+        {kits.length === 0 ? (
+          <p className="text-[0.75rem] leading-relaxed text-fg-subtle">
+            This workspace has no brand kits yet. Exports use the footage as recorded, with plain captions.{" "}
+            <Link href="/app/brand" className="text-iris-300 underline-offset-2 hover:underline">
+              Create one
+            </Link>{" "}
+            to put your logo, colours and typeface on every export.
           </p>
+        ) : (
+          <>
+            <div className="space-y-1">
+              <KitChoice active={kitId === null} onClick={() => onKit(null)} name="No kit" hint="Footage as recorded, plain captions" />
+              {kits.map((kit) => {
+                const b = resolveBrand(kit.tokens);
+                return (
+                  <KitChoice
+                    key={kit.id}
+                    active={kitId === kit.id}
+                    onClick={() => onKit(kit.id)}
+                    name={kit.name}
+                    hint={`${b.font}${kit.locked ? " · locked" : ""}`}
+                    swatches={[b.colors.accent, b.colors.background, b.colors.text]}
+                  />
+                );
+              })}
+            </div>
+            {chosen ? (
+              <div className="mt-3">
+                <BrandPreview brand={brand} logoUrl={kitLogoUrl(chosen)} caption="Captions look like this" />
+                {brand.intro || brand.outro ? (
+                  // The cards are part of the export, not of the cut, so the
+                  // canvas does not play them; they are shown here instead.
+                  <div className="mt-2 grid grid-cols-2 gap-2">
+                    {brand.intro ? (
+                      <div>
+                        <BrandPreview brand={brand} logoUrl={kitLogoUrl(chosen)} card="intro" title={project.title} />
+                        <span className="mt-1 block text-2xs text-fg-faint">Intro card · 2.5 s</span>
+                      </div>
+                    ) : null}
+                    {brand.outro ? (
+                      <div>
+                        <BrandPreview brand={brand} logoUrl={kitLogoUrl(chosen)} card="outro" />
+                        <span className="mt-1 block text-2xs text-fg-faint">Outro card · 2.5 s</span>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
+                <p className="mt-2 text-[0.75rem] leading-relaxed text-fg-subtle">
+                  Exports carry the kit&apos;s captions{brand.logo ? " and logo" : ""}
+                  {brand.intro || brand.outro ? `, with ${brand.intro && brand.outro ? "intro and outro cards" : brand.intro ? "an intro card" : "an outro card"}` : ""}
+                  . The share page takes its accent colour{brand.logo ? " and logo" : ""}.
+                </p>
+              </div>
+            ) : null}
+            <Link href="/app/brand" className="mt-2 inline-flex items-center gap-1 text-2xs text-fg-faint underline-offset-2 hover:text-fg hover:underline">
+              Manage kits
+              <Icon name="arrowUpRight" className="size-3" strokeWidth={2} />
+            </Link>
+          </>
         )}
       </Group>
 
       <Group label="Overrides">
-        <SwitchRow label="Show captions" on={state.captions} onChange={(v) => onState({ captions: v })} />
-        <SwitchRow label="Music bed" on={state.music} onChange={(v) => onState({ music: v })} />
+        <SwitchRow
+          label="Show captions"
+          hint={held ? `${chosen?.name} is locked, so its captions stay on` : undefined}
+          on={held ? true : state.captions}
+          onChange={held ? () => {} : (v) => onState({ captions: v })}
+        />
       </Group>
     </div>
+  );
+}
+
+function KitChoice({
+  active,
+  onClick,
+  name,
+  hint,
+  swatches,
+}: {
+  active: boolean;
+  onClick: () => void;
+  name: string;
+  hint: string;
+  swatches?: string[];
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className={cn(
+        "flex w-full items-center gap-2.5 rounded-lg border px-2.5 py-2 text-left transition-colors",
+        active ? "border-iris-500/50 bg-iris-500/10" : "border-[var(--line)] hover:bg-ink-900",
+      )}
+    >
+      <span className="flex shrink-0 -space-x-1">
+        {(swatches ?? ["transparent"]).map((hex, i) => (
+          <span key={i} className="size-4 rounded-full border border-fg/15" style={{ background: hex }} />
+        ))}
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-[0.8125rem] text-fg">{name}</span>
+        <span className="block truncate text-2xs text-fg-faint">{hint}</span>
+      </span>
+      {active ? <Icon name="check" className="size-3.5 shrink-0 text-iris-300" strokeWidth={2.6} /> : null}
+    </button>
   );
 }
 
@@ -753,7 +853,6 @@ interface EditProposal {
   removeFillers?: boolean;
   deletedSegments?: number[];
   captions?: boolean;
-  music?: boolean;
   zoomEnabled?: boolean;
 }
 
@@ -849,7 +948,6 @@ function RiffTab({
     const patch: Partial<EditState> = {};
     if (proposal.removeFillers !== undefined) patch.removeFillers = proposal.removeFillers;
     if (proposal.captions !== undefined) patch.captions = proposal.captions;
-    if (proposal.music !== undefined) patch.music = proposal.music;
     if (proposal.zoomEnabled !== undefined) patch.zoomEnabled = proposal.zoomEnabled;
     if (proposal.deletedSegments) patch.deletedSegments = new Set(proposal.deletedSegments);
 

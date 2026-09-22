@@ -42,5 +42,5 @@ export default async function PublicSharePage({ params }: { params: Promise<{ sl
   // tells a stranger which slugs a company is sitting on.
   if (!share) notFound();
 
-  return <SharePage project={share.project} videoUrl={share.videoUrl} />;
+  return <SharePage project={share.project} videoUrl={share.videoUrl} brand={share.brand} />;
 }

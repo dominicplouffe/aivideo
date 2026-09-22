@@ -1,5 +1,8 @@
+import path from "node:path";
 import { spawn } from "node:child_process";
-import type { Edl, EdlMask, EdlZoom } from "./edl";
+import type { Edl, EdlBrand, EdlMask, EdlZoom } from "./edl";
+import type { LogoPosition } from "@/lib/brand";
+import { fontFile, fontsDirectory } from "./fonts-path";
 
 /**
  * Compiles an EDL into an FFmpeg invocation.
@@ -30,13 +33,155 @@ export function srtTimestamp(seconds: number): string {
   return `${pad(h)}:${pad(m)}:${pad(s)},${pad(rest, 3)}`;
 }
 
-/** Burned-in captions, as a subtitle file rather than a drawtext chain. */
+/**
+ * Burned-in captions, as a subtitle file rather than a drawtext chain.
+ *
+ * Timed against the cut, not the finished file: the captions are burned
+ * onto the cut before the brand's cards are joined around it, so an intro
+ * card shifts nothing here.
+ */
 export function toSrt(edl: Edl): string {
   return edl.captions
     .map((cue, i) =>
       [`${i + 1}`, `${srtTimestamp(cue.from)} --> ${srtTimestamp(cue.until)}`, cue.text, ""].join("\n"),
     )
     .join("\n");
+}
+
+/* ------------------------------------------------------------- brand */
+
+/** `#RRGGBB` as libass writes colours: `&HAABBGGRR`, with 00 meaning opaque. */
+export function assColor(hex: string, alpha = 0): string {
+  const r = hex.slice(1, 3), g = hex.slice(3, 5), b = hex.slice(5, 7);
+  return `&H${alpha.toString(16).padStart(2, "0")}${b}${g}${r}`.toUpperCase();
+}
+
+/**
+ * The subtitle style a brand asks for.
+ *
+ * Sizes are in libass's default 384×288 play resolution, which the
+ * subtitles filter scales to the output: a FontSize of 17 is about six
+ * percent of the frame's height, the same as the Studio's preview draws.
+ * A boxed style is BorderStyle 4, the box behind the whole line, with the
+ * outline width doing duty as padding; an outlined style is a dark edge
+ * and a soft shadow with no box.
+ */
+export function captionForceStyle(brand: EdlBrand): string {
+  const boxed = brand.captionStyle.startsWith("boxed");
+  const top = brand.captionStyle.endsWith("top");
+  const style: Record<string, string | number> = {
+    FontName: brand.font,
+    FontSize: 17,
+    Bold: 1,
+    PrimaryColour: assColor(boxed ? brand.colors.text : "#FFFFFF"),
+    Alignment: top ? 8 : 2,
+    MarginV: 15,
+    MarginL: 24,
+    MarginR: 24,
+  };
+  if (boxed) {
+    Object.assign(style, {
+      BorderStyle: 4,
+      // 80% opaque, like the preview's caption box.
+      BackColour: assColor(brand.colors.background, 0x33),
+      OutlineColour: assColor(brand.colors.background, 0x33),
+      Outline: 4,
+      Shadow: 0,
+    });
+  } else {
+    Object.assign(style, {
+      BorderStyle: 1,
+      OutlineColour: assColor("#000000", 0x20),
+      BackColour: assColor("#000000", 0x80),
+      Outline: 1.4,
+      Shadow: 1,
+    });
+  }
+  return Object.entries(style)
+    .map(([key, value]) => `${key}=${value}`)
+    .join(",");
+}
+
+/** Text as drawtext wants it inside a filter graph: its own escapes, then the graph's. */
+export function escapeDrawtext(text: string): string {
+  return text
+    .replace(/\\/g, "\\\\")
+    .replace(/'/g, "\u2019")
+    .replace(/:/g, "\\:")
+    .replace(/%/g, "\\%")
+    .replace(/,/g, "\\,")
+    .replace(/;/g, "\\;")
+    .replace(/\[/g, "\\[")
+    .replace(/\]/g, "\\]");
+}
+
+/** Where the logo sits in its corner, in output pixels: 3% in from the side, 4% from the top or bottom. */
+function logoPlacement(position: LogoPosition, width: number, height: number): string {
+  const mx = Math.round(width * 0.03);
+  const my = Math.round(height * 0.04);
+  const [v, h] = position.split("-");
+  return `x=${h === "left" ? mx : `W-w-${mx}`}:y=${v === "top" ? my : `H-h-${my}`}`;
+}
+
+/**
+ * The intro or outro card as a filter chain, with no input of its own: a
+ * plain colour source, the text drawn on it, and the logo overlaid when
+ * the kit has one. Fades toward the cut so the join is not a hard cut to
+ * footage.
+ */
+function buildCardFilters(
+  edl: Edl,
+  which: "intro" | "outro",
+  options: { logoLabel: string | null; fontsDir: string },
+): { filters: string[]; out: string } | null {
+  const card = which === "intro" ? edl.brand.intro : edl.brand.outro;
+  if (!card) return null;
+  const { width, height, fps } = edl.output;
+  const brand = edl.brand;
+  const filters: string[] = [];
+  const bg = brand.colors.background.replace("#", "0x");
+  const fg = brand.colors.text.replace("#", "0x");
+  const title = which === "intro" ? (edl.brand.intro?.title ?? "") : "";
+  const line = card.line;
+  const bold = path.join(options.fontsDir, fontFile(brand.font, "Bold"));
+  const regular = path.join(options.fontsDir, fontFile(brand.font, "Regular"));
+
+  // Layout in fractions of the height, the same as the preview: the mark
+  // near a third of the way down, the title at the middle, the line below.
+  const hasMark = options.logoLabel !== null;
+  const titleSize = Math.round(height * (which === "intro" ? 0.075 : 0.058));
+  const lineSize = Math.round(height * 0.036);
+  const steps = [`color=c=${bg}:s=${width}x${height}:r=${fps}:d=${n(card.durationSec)}`, "format=yuv420p", "setsar=1"];
+  if (!hasMark) {
+    // No logo: a short accent rule where the mark would be.
+    const rw = Math.round(width * 0.12), rh = Math.max(2, Math.round(height * 0.012));
+    steps.push(`drawbox=x=(iw-${rw})/2:y=${Math.round(height * 0.36)}:w=${rw}:h=${rh}:color=${brand.colors.accent.replace("#", "0x")}:t=fill`);
+  }
+  const text = which === "intro" ? title : line;
+  const sub = which === "intro" ? line : "";
+  if (text) {
+    steps.push(
+      `drawtext=fontfile='${escapeFilterPath(bold)}':text='${escapeDrawtext(text)}':fontsize=${titleSize}:fontcolor=${fg}` +
+        `:x=(w-text_w)/2:y=${Math.round(height * 0.5)}-text_h/2`,
+    );
+  }
+  if (sub) {
+    steps.push(
+      `drawtext=fontfile='${escapeFilterPath(regular)}':text='${escapeDrawtext(sub)}':fontsize=${lineSize}:fontcolor=${fg}@0.8` +
+        `:x=(w-text_w)/2:y=${Math.round(height * 0.63)}`,
+    );
+  }
+  const fade = which === "intro"
+    ? `fade=t=out:st=${n(Math.max(0, card.durationSec - 0.35))}:d=0.35`
+    : `fade=t=in:st=0:d=0.35`;
+  const label = `card_${which}`;
+  if (hasMark) {
+    filters.push(`${steps.join(",")}[${label}_bg]`);
+    filters.push(`[${label}_bg][${options.logoLabel}]overlay=x=(W-w)/2:y=${Math.round(height * 0.3)}-h/2,${fade}[${label}]`);
+  } else {
+    filters.push(`${steps.join(",")},${fade}[${label}]`);
+  }
+  return { filters, out: label };
 }
 
 /**
@@ -301,6 +446,10 @@ export interface CompileOptions {
   sourceHasAudio?: boolean;
   /** Overwrite an existing output. */
   overwrite?: boolean;
+  /** The brand's logo, staged locally. Required when `edl.brand.logo` is set. */
+  logoPath?: string;
+  /** Where the bundled typefaces are. Defaults to `fontsDirectory()`. */
+  fontsDir?: string;
 }
 
 /** Escapes a path for use inside a filter argument. */
@@ -366,10 +515,32 @@ export function compile(edl: Edl, options: CompileOptions): FfmpegPlan {
   filters.push(...masked.filters);
   current = masked.out;
 
+  const fontsDir = options.fontsDir ?? fontsDirectory();
   const subtitlePath = edl.captions.length > 0 ? (options.subtitlePath ?? null) : null;
   if (subtitlePath) {
-    filters.push(`[${current}]subtitles='${escapeFilterPath(subtitlePath)}'[vburn]`);
+    filters.push(
+      `[${current}]subtitles='${escapeFilterPath(subtitlePath)}':fontsdir='${escapeFilterPath(fontsDir)}'` +
+        `:force_style='${captionForceStyle(edl.brand)}'[vburn]`,
+    );
     current = "vburn";
+  }
+
+  // The logo is one more input, after the audio files, so its index is
+  // known here. Split when the cards need a copy of it too.
+  const logo = edl.brand.logo && options.logoPath ? { path: options.logoPath, index: 1 + (options.audioPaths ?? []).length } : null;
+  const cards = [edl.brand.intro ? "intro" : null, edl.brand.outro ? "outro" : null].filter(Boolean) as ("intro" | "outro")[];
+  if (logo) {
+    const copies = 1 + cards.length;
+    const labels = ["logo_corner", ...cards.map((c) => `logo_${c}`)];
+    filters.push(
+      `[${logo.index}:v]format=rgba${copies > 1 ? `,split=${copies}` : ""}${labels.map((l) => `[${l}_raw]`).join("")}`,
+    );
+    // 7% of the frame's height in the corner, twice that on a card: the
+    // same proportions the Studio's preview draws.
+    filters.push(`[logo_corner_raw]scale=-2:${Math.round(height * 0.07)}[logo_corner]`);
+    for (const c of cards) filters.push(`[logo_${c}_raw]scale=-2:${Math.round(height * 0.14)}[logo_${c}]`);
+    filters.push(`[${current}][logo_corner]overlay=${logoPlacement(edl.brand.logo!.position, width, height)}[vlogo]`);
+    current = "vlogo";
   }
 
   // Narration replaces the original voice; that is the point of a studio
@@ -380,16 +551,54 @@ export function compile(edl: Edl, options: CompileOptions): FfmpegPlan {
     ? buildAudioFilters(edl)
     : buildSourceAudioMix(edl, Boolean(options.sourceHasAudio));
   filters.push(...audio.filters);
+  let audioOut = audio.out;
+
+  // The cards, around the cut. Video and audio are each concatenated in
+  // the same order; the cut's audio is held to the cut's length first, so
+  // a reading that ran past the footage cannot push the outro card late.
+  if (cards.length > 0) {
+    const videoParts: string[] = [];
+    const audioParts: string[] = [];
+    filters.push(`[${current}]format=yuv420p,setsar=1[vbody]`);
+    if (audioOut) {
+      filters.push(`[${audioOut}]atrim=0:${n(edl.durationSec)},asetpts=PTS-STARTPTS,aformat=sample_rates=48000:channel_layouts=stereo[abody]`);
+    }
+    for (const which of cards) {
+      const card = buildCardFilters(edl, which, { logoLabel: logo ? `logo_${which}` : null, fontsDir });
+      if (!card) continue;
+      filters.push(...card.filters);
+      const duration = which === "intro" ? edl.brand.intro!.durationSec : edl.brand.outro!.durationSec;
+      if (audioOut) filters.push(`anullsrc=r=48000:cl=stereo:d=${n(duration)}[a_${which}]`);
+      if (which === "intro") {
+        videoParts.push(`[${card.out}]`, "[vbody]");
+        if (audioOut) audioParts.push(`[a_${which}]`, "[abody]");
+      } else {
+        if (videoParts.length === 0) {
+          videoParts.push("[vbody]");
+          if (audioOut) audioParts.push("[abody]");
+        }
+        videoParts.push(`[${card.out}]`);
+        if (audioOut) audioParts.push(`[a_${which}]`);
+      }
+    }
+    filters.push(`${videoParts.join("")}concat=n=${videoParts.length}:v=1:a=0[vfinal]`);
+    current = "vfinal";
+    if (audioOut) {
+      filters.push(`${audioParts.join("")}concat=n=${audioParts.length}:v=0:a=1[afinal]`);
+      audioOut = "afinal";
+    }
+  }
 
   const args: string[] = [];
   if (options.overwrite !== false) args.push("-y");
   args.push("-i", options.sourcePath);
   for (const path of options.audioPaths ?? []) args.push("-i", path);
+  if (logo) args.push("-i", logo.path);
 
   args.push("-filter_complex", filters.join(";"));
   args.push("-map", `[${current}]`);
-  if (audio.out) {
-    args.push("-map", `[${audio.out}]`);
+  if (audioOut) {
+    args.push("-map", `[${audioOut}]`);
     args.push("-c:a", edl.output.audioCodec, "-b:a", "192k");
     // Paired with `apad` above: audio is padded past the video and then cut
     // back to it, so the video's length always wins.

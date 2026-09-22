@@ -1,7 +1,7 @@
-import "server-only";
-import { and, asc, eq, sql } from "drizzle-orm";
+import { and, asc, eq, isNull, sql } from "drizzle-orm";
 import { getDb } from "../client";
 import * as s from "../schema";
+import type { BrandLogo, BrandTokens } from "@/lib/brand";
 
 /**
  * Brand kits.
@@ -19,17 +19,13 @@ import * as s from "../schema";
  * independent edits with no way to say which belonged to the same change.
  */
 
-/** The design tokens a kit carries. Every field is optional. */
-export interface BrandTokens {
-  /** Hex values, in the order they should be shown. */
-  colors?: string[];
-  font?: string;
-  intro?: string;
-  outro?: string;
-  captionStyle?: string;
-  cursor?: string;
-  music?: string;
-}
+/*
+ * Not `server-only`: the render worker reads kits through this module to
+ * find the typeface and colours a render was asked for, and the worker is a
+ * process rather than a request.
+ */
+
+export type { BrandTokens } from "@/lib/brand";
 
 export interface BrandKit {
   id: string;
@@ -59,19 +55,19 @@ function toKit(row: typeof s.brandKits.$inferSelect, usedBy = 0): BrandKit {
 }
 
 export async function listBrandKits(workspaceId: string): Promise<BrandKit[]> {
+  // Counted in the query. The fixture carried a `usedBy` number written by
+  // hand, so "48 videos inherit this kit" was true of no workspace. A join
+  // rather than a correlated subquery: the subquery form counted zero for
+  // every kit once the table it named was also the one being selected from.
   const rows = await getDb()
     .select({
       kit: s.brandKits,
-      // Counted in the query. The fixture carried a `usedBy` number written
-      // by hand, so "48 videos inherit this kit" was true of no workspace.
-      usedBy: sql<number>`(
-        select count(*) from ${s.projects}
-         where ${s.projects.brandKitId} = ${s.brandKits.id}
-           and ${s.projects.deletedAt} is null
-      )::int`,
+      usedBy: sql<number>`count(${s.projects.id})::int`,
     })
     .from(s.brandKits)
+    .leftJoin(s.projects, and(eq(s.projects.brandKitId, s.brandKits.id), isNull(s.projects.deletedAt)))
     .where(eq(s.brandKits.workspaceId, workspaceId))
+    .groupBy(s.brandKits.id)
     .orderBy(asc(s.brandKits.createdAt));
 
   return rows.map((row) => toKit(row.kit, Number(row.usedBy ?? 0)));
@@ -131,6 +127,23 @@ export async function updateBrandKit(
     .where(and(eq(s.brandKits.workspaceId, workspaceId), eq(s.brandKits.id, id)))
     .returning();
   return row ? toKit(row) : null;
+}
+
+/**
+ * Records where a kit's logo now lives, or that it has none. Bumps the
+ * version like any other change: a render with the old logo has to be
+ * tellable from one with the new.
+ */
+export async function setBrandKitLogo(
+  workspaceId: string,
+  id: string,
+  logo: BrandLogo | null,
+): Promise<BrandKit | null> {
+  const current = await getBrandKit(workspaceId, id);
+  if (!current) return null;
+  const { logo: _dropped, ...rest } = current.tokens;
+  void _dropped;
+  return updateBrandKit(workspaceId, id, { tokens: logo ? { ...rest, logo } : rest });
 }
 
 export async function deleteBrandKit(workspaceId: string, id: string): Promise<boolean> {

@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/Button";
 import type { Project } from "@/lib/app-data";
 import { LOCALES } from "@/lib/locales";
 import { site } from "@/lib/site";
+import { CARD_SECONDS } from "@/lib/brand";
 
 type Step = "configure" | "rendering" | "done" | "error";
 
@@ -55,10 +56,13 @@ const resolutions = ["2160p", "1440p", "1080p", "720p"];
 export function ExportDialog({
   project,
   duration,
+  brand = null,
   onClose,
 }: {
   project: Project;
   duration: number;
+  /** The kit the export will wear, for saying what it adds. */
+  brand?: { name: string; cards: number; logo: boolean } | null;
   onClose: () => void;
 }) {
   const [step, setStep] = useState<Step>("configure");
@@ -312,8 +316,9 @@ export function ExportDialog({
                     {billedMinutes} video minutes will be billed
                   </p>
                   <p className="mt-0.5 text-2xs text-fg-faint">
-                    {formatDuration(duration)} finished · billed from the encoded output, not this estimate
+                    {formatDuration(duration + (brand?.cards ?? 0) * CARD_SECONDS)} finished · billed from the encoded output, not this estimate
                   </p>
+                  {brand ? <p className="mt-0.5 text-2xs text-fg-faint">{brandLine(brand)}</p> : null}
                 </div>
 
               </div>
@@ -373,6 +378,7 @@ export function ExportDialog({
                   <p className="mt-1 text-[0.8125rem] text-fg-muted">
                     {formatDuration(duration)} at {resolution}, cut to your edit.
                     {narration ? ` Narrated by ${narration.voice.name}.` : ""}
+                    {brand ? ` ${brandLine(brand)}` : ""}
                   </p>
                 </div>
               </div>
@@ -628,4 +634,13 @@ function Pill({
       {children}
     </button>
   );
+}
+
+/** "Dressed in Acme, with an intro and outro card and your logo." */
+function brandLine(brand: { name: string; cards: number; logo: boolean }): string {
+  const parts: string[] = [];
+  if (brand.cards === 2) parts.push("an intro and outro card");
+  else if (brand.cards === 1) parts.push("a title card");
+  if (brand.logo) parts.push("your logo");
+  return `Dressed in ${brand.name}${parts.length > 0 ? `, with ${parts.join(" and ")}` : ""}.`;
 }

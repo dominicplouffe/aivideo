@@ -9,10 +9,14 @@ import { LogoMark } from "@/components/brand/Logo";
 import { MockApp } from "@/components/marketing/MockApp";
 import type { Project } from "@/lib/app-data";
 import { WatchTracker } from "./WatchTracker";
+import { DEFAULT_FONT } from "@/lib/brand";
+import { useBrandFont } from "@/components/app/brand/BrandPreview";
+import type { ShareBrand } from "@/lib/share/resolve";
 
 export function SharePage({
   project,
   videoUrl = null,
+  brand = null,
 }: {
   project: Project;
   /**
@@ -22,7 +26,17 @@ export function SharePage({
    * those keep the illustrated player. Everything else gets a real one.
    */
   videoUrl?: string | null;
+  /**
+   * Whose page this is. The header names the workspace, not a fixture
+   * company, and a project wearing a brand kit takes the kit's logo,
+   * typeface and accent colour.
+   */
+  brand?: ShareBrand | null;
 }) {
+  const kit = brand?.kit ?? null;
+  const accent = kit?.tokens.colors.accent ?? null;
+  const name = brand?.workspaceName || project.title;
+  useBrandFont(kit?.tokens.font ?? DEFAULT_FONT);
   const [tab, setTab] = useState<"video" | "guide" | "tour">("video");
   const [chapter, setChapter] = useState(0);
   const [copied, setCopied] = useState(false);
@@ -67,17 +81,37 @@ export function SharePage({
   };
 
   return (
-    <div data-theme="dark" className="min-h-dvh bg-ink-1000 text-fg">
+    <div
+      data-theme="dark"
+      className="min-h-dvh bg-ink-1000 text-fg"
+      style={
+        accent
+          ? ({
+              // The kit's accent, where the page's own purple would be.
+              "--color-iris-500": accent,
+              "--color-iris-400": accent,
+              "--color-iris-300": accent,
+              "--color-cyan-400": accent,
+              fontFamily: `"${kit!.tokens.font}", Inter, system-ui, sans-serif`,
+            } as React.CSSProperties)
+          : undefined
+      }
+    >
       {/* branded header */}
       <header className="hairline-b bg-ink-950">
         <div className="container-page flex h-14 items-center justify-between gap-4">
-          <div className="flex items-center gap-2.5">
-            <span className="inline-flex size-7 items-center justify-center rounded-lg bg-gradient-to-br from-cyan-400 to-iris-500 text-[0.6875rem] font-bold text-white">
-              M
-            </span>
-            <span className="text-[0.9375rem] font-semibold tracking-[-0.02em] text-fg-strong">
-              Meridian
-            </span>
+          <div className="flex min-w-0 items-center gap-2.5">
+            {kit?.logoUrl ? (
+              <img src={kit.logoUrl} alt={`${name} logo`} className="h-7 w-auto max-w-[9rem] object-contain" />
+            ) : (
+              <span
+                className="inline-flex size-7 shrink-0 items-center justify-center rounded-lg text-[0.6875rem] font-bold text-white"
+                style={{ background: accent ?? "linear-gradient(135deg, var(--color-cyan-400), var(--color-iris-500))" }}
+              >
+                {name.charAt(0).toUpperCase()}
+              </span>
+            )}
+            <span className="truncate text-[0.9375rem] font-semibold tracking-[-0.02em] text-fg-strong">{name}</span>
           </div>
           <div className="flex items-center gap-2">
             {/* The language switcher changed a state variable and nothing
@@ -182,7 +216,7 @@ export function SharePage({
                   <>
                     <div className="absolute top-3 left-3 flex items-center gap-1.5 rounded-md bg-black/45 px-2 py-1 backdrop-blur-sm">
                       <span className="size-3 rounded-[4px] bg-gradient-to-br from-cyan-400 to-iris-500" />
-                      <span className="text-[0.5rem] font-semibold text-white/85">Meridian</span>
+                      <span className="text-[0.5rem] font-semibold text-white/85">{name}</span>
                     </div>
 
                     <div className="absolute inset-x-0 bottom-9 flex justify-center px-6">
@@ -322,7 +356,7 @@ export function SharePage({
             <LogoMark className="size-4" gradientId="share-logo" />
             Made with DemoRiff
           </Link>
-          <p className="text-2xs text-fg-faint">© Meridian Logistics. All rights reserved.</p>
+          <p className="text-2xs text-fg-faint">© {name}. All rights reserved.</p>
         </div>
       </footer>
     </div>

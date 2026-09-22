@@ -88,6 +88,8 @@ export interface Project {
    * the id the picker and the renderer work with.
    */
   voiceId?: string | null;
+  /** The brand kit applied to renders and the share page, or null for none. `brandKit` above is its name. */
+  brandKitId?: string | null;
   /** The Studio's saved decisions. Absent means "nobody has edited this yet". */
   editState?: Record<string, unknown> | null;
 }

@@ -24,6 +24,9 @@ interface NarrationPlan {
   words: { seg: number; word: number; start: number; end: number }[];
 }
 import { Transcript, type WordEditChange } from "./Transcript";
+import { resolveBrand } from "@/lib/brand";
+import { kitLogoUrl } from "@/components/app/brand/BrandPreview";
+import type { KitRecord } from "@/components/app/brand/BrandKitsEditor";
 import { Inspector, type StudioVoice } from "./Inspector";
 import { ExportDialog } from "./ExportDialog";
 import {
@@ -83,6 +86,29 @@ export function Studio({
     };
   }, []);
   const narrator = voiceId ? voices.find((v) => v.id === voiceId) ?? null : null;
+
+  // The brand kits the workspace has, and which one this project wears.
+  // The canvas draws captions and the logo the kit's way, so this is
+  // fetched here and not in the Brand tab.
+  const [brandKits, setBrandKits] = useState<KitRecord[]>([]);
+  const [brandKitId, setBrandKitId] = useState<string | null>(project.brandKitId ?? null);
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/brand-kits")
+      .then((r) => (r.ok ? r.json() : { data: [] }))
+      .then((body: { data?: KitRecord[] }) => {
+        if (!cancelled) setBrandKits(body.data ?? []);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  const brandKit = brandKitId ? brandKits.find((k) => k.id === brandKitId) ?? null : null;
+  const brand = useMemo(
+    () => (brandKit ? { kit: brandKit, tokens: resolveBrand(brandKit.tokens), logoUrl: kitLogoUrl(brandKit) } : null),
+    [brandKit],
+  );
   // With a voice chosen, chapters play whole and the cut is a cut of words,
   // not of footage. The timeline and the strip follow the render's rule.
   const narrated = voiceId !== null;
@@ -465,6 +491,27 @@ export function Studio({
     }
   }, [copying, dirty, project.id, router, state]);
 
+  const chooseBrandKit = useCallback(
+    async (next: string | null) => {
+      const previous = brandKitId;
+      setBrandKitId(next);
+      setSaved("saving");
+      try {
+        const response = await fetch(`/api/projects/${project.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ brand_kit_id: next }),
+        });
+        if (!response.ok) throw new Error();
+        setSaved("saved");
+      } catch {
+        setBrandKitId(previous);
+        setSaved("error");
+      }
+    },
+    [brandKitId, project.id],
+  );
+
   const setWordsCut = useCallback((keys: string[], cut: boolean) => {
     setState((s) => {
       const next = new Set(s.cutWords);
@@ -712,6 +759,7 @@ export function Studio({
             mediaUrl={mediaUrl}
             sourceTime={sourceTime}
             narration={narratedPreview}
+            brand={brand}
             pinning={
               pinning
                 ? {
@@ -754,6 +802,9 @@ export function Studio({
             voices={voices}
             voiceId={voiceId}
             onVoice={(next) => void chooseVoice(next)}
+            brandKits={brandKits}
+            brandKitId={brandKitId}
+            onBrandKit={(next) => void chooseBrandKit(next)}
             ask={ask}
             onAsked={() => setAsk(null)}
           />
@@ -787,7 +838,20 @@ export function Studio({
       </div>
 
       {exportOpen ? (
-        <ExportDialog project={project} duration={duration} onClose={() => setExportOpen(false)} />
+        <ExportDialog
+          project={project}
+          duration={duration}
+          brand={
+            brand
+              ? {
+                  name: brand.kit.name,
+                  cards: Number(Boolean(brand.tokens.intro)) + Number(Boolean(brand.tokens.outro)),
+                  logo: Boolean(brand.logoUrl),
+                }
+              : null
+          }
+          onClose={() => setExportOpen(false)}
+        />
       ) : null}
     </div>
   );

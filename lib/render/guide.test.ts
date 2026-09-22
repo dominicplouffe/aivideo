@@ -6,6 +6,7 @@ import path from "node:path";
 import test from "node:test";
 import { buildGuide, grabFrame } from "./guide";
 import type { Edl } from "./edl";
+import { plainBrand } from "./edl";
 
 function hasFfmpeg(): boolean {
   try {
@@ -35,7 +36,7 @@ function edl(overrides: Partial<Edl> = {}): Edl {
       { from: 4, until: 7, text: "Click new shipment to start." },
     ],
     audio: [],
-    brand: { colors: [], font: "Inter", captionStyle: "", introSec: 0, outroSec: 0 },
+    brand: plainBrand(),
     durationSec: 7,
     ...overrides,
   };

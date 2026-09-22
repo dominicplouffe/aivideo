@@ -88,6 +88,7 @@ function toProject(
     createdAt: r.createdAt.toISOString(),
     owner: extras.ownerFixtureId,
     brandKit: extras.brandKitName,
+    brandKitId: r.brandKitId ?? null,
     voice: extras.voiceLabel,
     voiceId: r.voiceId ?? null,
     locales: extras.locales,
@@ -431,6 +432,20 @@ export async function saveEditState(
     .update(s.projects)
     .set({ editState, updatedAt: new Date() })
     .where(and(eq(s.projects.id, projectId), eq(s.projects.workspaceId, workspaceId)))
+    .returning({ id: s.projects.id });
+  return Boolean(updated);
+}
+
+/** Sets, or clears, the brand kit a project's renders and share page wear. */
+export async function saveBrandKit(
+  workspaceId: string,
+  projectId: string,
+  brandKitId: string | null,
+): Promise<boolean> {
+  const [updated] = await getDb()
+    .update(s.projects)
+    .set({ brandKitId, updatedAt: new Date() })
+    .where(and(eq(s.projects.id, projectId), eq(s.projects.workspaceId, workspaceId), isNull(s.projects.deletedAt)))
     .returning({ id: s.projects.id });
   return Boolean(updated);
 }

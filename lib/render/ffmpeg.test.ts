@@ -3,7 +3,7 @@ import { execFileSync } from "node:child_process";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import test from "node:test";
+import test, { describe, it } from "node:test";
 import type { Edl } from "./edl";
 import {
   anchorExpression, buildAudioFilters, buildCutFilters, buildMaskFilters,
@@ -11,6 +11,7 @@ import {
   parseProgress, probe, runFfmpeg, srtTimestamp, toSrt, zoomExpression,
 } from "./ffmpeg";
 import { renderEdl } from "./worker";
+import { plainBrand } from "./edl";
 
 /**
  * A filter graph is a program. These tests read it as one.
@@ -46,7 +47,7 @@ function edl(overrides: Partial<Edl> = {}): Edl {
     masks: [],
     captions: [],
     audio: [],
-    brand: { colors: [], font: "Inter", captionStyle: "", introSec: 0, outroSec: 0 },
+    brand: plainBrand(),
     durationSec: 7,
     ...overrides,
   };
@@ -386,4 +387,60 @@ test("a silent source is still rendered, without audio", () => {
   assert.ok(plan.args.includes("-an"), "no audio stream is mapped");
   const graph = plan.args[plan.args.indexOf("-filter_complex") + 1];
   assert.ok(!graph.includes("[0:a]"), "the graph never references a stream that is not there");
+});
+
+describe("brand in the graph", () => {
+  const branded = (): Edl => ({
+    ...edl(),
+    captions: [{ from: 0.5, until: 2, text: "Hello" }],
+    brand: {
+      font: "Montserrat",
+      colors: { accent: "#FF6A00", background: "#0B0D14", text: "#F5F7FF" },
+      captionStyle: "boxed-top",
+      logo: { url: "file:///tmp/logo.png", position: "top-left" },
+      intro: { title: "Acme's tour", line: "Two minutes, honest", durationSec: 2.5 },
+      outro: { line: "Start free at acme.com", durationSec: 2.5 },
+    },
+  });
+
+  it("styles captions from the kit and points libass at the bundled fonts", () => {
+    const plan = compile(branded(), { sourcePath: "in.mp4", outputPath: "out.mp4", subtitlePath: "c.srt", fontsDir: "/fonts", sourceHasAudio: true });
+    const graph = plan.args[plan.args.indexOf("-filter_complex") + 1];
+    assert.match(graph, /subtitles='c\.srt':fontsdir='\/fonts':force_style='FontName=Montserrat,/);
+    assert.match(graph, /Alignment=8/, "a top style aligns to the top");
+    assert.match(graph, /BorderStyle=4/, "a boxed style draws the box");
+    assert.match(graph, /PrimaryColour=&H00FFF7F5/, "the kit's text colour, as libass writes it");
+  });
+
+  it("adds the logo as one more input and overlays it in its corner", () => {
+    const plan = compile(branded(), { sourcePath: "in.mp4", outputPath: "out.mp4", logoPath: "/tmp/logo.png", sourceHasAudio: false });
+    assert.deepEqual(plan.args.slice(plan.args.indexOf("-i", 2), plan.args.indexOf("-i", 2) + 2), ["-i", "/tmp/logo.png"]);
+    const graph = plan.args[plan.args.indexOf("-filter_complex") + 1];
+    assert.match(graph, /\[1:v\]format=rgba,split=3/);
+    assert.match(graph, /scale=-2:50\[logo_corner\]/, "7% of a 720 frame");
+    assert.match(graph, /\[logo_corner\]overlay=x=38:y=29\[vlogo\]/, "top-left, 3% and 4% in");
+  });
+
+  it("joins the cards around the cut, video and audio alike", () => {
+    const plan = compile(branded(), { sourcePath: "in.mp4", outputPath: "out.mp4", logoPath: "/tmp/logo.png", fontsDir: "/fonts", sourceHasAudio: true });
+    const graph = plan.args[plan.args.indexOf("-filter_complex") + 1];
+    assert.match(graph, /\[card_intro\]\[vbody\]\[card_outro\]concat=n=3:v=1:a=0\[vfinal\]/);
+    assert.match(graph, /\[a_intro\]\[abody\]\[a_outro\]concat=n=3:v=0:a=1\[afinal\]/);
+    assert.match(graph, /drawtext=fontfile='\/fonts\/Montserrat-Bold\.ttf':text='Acme’s tour'/, "the title, with the quote made safe");
+    assert.match(graph, /text='Two minutes\\, honest'/, "the comma escaped for the graph");
+    assert.match(graph, /\[card_intro_bg\]\[logo_intro\]overlay/, "the logo on the card");
+    assert.ok(plan.args.includes("[vfinal]") && plan.args.includes("[afinal]"), "the joined streams are what is written");
+  });
+
+  it("leaves the graph alone when the project wears no kit", () => {
+    const plan = compile({ ...edl(), captions: [{ from: 0, until: 1, text: "x" }] }, { sourcePath: "in.mp4", outputPath: "out.mp4", subtitlePath: "c.srt", fontsDir: "/fonts", sourceHasAudio: true });
+    const graph = plan.args[plan.args.indexOf("-filter_complex") + 1];
+    assert.match(graph, /force_style='FontName=Inter,/);
+    assert.doesNotMatch(graph, /concat=n=3/);
+    assert.doesNotMatch(graph, /overlay/);
+  });
+
+  it("does not shift the captions for an intro card, which is joined after they are burned", () => {
+    assert.match(toSrt(branded()), /00:00:00,500 --> 00:00:02,000/);
+  });
 });

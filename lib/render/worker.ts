@@ -7,7 +7,7 @@ import { ProviderError } from "@/lib/providers/errors";
 import { recordQuietly } from "@/lib/audit/log";
 import { checkBeforeWork, markNoticeSent, meter } from "@/lib/billing/metering";
 import { emitEvent, type WebhookEventType } from "@/lib/webhooks/outbound";
-import { buildEdl, validateEdl, type Edl } from "./edl";
+import { buildEdl, validateEdl, type Edl, brandForRender, totalDurationSec, type EdlBrand } from "./edl";
 import { compile, probe, runFfmpeg, toSrt } from "./ffmpeg";
 import { narrate, type NarrationReport } from "./narration";
 import { codeVersion } from "@/lib/version";
@@ -73,7 +73,7 @@ function extensionOf(url: string): string {
 }
 
 /** Downloads an EDL's source and audio into the scratch directory. */
-async function stage(edl: Edl, dir: string): Promise<{ sourcePath: string; audioPaths: string[] }> {
+async function stage(edl: Edl, dir: string): Promise<{ sourcePath: string; audioPaths: string[]; logoPath: string | undefined }> {
   const sourcePath = path.join(dir, "source" + (extensionOf(edl.source.url) || ".mp4"));
   await writeFile(sourcePath, await fetchBytes(edl.source.url));
 
@@ -85,7 +85,15 @@ async function stage(edl: Edl, dir: string): Promise<{ sourcePath: string; audio
     audioPaths.push(target);
   }
 
-  return { sourcePath, audioPaths };
+  // The brand's logo, when the kit has one. Fetched the same way as the
+  // take: it lives in the workspace's storage, behind the same credentials.
+  let logoPath: string | undefined;
+  if (edl.brand.logo) {
+    logoPath = path.join(dir, "logo" + (extensionOf(edl.brand.logo.url) || ".png"));
+    await writeFile(logoPath, await fetchBytes(edl.brand.logo.url));
+  }
+
+  return { sourcePath, audioPaths, logoPath };
 }
 
 /** Reads a `file://`, `http(s)://` or storage-signed URL into memory. */
@@ -150,7 +158,7 @@ export async function renderEdl(
 
   const dir = await mkdtemp(path.join(options.scratchRoot ?? tmpdir(), "demoriff-render-"));
   try {
-    const { sourcePath, audioPaths } = await stage(edl, dir);
+    const { sourcePath, audioPaths, logoPath } = await stage(edl, dir);
 
     let subtitlePath: string | undefined;
     if (edl.captions.length > 0) {
@@ -168,12 +176,14 @@ export async function renderEdl(
       outputPath,
       audioPaths,
       subtitlePath,
+      logoPath,
       sourceHasAudio: source.hasAudio,
     });
 
     await runFfmpeg(plan.args, {
       binary: options.ffmpegBinary,
-      durationSec: edl.durationSec,
+      // The cards count: progress is measured against the whole file.
+      durationSec: totalDurationSec(edl),
       onProgress: options.onProgress,
     });
 
@@ -621,6 +631,25 @@ async function defaultResolveEdl(job: Job): Promise<Edl> {
 
   const { hydrateEditState } = await import("@/lib/edit-state");
   const state = hydrateEditState(project.editState);
+
+  // The kit the project wears, resolved for the encoder. A locked kit keeps
+  // its captions on whatever the Studio's switch says.
+  let brand: EdlBrand | undefined;
+  let locked = false;
+  if (project.brandKitId) {
+    const { getBrandKit } = await import("@/lib/db/repositories/brand-kits");
+    const { resolveBrand } = await import("@/lib/brand");
+    const kit = await getBrandKit(job.workspaceId, project.brandKitId);
+    if (kit) {
+      const resolved = resolveBrand(kit.tokens);
+      brand = brandForRender(resolved, {
+        logoUrl: resolved.logo ? `storage://${job.workspaceId}/${resolved.logo.key}` : null,
+        title: project.title,
+      });
+      locked = kit.locked;
+    }
+  }
+
   return buildEdl({
     project,
     sourceUrl: payload.sourceUrl,
@@ -630,7 +659,8 @@ async function defaultResolveEdl(job: Job): Promise<Edl> {
     wordEdits: state.wordEdits,
     sceneTiming: state.sceneTiming,
     continuous: Boolean(project.voiceId),
-    captions: state.captions,
+    captions: state.captions || locked,
+    brand,
     zoomEnabled: state.zoomEnabled,
     resolution: (payload.video?.resolution as "1080p") ?? "1080p",
     fps: (payload.video?.fps as 30 | 60) ?? 30,

@@ -14,6 +14,7 @@ import { getProviders, setProviders } from "@/lib/providers";
 import { processOne } from "./worker";
 import { probe, runFfmpeg } from "./ffmpeg";
 import type { Edl } from "./edl";
+import { plainBrand } from "./edl";
 
 /**
  * The worker's job is to turn a queued row into a stored video and a truthful
@@ -82,7 +83,7 @@ function edlFor(sourcePath: string): Edl {
     masks: [],
     captions: [],
     audio: [],
-    brand: { colors: [], font: "Inter", captionStyle: "", introSec: 0, outroSec: 0 },
+    brand: plainBrand(),
     durationSec: 6,
   };
 }
