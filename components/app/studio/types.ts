@@ -44,12 +44,53 @@ export interface EditedWord {
  * Flattens the project into a single edited timeline. Words the current edit
  * removes are excluded, so `end` of the last entry is the finished duration —
  * exactly the number the customer is billed on.
+ *
+ * `continuous` is the narrated form: each surviving chapter plays whole, so
+ * an entry runs from its word's source time to the next surviving word's
+ * (the pause after a word belongs to it), the first entry starts at the
+ * chapter's start and the last ends at its end, and a removed word's time
+ * folds into its neighbour rather than vanishing. Same rule as the EDL's
+ * `continuous`, so the preview scrubs what the render shows.
  */
-export function buildTimeline(project: Project, state: EditState): EditedWord[] {
+export function buildTimeline(
+  project: Project,
+  state: EditState,
+  options: { continuous?: boolean } = {},
+): EditedWord[] {
   const out: EditedWord[] = [];
   let t = 0;
   project.segments.forEach((seg: Segment, segIndex) => {
     if (state.deletedSegments.has(segIndex)) return;
+    if (options.continuous && seg.words.length > 0) {
+      const span = silentSpanSec(seg);
+      if (span <= 0) return;
+      const kept = resolveWords(seg, segIndex, state).filter(
+        (w) => !isWordRemoved(state, segIndex, w.wordIndex, w),
+      );
+      if (kept.length === 0) {
+        out.push({ segIndex, wordIndex: 0, text: "", start: t, end: t + span, srcStart: seg.start, cut: false, em: false, silent: true });
+        t += span;
+        return;
+      }
+      kept.forEach((w, i) => {
+        const srcStart = i === 0 ? seg.start : w.t;
+        const srcEnd = i === kept.length - 1 ? seg.end : kept[i + 1].t;
+        const length = Math.max(0, srcEnd - srcStart);
+        out.push({
+          segIndex,
+          wordIndex: w.wordIndex,
+          text: w.text,
+          start: t,
+          end: t + length,
+          srcStart,
+          cut: w.cut,
+          em: w.em,
+          silent: false,
+        });
+        t += length;
+      });
+      return;
+    }
     if (seg.words.length === 0) {
       // Silent footage plays as recorded; see `silentSpanSec`.
       const span = silentSpanSec(seg);

@@ -2,7 +2,12 @@ import type { Project } from "@/lib/app-data";
 import type { SynthesisProvider } from "@/lib/providers/types";
 import { ProviderError } from "@/lib/providers/errors";
 import { hydrateEditState, isWordRemoved, resolveWords, type EditState } from "@/lib/edit-state";
-import { segmentOutputSeconds, withNarration, type Edl, type NarrationClip } from "./edl";
+import {
+  narrationCaptions, segmentOutputSeconds, withClipsFor, withNarration,
+  type Edl, type EdlCaption, type NarrationClip,
+} from "./edl";
+import { anchorsFromWords, retimeChapter, type RetimeSummary } from "./retime";
+import type { StillSpan } from "@/lib/pipeline/stillness";
 
 /**
  * Reads a project's transcript aloud in the voice it chose.
@@ -13,14 +18,14 @@ import { segmentOutputSeconds, withNarration, type Edl, type NarrationClip } fro
  * begins on the finished timeline and the mix drops the recording's own
  * audio in its favour.
  *
- * **Fitting.** A synthetic reading rarely runs exactly as long as the person
- * took to say it. When it runs short, the silence until the next chapter is
- * simply part of the shot. When it runs long it would talk over the next
- * chapter, so it is fitted in two steps: the vendor is asked to read faster,
- * within the range it allows, and any remainder is a time-stretch in the
- * mix, capped where a voice starts to sound hurried. Past that cap the
- * overrun is reported rather than hidden, so the person can shorten the
- * chapter's words or accept the overlap knowingly.
+ * **Fitting.** A synthetic reading never runs exactly as long as the person
+ * took to say it, so one of the two has to bend. Over continuous footage it
+ * is the footage: the transcriber timed each word as spoken and the
+ * synthesizer times it as read, and between those anchors the picture is
+ * held, hurried or, last of all, trimmed to fit — see `retimeChapter`. The
+ * voice is never hurried. The older path, for a word-cut EDL with no room to
+ * bend, still paces the voice and stretches it within limits, and reports
+ * what it could not fit.
  */
 
 /** Slightly long is fine: nobody hears a three-percent overrun. */
@@ -33,7 +38,7 @@ const TEMPO_MAX = 1.35;
 export interface NarratedChapter {
   segIndex: number;
   title: string;
-  /** How long the footage for this chapter runs. */
+  /** How long the footage for this chapter ran before fitting. */
   availableSec: number;
   /** How long the narration runs after fitting. */
   spokenSec: number;
@@ -43,6 +48,8 @@ export interface NarratedChapter {
   tempo: number;
   /** Seconds the narration still overruns the footage, 0 when it fits. */
   overrunSec: number;
+  /** How the footage was bent to the reading, when it was the footage that bent. */
+  retime?: RetimeSummary;
 }
 
 export interface NarrationReport {
@@ -57,6 +64,16 @@ export interface NarrateInput {
   synthesis: SynthesisProvider;
   /** Respellings from the workspace glossary: shown text → how it is said. */
   pronunciations?: Record<string, string>;
+  /** Whether to caption the reading. Defaults to the edit's captions toggle, on. */
+  captions?: boolean;
+  /** Where the recording's picture stands still; lets the retimer bend still footage first. */
+  stillness?: StillSpan[] | null;
+  /**
+   * Whether the EDL keeps chapters whole (see BuildEdlInput.continuous), so
+   * the footage can bend to the reading. Every narrated render is built that
+   * way; false only for the older word-cut path, where the voice bends.
+   */
+  continuous?: boolean;
   /** Looks a voice up. Injectable so the fitting logic can be tested without a database. */
   lookupVoice: (id: string) => Promise<{
     id: string;
@@ -69,18 +86,60 @@ export interface NarrateInput {
 
 const round = (value: number) => Math.round(value * 1000) / 1000;
 
+/** A chapter's surviving words: what is shown, and what is said. */
+export function chapterWords(project: Project, state: EditState, segIndex: number): { text: string; spoken: string }[] {
+  const segment = project.segments[segIndex];
+  if (!segment) return [];
+  return resolveWords(segment, segIndex, state)
+    .filter((word) => !isWordRemoved(state, segIndex, word.wordIndex, word))
+    .map((word) => ({ text: word.text, spoken: word.spoken }));
+}
+
 /**
  * What a chapter's narrator says: its words as rewritten, in their spoken
  * form where one was given, less the ones the edit removes.
  */
 export function chapterText(project: Project, state: EditState, segIndex: number): string {
-  const segment = project.segments[segIndex];
-  if (!segment) return "";
-  return resolveWords(segment, segIndex, state)
-    .filter((word) => !isWordRemoved(state, segIndex, word.wordIndex, word))
+  return chapterWords(project, state, segIndex)
     .map((word) => word.spoken)
     .join(" ")
     .trim();
+}
+
+/**
+ * Applies the glossary's respellings to one spoken word, keeping its
+ * punctuation. Done here, per word, rather than in the adapter over the
+ * whole text, so the count of tokens sent is known word by word — which is
+ * what lets the vendor's timings be mapped back onto the transcript's words.
+ */
+function respell(spoken: string, pronunciations: Record<string, string>): string {
+  const m = spoken.match(/^([^\p{L}\p{N}]*)(.*?)([^\p{L}\p{N}]*)$/u);
+  if (!m) return spoken;
+  const [, lead, core, trail] = m;
+  for (const [term, saidAs] of Object.entries(pronunciations)) {
+    if (core.toLowerCase() === term.toLowerCase()) return `${lead}${saidAs}${trail}`;
+  }
+  return spoken;
+}
+
+/** Caption cues from the vendor's word timings, grouped like the word-timed captions are. */
+function captionsFromTimings(
+  words: { text: string; start: number; end: number }[],
+  at: number,
+): EdlCaption[] {
+  const cues: EdlCaption[] = [];
+  let group: { text: string; start: number; end: number }[] = [];
+  const flush = () => {
+    if (group.length === 0) return;
+    cues.push({ from: at + group[0].start, until: at + group[group.length - 1].end, text: group.map((w) => w.text).join(" ") });
+    group = [];
+  };
+  for (const w of words) {
+    group.push(w);
+    if (/[.!?]$/.test(w.text) || group.length >= 7) flush();
+  }
+  flush();
+  return cues;
 }
 
 export async function narrate(input: NarrateInput): Promise<{ edl: Edl; report: NarrationReport } | null> {
@@ -112,46 +171,121 @@ export async function narrate(input: NarrateInput): Promise<{ edl: Edl; report: 
   }
 
   const state = hydrateEditState(project.editState);
+  const pronunciations = input.pronunciations ?? {};
+  const wantCaptions = input.captions ?? state.captions;
   const clips: NarrationClip[] = [];
   const chapters: NarratedChapter[] = [];
+  let working = edl;
 
   for (const [segIndex, segment] of project.segments.entries()) {
     if (state.deletedSegments.has(segIndex)) continue;
-    const text = chapterText(project, state, segIndex);
+
+    // The chapter's surviving words, each with what is shown, what is said
+    // (respelled per the glossary), where it was spoken in the recording,
+    // and how many tokens it sends — so the vendor's timings map back.
+    const kept = resolveWords(segment, segIndex, state)
+      .filter((word) => !isWordRemoved(state, segIndex, word.wordIndex, word))
+      .map((word) => {
+        const spoken = word.spoken
+          .split(/\s+/)
+          .filter(Boolean)
+          .map((token) => respell(token, pronunciations))
+          .join(" ");
+        return { text: word.text, spoken, sourceStart: word.t, tokens: spoken.split(/\s+/).filter(Boolean).length };
+      })
+      .filter((word) => word.tokens > 0);
+    const text = kept.map((w) => w.spoken).join(" ").trim();
     if (!text) continue;
 
-    const availableSec = segmentOutputSeconds(edl, segment.id);
+    const availableSec = segmentOutputSeconds(working, segment.id);
     if (availableSec <= 0) continue;
+    const chapterClips = working.clips.filter((clip) => clip.label === segment.id);
+    const continuous = input.continuous ?? true;
 
-    const request = {
-      text,
-      voiceId: voice.providerVoiceId,
-      locale: edl.locale,
-      workspaceId: input.workspaceId,
-      ...(input.pronunciations && Object.keys(input.pronunciations).length > 0
-        ? { pronunciations: input.pronunciations }
-        : {}),
-    };
+    const request = { text, voiceId: voice.providerVoiceId, locale: working.locale, workspaceId: input.workspaceId };
     let result = await input.synthesis.synthesize(request);
-    let pace = 1;
 
+    // The vendor's timing per transcript word: the first token's start and
+    // the last token's end of the tokens that word sent.
+    const timed: { text: string; start: number; end: number; sourceStart: number }[] = [];
+    if (result.words && result.words.length === kept.reduce((n, w) => n + w.tokens, 0)) {
+      let cursor = 0;
+      for (const word of kept) {
+        const first = result.words[cursor];
+        const last = result.words[cursor + word.tokens - 1];
+        timed.push({ text: word.text, start: first.start, end: last.end, sourceStart: word.sourceStart });
+        cursor += word.tokens;
+      }
+    }
+
+    if (continuous) {
+      // The footage bends to the reading. Anchors where a sentence ends on
+      // both clocks; still footage is held or hurried first.
+      const anchors = anchorsFromWords(
+        timed.map((w) => ({ source: w.sourceStart, output: w.start, sentenceEnd: /[.!?]$/.test(w.text) })),
+        { sourceStart: segment.start, sourceEnd: segment.end, narrationSec: result.durationSec },
+      );
+      const fitted = retimeChapter({
+        sourceStart: segment.start,
+        sourceEnd: segment.end,
+        narrationSec: result.durationSec,
+        anchors,
+        still: input.stillness ?? [],
+      });
+      working = withClipsFor(
+        working,
+        segment.id,
+        fitted.clips.map((clip) => ({ ...clip, label: segment.id })),
+      );
+      const chapterStart = working.clips.find((clip) => clip.label === segment.id)?.outputStart ?? 0;
+      clips.push({
+        segmentId: segment.id,
+        url: result.storageUrl ?? result.audioUrl,
+        durationSec: result.durationSec,
+        voiceId: voice.id,
+        ...(wantCaptions
+          ? {
+              captions:
+                timed.length > 0
+                  ? captionsFromTimings(timed, chapterStart)
+                  : narrationCaptions(kept.map((w) => w.text), chapterStart, result.durationSec),
+            }
+          : {}),
+      });
+      chapters.push({
+        segIndex,
+        title: segment.title,
+        availableSec: round(availableSec),
+        spokenSec: round(result.durationSec),
+        pace: 1,
+        tempo: 1,
+        overrunSec: 0,
+        retime: fitted.summary,
+      });
+      continue;
+    }
+
+    // A word-cut EDL has no footage to bend, so the voice bends instead.
+    const chapterStart = chapterClips[0]?.outputStart ?? 0;
+    let pace = 1;
     if (result.durationSec > availableSec * FIT_TOLERANCE) {
       pace = Math.min(VENDOR_PACE_MAX, result.durationSec / availableSec);
       result = await input.synthesis.synthesize({ ...request, direction: { pace } });
     }
-
     let tempo = 1;
     if (result.durationSec > availableSec * FIT_TOLERANCE) {
       tempo = Math.min(TEMPO_MAX, result.durationSec / availableSec);
     }
     const spokenSec = result.durationSec / tempo;
-
     clips.push({
       segmentId: segment.id,
       url: result.storageUrl ?? result.audioUrl,
       durationSec: spokenSec,
       voiceId: voice.id,
       tempo,
+      ...(wantCaptions
+        ? { captions: narrationCaptions(kept.map((w) => w.text), chapterStart, Math.min(spokenSec, availableSec)) }
+        : {}),
     });
     chapters.push({
       segIndex,
@@ -165,7 +299,7 @@ export async function narrate(input: NarrateInput): Promise<{ edl: Edl; report: 
   }
 
   return {
-    edl: withNarration(edl, clips),
+    edl: withNarration(working, clips),
     report: { voice: { id: voice.id, name: voice.name }, chapters },
   };
 }

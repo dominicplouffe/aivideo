@@ -745,6 +745,8 @@ export const recordings = pgTable(
     events: jsonb("events").$type<unknown[]>(),
     // Word-level alignment. Segment-level would not support the edit model.
     transcript: jsonb("transcript").$type<{ language: string; words: unknown[] } | null>(),
+    // Spans where the picture stands still, in seconds. See lib/pipeline/stillness.ts.
+    stillness: jsonb("stillness").$type<[number, number][] | null>(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     deletedAt: timestamp("deleted_at", { withTimezone: true }),
   },

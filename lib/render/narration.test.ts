@@ -31,20 +31,22 @@ function project(overrides: Partial<Project> = {}): Project {
   } as Project;
 }
 
-/** Speaks every request at `secondsPerWord`, honouring the pace it is given. */
+/** Speaks every request at `secondsPerWord`, honouring the pace it is given, and times each word. */
 function synthesizer(secondsPerWord: number) {
   const requests: SynthesisRequest[] = [];
   const provider: SynthesisProvider = {
     name: "stub-synthesis",
     async synthesize(req) {
       requests.push(req);
-      const words = req.text.split(/\s+/).length;
+      const tokens = req.text.split(/\s+/);
       const pace = req.direction?.pace ?? 1;
+      const per = secondsPerWord / pace;
       return {
-        audioUrl: `signed://${req.voiceId}/${words}`,
-        storageUrl: `storage://ws/synthesis/${req.voiceId}/${words}-${pace}.wav`,
-        durationSec: (words * secondsPerWord) / pace,
+        audioUrl: `signed://${req.voiceId}/${tokens.length}`,
+        storageUrl: `storage://ws/synthesis/${req.voiceId}/${tokens.length}-${pace}.wav`,
+        durationSec: tokens.length * per,
         sampleRate: 44100,
+        words: tokens.map((text, i) => ({ text, start: i * per, end: (i + 1) * per })),
       };
     },
     async listVoices() { return []; },
@@ -68,7 +70,8 @@ test("each chapter is read from the words the edit keeps, and placed where it be
   const edl = buildEdl({ project: p, sourceUrl: "file://a.mp4", cutWords: new Set(["0:1"]) });
   const { provider, requests } = synthesizer(0.5);
 
-  const result = await narrate({ edl, project: p, workspaceId: "ws", synthesis: provider, lookupVoice: lookup });
+  // A word-cut EDL: the older path, where the footage is already cut to the words.
+  const result = await narrate({ edl, project: p, workspaceId: "ws", synthesis: provider, lookupVoice: lookup, continuous: false });
   assert.ok(result);
   assert.deepEqual(requests.map((r) => r.text), ["Open board.", "Then save."]);
   assert.equal(requests[0].voiceId, "el_rhys");
@@ -92,6 +95,56 @@ test("the narrator reads the spoken form of a rewritten word", async () => {
   assert.deepEqual(requests.map((r) => r.text), ["Open core board.", "Now save."]);
 });
 
+test("over continuous footage the picture bends to the reading and the voice is never hurried", async () => {
+  const p = project();
+  const edl = buildEdl({ project: p, sourceUrl: "file://a.mp4", continuous: true });
+  // 2s per word: seg_1 (3 words) reads 6s over 4s of footage; seg_2 (2 words)
+  // reads 4s over 2s. Neither reading is paced or stretched — the footage
+  // is held and slowed to fit, and the chapter now occupies the reading.
+  const { provider, requests } = synthesizer(2);
+  const result = await narrate({
+    edl, project: p, workspaceId: "ws", synthesis: provider, lookupVoice: lookup,
+    stillness: [[1, 3]], // two still seconds inside seg_1
+  });
+  assert.ok(result);
+  assert.equal(requests.length, 2, "one synthesis per chapter, no re-pacing");
+  const [first, second] = result.report.chapters;
+  assert.equal(first.pace, 1);
+  assert.equal(first.tempo, 1);
+  assert.equal(first.availableSec, 4);
+  assert.equal(first.spokenSec, 6);
+  // seg_1 grew by holding its still footage; seg_2 has no still footage and slowed then held.
+  assert.ok(first.retime!.heldSec > 1.9 && first.retime!.heldSec < 2.1, JSON.stringify(first.retime));
+  assert.equal(first.retime!.slowedSec, 0);
+  assert.ok(second.retime!.slowedSec > 0);
+  // The EDL's chapters now run as long as their readings, back to back.
+  const seg1 = result.edl.clips.filter((c) => c.label === "seg_1");
+  const seg2 = result.edl.clips.filter((c) => c.label === "seg_2");
+  const plays = (cs: typeof seg1) => cs.reduce((n, c) => n + (c.sourceEnd - c.sourceStart) / (c.speed ?? 1) + (c.holdSec ?? 0), 0);
+  assert.ok(Math.abs(plays(seg1) - 6) < 1e-6);
+  assert.ok(Math.abs(plays(seg2) - 4) < 1e-6);
+  assert.equal(result.edl.audio[1].at, 6, "the second reading starts where the first chapter now ends");
+  assert.ok(Math.abs(result.edl.durationSec - 10) < 1e-6);
+  // Captions follow the vendor's word timings, showing the text.
+  assert.equal(result.edl.captions[0].text, "Open the board.");
+  assert.equal(result.edl.captions[0].from, 0);
+  assert.ok(Math.abs(result.edl.captions[0].until - 6) < 1e-6);
+});
+
+test("glossary respellings are applied per word so the vendor's timings still map onto the transcript", async () => {
+  const p = project({ editState: { wordEdits: [{ s: 0, w: 1, n: 1, text: "Qore" }] } });
+  const edl = buildEdl({ project: p, sourceUrl: "file://a.mp4", continuous: true });
+  const { provider, requests } = synthesizer(1);
+  const result = await narrate({
+    edl, project: p, workspaceId: "ws", synthesis: provider, lookupVoice: lookup,
+    pronunciations: { Qore: "core" },
+  });
+  assert.equal(requests[0].text, "Open core board.");
+  assert.equal(requests[0].pronunciations, undefined);
+  // The caption shows the spelling, not the respelling.
+  assert.equal(result!.edl.captions[0].text, "Open Qore board.");
+});
+
 test("a reading that runs long is paced by the vendor first, then stretched, then reported", async () => {
   const p = project();
   const edl = buildEdl({ project: p, sourceUrl: "file://a.mp4" });
@@ -99,7 +152,7 @@ test("a reading that runs long is paced by the vendor first, then stretched, the
   // fits it exactly. seg_2 (2 words) reads 3.2s for 2s: pace maxes at 1.2
   // (2.67s), the stretch takes the rest (1.333×).
   const { provider, requests } = synthesizer(1.6);
-  const result = await narrate({ edl, project: p, workspaceId: "ws", synthesis: provider, lookupVoice: lookup });
+  const result = await narrate({ edl, project: p, workspaceId: "ws", synthesis: provider, lookupVoice: lookup, continuous: false });
   assert.ok(result);
 
   const [first, second] = result.report.chapters;
@@ -122,7 +175,7 @@ test("past what pacing and stretching can absorb, the overrun is reported rather
   const edl = buildEdl({ project: p, sourceUrl: "file://a.mp4" });
   // 3s per word: seg_2 reads 6s for 2s of footage. Pace 1.2 → 5s; stretch caps at 1.35 → 3.7s. Still 1.7s over.
   const { provider } = synthesizer(3);
-  const result = await narrate({ edl, project: p, workspaceId: "ws", synthesis: provider, lookupVoice: lookup });
+  const result = await narrate({ edl, project: p, workspaceId: "ws", synthesis: provider, lookupVoice: lookup, continuous: false });
   const second = result!.report.chapters[1];
   assert.equal(second.tempo, 1.35);
   assert.ok(second.overrunSec > 1.6 && second.overrunSec < 1.8, `overrun ${second.overrunSec}`);

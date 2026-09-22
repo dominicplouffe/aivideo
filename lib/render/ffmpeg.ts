@@ -50,11 +50,26 @@ export function buildCutFilters(edl: Edl): { filters: string[]; out: string } {
   const filters: string[] = [];
   const labels: string[] = [];
 
+  // A browser's screen capture writes a frame only when the picture changes
+  // — one a second on a still screen — so a trim of that stream ends at its
+  // last frame, not at the cut, and every clip comes out short by up to a
+  // second. Made constant-rate first, so a trim is the length it says.
+  const sources = edl.clips.map((_, i) => `[v${i}]`);
+  filters.push(
+    `[0:v]fps=${edl.output.fps}${edl.clips.length > 1 ? `,split=${edl.clips.length}` : ""}${sources.join("")}`,
+  );
+
   edl.clips.forEach((clip, i) => {
     const label = `c${i}`;
-    filters.push(
-      `[0:v]trim=start=${n(clip.sourceStart)}:end=${n(clip.sourceEnd)},setpts=PTS-STARTPTS[${label}]`,
-    );
+    const speed = clip.speed ?? 1;
+    // Rebase, then scale: a clip at 2× has its timestamps halved, and a held
+    // frame clones the last frame for the hold (`tpad` with clone).
+    const steps = [
+      `trim=start=${n(clip.sourceStart)}:end=${n(clip.sourceEnd)}`,
+      Math.abs(speed - 1) > 1e-6 ? `setpts=(PTS-STARTPTS)/${n(speed)}` : "setpts=PTS-STARTPTS",
+    ];
+    if ((clip.holdSec ?? 0) > 1e-3) steps.push(`tpad=stop_mode=clone:stop_duration=${n(clip.holdSec!)}`);
+    filters.push(`[v${i}]${steps.join(",")}[${label}]`);
     labels.push(`[${label}]`);
   });
 

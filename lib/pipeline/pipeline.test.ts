@@ -297,6 +297,27 @@ test("apply to all finds every place the transcriber wrote the phrase, punctuati
   assert.equal(withTrailingPunctuation("Claude!", "O."), "Claude!");
 });
 
+test("a narrated timeline plays each chapter whole, pauses and all", () => {
+  // Two chapters with pauses: words at 0–0.4 and 1.0–1.4 in a 0–2s chapter,
+  // then a word at 3.0–3.5 in a 2.5–4s chapter.
+  const project = projectWith([
+    { ordinal: 0, title: "Open", startSec: 0, endSec: 2, words: [{ w: "Open", t: 0, d: 0.4 }, { w: "board.", t: 1, d: 0.4 }] },
+    { ordinal: 1, title: "Then", startSec: 2.5, endSec: 4, words: [{ w: "Then", t: 3, d: 0.5 }] },
+  ]);
+  const timeline = buildTimeline(project, DEFAULT_EDIT_STATE, { continuous: true });
+  // Each entry runs to the next word; the last runs to the chapter's end.
+  assert.deepEqual(
+    timeline.map((w) => [w.text, w.start, w.end, w.srcStart]),
+    [["Open", 0, 1, 0], ["board.", 1, 2, 1], ["Then", 2, 3.5, 2.5]],
+  );
+  // Edited time 0.7 is inside the pause after "Open": source time 0.7, no jump.
+  assert.ok(Math.abs((sourceTimeAt(timeline, 0.7) ?? 0) - 0.7) < 1e-9);
+  assert.ok(Math.abs(timelineDuration(timeline) - 3.5) < 1e-9);
+  // Cutting a word folds its time into its neighbour rather than removing footage.
+  const cut = buildTimeline(project, { ...DEFAULT_EDIT_STATE, cutWords: new Set([wordKey(0, 1)]) }, { continuous: true });
+  assert.deepEqual(cut.map((w) => [w.text, w.start, w.end]), [["Open", 0, 2], ["Then", 2, 3.5]]);
+});
+
 test("keeping the fillers makes edited time and source time agree again", () => {
   const drafts = segmentTranscript(transcript("So@0-0.3 um@0.3-1.3 click.@1.3-1.6"));
   const timeline = buildTimeline(projectWith(drafts), {

@@ -90,7 +90,8 @@ npm run start           # serve the production build
 npm run typecheck       # tsc --noEmit
 npm test                # 566 unit tests, with DATABASE_URL set
 npm run test:all        # end-to-end: signup → publish → analytics (see below)
-npm run worker          # render + webhook + audit-stream worker (needs ffmpeg)
+npm run worker:dev      # render + webhook + audit-stream worker (needs ffmpeg); restarts on code changes
+npm run worker          # the same, without the watcher — what a deploy runs
 npm run build:extension # the Chromium capture extension, into extension/dist
 npm run db:studio       # browse the database
 ```
@@ -113,7 +114,7 @@ rather than a test of anything — it cost a run to a request that never got a
 connection.
 
 **Run the worker to export anything.** Rendering happens in a separate
-process, so `npm run worker` has to be running alongside `npm run dev` for
+process, so `npm run worker:dev` has to be running alongside `npm run dev` for
 the export dialog to produce a file. It needs `ffmpeg` and `ffprobe` on the
 PATH. If you forget, the dialog says so and names the command rather than
 spinning.

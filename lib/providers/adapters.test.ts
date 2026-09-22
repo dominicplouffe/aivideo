@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { AnthropicTranslation } from "./anthropic";
 import { DeepgramTranscription } from "./deepgram";
-import { ElevenLabsSynthesis } from "./elevenlabs";
+import { ElevenLabsSynthesis, wordsFromAlignment } from "./elevenlabs";
 import { ProviderError } from "./errors";
 import { ruleMasking } from "./masking";
 import { setStorage } from "@/lib/storage";
@@ -143,6 +143,20 @@ test("deepgram separates retryable failures from permanent ones", async () => {
 
 // --- ElevenLabs ------------------------------------------------------------
 
+/** What the timestamped endpoint answers: base64 audio plus per-character timing. */
+function speech(pcm: Uint8Array, text = "Click here.", seconds = 1): Response {
+  const chars = [...text];
+  const step = seconds / chars.length;
+  return jsonResponse({
+    audio_base64: Buffer.from(pcm).toString("base64"),
+    alignment: {
+      characters: chars,
+      character_start_times_seconds: chars.map((_, i) => i * step),
+      character_end_times_seconds: chars.map((_, i) => (i + 1) * step),
+    },
+  });
+}
+
 test("elevenlabs derives exact duration from the PCM byte count", async () => {
   const { adapter, writes } = recordingStorage();
   setStorage(adapter);
@@ -151,7 +165,10 @@ test("elevenlabs derives exact duration from the PCM byte count", async () => {
   const oneSecond = new Uint8Array(24000 * 2);
   const provider = new ElevenLabsSynthesis({
     apiKey: "k",
-    fetchImpl: async () => new Response(oneSecond, { status: 200 }),
+    fetchImpl: async (url) => {
+      assert.match(String(url), /\/with-timestamps\?/);
+      return speech(oneSecond);
+    },
   });
 
   const result = await provider.synthesize({
@@ -163,14 +180,19 @@ test("elevenlabs derives exact duration from the PCM byte count", async () => {
 
   assert.equal(result.durationSec, 1);
   assert.equal(result.sampleRate, 24000);
+  // Word timings from the vendor's character timings: two words, in order.
+  assert.deepEqual(result.words?.map((w) => w.text), ["Click", "here."]);
+  assert.ok((result.words?.[1].start ?? 0) > (result.words?.[0].end ?? 1));
   assert.equal(result.audioUrl.startsWith("signed://synthesis/v1/"), true);
   // The worker's reference: under the requesting tenant, and never expiring.
   assert.equal(result.storageUrl?.startsWith(`storage://${WORKSPACE}/synthesis/v1/`), true);
   assert.equal(result.storageUrl?.endsWith(".wav"), true);
-  assert.equal(writes.length, 1);
-  // Stored as WAV: a 44-byte header in front of the PCM, so ffmpeg can read it.
+  // Stored as WAV — a 44-byte header in front of the PCM, so ffmpeg can read
+  // it — with the word timings beside it for the next reader of the cache.
+  assert.equal(writes.length, 2);
   assert.equal(writes[0].contentType, "audio/wav");
   assert.equal(writes[0].bytes, 44 + oneSecond.byteLength);
+  assert.equal(writes[1].contentType, "application/json");
   setStorage(null);
 });
 
@@ -190,7 +212,7 @@ test("elevenlabs falls back to the format every plan has when a higher one is re
           { status: 403 },
         );
       }
-      return new Response(new Uint8Array(24000 * 2), { status: 200 });
+      return speech(new Uint8Array(24000 * 2), "Hi.");
     },
   });
   const result = await provider.synthesize({ text: "Hi.", voiceId: "v1", locale: "en-US", workspaceId: WORKSPACE });
@@ -203,16 +225,21 @@ test("elevenlabs falls back to the format every plan has when a higher one is re
 test("elevenlabs does not buy a clip it has already stored", async () => {
   const { adapter, writes } = recordingStorage();
   let vendorCalls = 0;
-  const stored = new Map<string, number>();
+  const stored = new Map<string, Uint8Array>();
   // A storage that remembers what was put, so the second call can find it.
   adapter.put = async (key, body, contentType) => {
-    stored.set(key.path, body.byteLength);
+    stored.set(key.path, body);
     writes.push({ key: `${key.workspaceId}/${key.path}`, bytes: body.byteLength, contentType });
     return { key: key.path, bytes: body.byteLength, contentType, createdAt: new Date() };
   };
   adapter.head = async (key) => {
-    const bytes = stored.get(key.path);
-    return bytes === undefined ? null : { key: key.path, bytes, contentType: "audio/wav", createdAt: new Date() };
+    const body = stored.get(key.path);
+    return body === undefined ? null : { key: key.path, bytes: body.byteLength, contentType: "audio/wav", createdAt: new Date() };
+  };
+  adapter.get = async (key) => {
+    const body = stored.get(key.path);
+    if (!body) throw new Error("missing");
+    return body;
   };
   setStorage(adapter);
 
@@ -220,7 +247,7 @@ test("elevenlabs does not buy a clip it has already stored", async () => {
     apiKey: "k",
     fetchImpl: async () => {
       vendorCalls += 1;
-      return new Response(new Uint8Array(44100 * 2), { status: 200 });
+      return speech(new Uint8Array(24000 * 2));
     },
   });
   const request = { text: "Click here.", voiceId: "v1", locale: "en-US", workspaceId: WORKSPACE };
@@ -230,6 +257,8 @@ test("elevenlabs does not buy a clip it has already stored", async () => {
   assert.equal(vendorCalls, 1);
   assert.equal(again.durationSec, first.durationSec);
   assert.equal(again.storageUrl, first.storageUrl);
+  // The timings came back from the cache too.
+  assert.deepEqual(again.words, first.words);
 
   // A different pace is a different clip.
   await provider.synthesize({ ...request, direction: { pace: 1.1 } });
@@ -240,7 +269,7 @@ test("elevenlabs does not buy a clip it has already stored", async () => {
 test("elevenlabs refuses to store audio under no tenant", async () => {
   const provider = new ElevenLabsSynthesis({
     apiKey: "k",
-    fetchImpl: async () => new Response(new Uint8Array(1024), { status: 200 }),
+    fetchImpl: async () => speech(new Uint8Array(1024)),
   });
   await assert.rejects(
     () => provider.synthesize({ text: "x", voiceId: "v1", locale: "en-US", workspaceId: "" }),
@@ -257,7 +286,7 @@ test("elevenlabs applies the direction the vendor can honour", async () => {
     apiKey: "k",
     fetchImpl: async (_url, init) => {
       sent = JSON.parse(String(init?.body)) as Record<string, unknown>;
-      return new Response(new Uint8Array(1024), { status: 200 });
+      return speech(new Uint8Array(1024));
     },
   });
 
@@ -275,6 +304,18 @@ test("elevenlabs applies the direction the vendor can honour", async () => {
   assert.deepEqual((sent.voice_settings as Record<string, unknown>).speed, 1.2);
   assert.equal(sent.language_code, "pt");
   setStorage(null);
+});
+
+test("word timings come from character timings, skipping the spaces", () => {
+  const words = wordsFromAlignment({
+    characters: ["H", "i", " ", "t", "o", ".", " "],
+    character_start_times_seconds: [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6],
+    character_end_times_seconds: [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7],
+  });
+  assert.deepEqual(words, [
+    { text: "Hi", start: 0, end: 0.2 },
+    { text: "to.", start: 0.3, end: 0.6 },
+  ]);
 });
 
 test("elevenlabs refuses to clone a voice without a consent recording", async () => {

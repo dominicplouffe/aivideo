@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-  buildEdl, edlDuration, mapOutputToSource, mapSourceToOutput, segmentOutputSeconds, validateEdl,
-  withNarration, type Edl, type EdlClip,
+  buildEdl, clipOutputSeconds, edlDuration, mapOutputToSource, mapSourceToOutput, narrationCaptions,
+  segmentOutputSeconds, validateEdl, withClipsFor, withNarration, type Edl, type EdlClip,
 } from "./edl";
 import type { Project } from "@/lib/app-data";
 import { wordKey } from "@/lib/segments";
@@ -190,6 +190,74 @@ test("narration lands where its chapter begins, and a removed chapter gets none"
   assert.deepEqual(validateEdl(narrated), []);
   // The original is untouched: adding narration returns a new EDL.
   assert.equal(edl.audio.length, 0);
+});
+
+test("a narrated project keeps each chapter's footage whole and cuts only words", () => {
+  const edl = buildEdl({
+    project: project(),
+    sourceUrl: "file://a.mp4",
+    continuous: true,
+    removeFillers: true,
+    cutWords: new Set([wordKey(1, 2)]),
+  });
+  // Both chapters, start to end, whatever the words say: seg_1 0–3, seg_2 5–7.
+  assert.deepEqual(edl.clips.map((c) => [c.sourceStart, c.sourceEnd, c.outputStart]), [[0, 3, 0], [5, 7, 3]]);
+  assert.equal(edl.durationSec, 5);
+  // No word-timed captions: the narration brings its own.
+  assert.deepEqual(edl.captions, []);
+  assert.deepEqual(validateEdl(edl), []);
+
+  const dropped = buildEdl({ project: project(), sourceUrl: "file://a.mp4", continuous: true, deletedSegments: new Set([0]) });
+  assert.deepEqual(dropped.clips.map((c) => [c.sourceStart, c.sourceEnd, c.outputStart]), [[5, 7, 0]]);
+});
+
+test("narration captions spread the chapter's words over the reading", () => {
+  const cues = narrationCaptions(["Open", "the", "board.", "Then", "save."], 10, 4);
+  assert.equal(cues.length, 2);
+  assert.equal(cues[0].text, "Open the board.");
+  assert.equal(cues[0].from, 10);
+  assert.ok(Math.abs(cues[1].until - 14) < 1e-9);
+  // The longer sentence gets the larger share.
+  assert.ok(cues[0].until - cues[0].from > cues[1].until - cues[1].from);
+  // withNarration carries the cues onto the EDL.
+  const edl = buildEdl({ project: project(), sourceUrl: "file://a.mp4", continuous: true });
+  const narrated = withNarration(edl, [{ segmentId: "seg_1", url: "u", durationSec: 2, captions: cues }]);
+  assert.equal(narrated.captions.length, 2);
+});
+
+test("a clip's speed and hold change how long it occupies, and the maps follow", () => {
+  const clips: EdlClip[] = [
+    { sourceStart: 0, sourceEnd: 4, outputStart: 0, speed: 2 }, // 2s on screen
+    { sourceStart: 6, sourceEnd: 8, outputStart: 2, holdSec: 3 }, // 2s + 3s held
+  ];
+  assert.equal(clipOutputSeconds(clips[0]), 2);
+  assert.equal(clipOutputSeconds(clips[1]), 5);
+  assert.equal(edlDuration(clips), 7);
+  // Source 2s at 2× is output 1s; source 7s is output 3s.
+  assert.equal(mapSourceToOutput(clips, 2), 1);
+  assert.equal(mapSourceToOutput(clips, 7), 3);
+  // Output 1s at 2× is source 2s; output 4.5s is inside the hold, parked on the last frame.
+  assert.equal(mapOutputToSource(clips, 1), 2);
+  assert.equal(mapOutputToSource(clips, 4.5), 8);
+});
+
+test("retimed clips are only valid under narration, within readable bounds", () => {
+  const base = buildEdl({ project: project(), sourceUrl: "file://a.mp4", continuous: true });
+  const retimed = withClipsFor(base, "seg_1", [
+    { sourceStart: 0, sourceEnd: 1.5, label: "seg_1", speed: 1.5 },
+    { sourceStart: 1.5, sourceEnd: 3, label: "seg_1", holdSec: 2 },
+  ]);
+  // Output starts were recomputed: 1 + 3.5 = 4.5s for seg_1, then seg_2 from 4.5.
+  assert.deepEqual(retimed.clips.map((c) => c.outputStart), [0, 1, 4.5]);
+  assert.equal(retimed.durationSec, 6.5);
+  // No narration yet: the recording's own audio could not follow the retime.
+  assert.match(validateEdl(retimed).join("\n"), /own audio/);
+  const narrated = withNarration(retimed, [{ segmentId: "seg_1", url: "u", durationSec: 4.5, voiceId: "v" }]);
+  assert.deepEqual(validateEdl(narrated), []);
+  const tooFast = withNarration(withClipsFor(base, "seg_1", [{ sourceStart: 0, sourceEnd: 3, label: "seg_1", speed: 6 }]), [
+    { segmentId: "seg_1", url: "u", durationSec: 0.5 },
+  ]);
+  assert.match(validateEdl(tooFast).join("\n"), /6×/);
 });
 
 test("a tempo the mix cannot apply fails validation", () => {

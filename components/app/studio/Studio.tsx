@@ -62,10 +62,16 @@ export function Studio({
     };
   }, []);
   const narrator = voiceId ? voices.find((v) => v.id === voiceId) ?? null : null;
+  // With a voice chosen, chapters play whole and the cut is a cut of words,
+  // not of footage. The timeline and the strip follow the render's rule.
+  const narrated = voiceId !== null;
   const raf = useRef<number | null>(null);
   const last = useRef<number>(0);
 
-  const timeline = useMemo(() => buildTimeline(project, state), [project, state]);
+  const timeline = useMemo(
+    () => buildTimeline(project, state, { continuous: narrated }),
+    [project, state, narrated],
+  );
   const duration = useMemo(() => timelineDuration(timeline), [timeline]);
   const active = useMemo(() => wordAt(timeline, time), [timeline, time]);
   const activeSegIndex = active?.segIndex ?? null;
@@ -403,6 +409,7 @@ export function Studio({
           <TimelineStrip
             project={project}
             state={state}
+            continuous={narrated}
             time={time}
             duration={duration}
             activeSegment={selected ?? activeSegIndex}

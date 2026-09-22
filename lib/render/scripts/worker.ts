@@ -15,6 +15,7 @@ for (const file of [".env.local", ".env"]) {
 import { processWebhookOne } from "@/lib/webhooks/worker";
 import { streamAll } from "@/lib/audit/siem";
 import { processOne } from "../worker";
+import { codeVersion } from "@/lib/version";
 
 /**
  * The worker process.
@@ -54,7 +55,7 @@ async function main() {
     return;
   }
 
-  console.log(`[${workerId}] render worker started`);
+  console.log(`[${workerId}] render worker started (code ${codeVersion()})`);
 
   for (const signal of ["SIGINT", "SIGTERM"] as const) {
     process.on(signal, () => {

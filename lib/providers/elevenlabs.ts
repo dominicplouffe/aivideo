@@ -3,6 +3,42 @@ import { getStorage } from "@/lib/storage";
 import { ProviderError, isRetryableStatus } from "./errors";
 import type { SynthesisProvider, SynthesisRequest, SynthesisResult } from "./types";
 
+/** The vendor's timing report: one entry per character of the text it read. */
+interface Alignment {
+  characters: string[];
+  character_start_times_seconds: number[];
+  character_end_times_seconds: number[];
+}
+
+/**
+ * Word timings from character timings.
+ *
+ * The vendor times characters; the editor thinks in words. A word is a run
+ * of non-space characters, spoken from its first character's start to its
+ * last character's end. Whitespace-only runs are skipped, so the result
+ * lines up one to one with `text.split(/\s+/)`.
+ */
+export function wordsFromAlignment(alignment: Alignment): { text: string; start: number; end: number }[] {
+  const out: { text: string; start: number; end: number }[] = [];
+  let current: { text: string; start: number; end: number } | null = null;
+  alignment.characters.forEach((ch, i) => {
+    if (/\s/.test(ch)) {
+      if (current) out.push(current);
+      current = null;
+      return;
+    }
+    const start = alignment.character_start_times_seconds[i];
+    const end = alignment.character_end_times_seconds[i];
+    if (!current) current = { text: ch, start, end };
+    else {
+      current.text += ch;
+      current.end = end;
+    }
+  });
+  if (current) out.push(current);
+  return out;
+}
+
 /**
  * ElevenLabs-backed speech synthesis and voice cloning.
  *
@@ -228,14 +264,25 @@ export class ElevenLabsSynthesis implements SynthesisProvider {
     };
     const storage = getStorage();
 
+    // The word timings live beside the audio, so a cache hit returns them too.
+    const timingKey = { workspaceId: key.workspaceId, path: key.path.replace(/\.wav$/, ".words.json") };
+
     const cached = await storage.head(key).catch(() => null);
     if (cached && cached.bytes > WAV_HEADER_BYTES) {
       const signed = await storage.signedReadUrl(key, this.config.signedUrlTtlSec ?? 3600);
+      let words: SynthesisResult["words"];
+      try {
+        const raw = await storage.get(timingKey);
+        words = JSON.parse(new TextDecoder().decode(raw)) as SynthesisResult["words"];
+      } catch {
+        // A clip stored before timings were kept. Still a clip.
+      }
       return {
         audioUrl: signed.url,
         storageUrl: `storage://${key.workspaceId}/${key.path}`,
         durationSec: (cached.bytes - WAV_HEADER_BYTES) / (sampleRate * BYTES_PER_SAMPLE),
         sampleRate,
+        ...(words ? { words } : {}),
       };
     }
 
@@ -257,24 +304,32 @@ export class ElevenLabsSynthesis implements SynthesisProvider {
       voice_settings: voiceSettings,
     };
 
+    // The variant that reports when each character was spoken. Same audio,
+    // same price; the timing is what lets the footage be fitted to the
+    // reading word by word instead of chapter by chapter.
     const response = await this.send(
-      `/v1/text-to-speech/${encodeURIComponent(req.voiceId)}?output_format=${format}`,
+      `/v1/text-to-speech/${encodeURIComponent(req.voiceId)}/with-timestamps?output_format=${format}`,
       {
         method: "POST",
-        headers: this.headers({ "Content-Type": "application/json", Accept: "audio/*" }),
+        headers: this.headers({ "Content-Type": "application/json", Accept: "application/json" }),
         body: JSON.stringify(body),
       },
     );
 
-    const audio = new Uint8Array(await response.arrayBuffer());
+    const payload = (await response.json()) as { audio_base64?: string; alignment?: Alignment | null };
+    const audio = payload.audio_base64 ? new Uint8Array(Buffer.from(payload.audio_base64, "base64")) : new Uint8Array();
     if (audio.byteLength === 0) {
       throw new ProviderError("ElevenLabs returned an empty audio stream.", {
         provider: this.name,
         retryable: true,
       });
     }
+    const words = payload.alignment ? wordsFromAlignment(payload.alignment) : undefined;
 
     await storage.put(key, wrapPcmInWav(audio, sampleRate), "audio/wav");
+    if (words) {
+      await storage.put(timingKey, new TextEncoder().encode(JSON.stringify(words)), "application/json");
+    }
     const signed = await storage.signedReadUrl(key, this.config.signedUrlTtlSec ?? 3600);
 
     return {
@@ -282,6 +337,7 @@ export class ElevenLabsSynthesis implements SynthesisProvider {
       storageUrl: `storage://${key.workspaceId}/${key.path}`,
       durationSec: audio.byteLength / (sampleRate * BYTES_PER_SAMPLE),
       sampleRate,
+      ...(words ? { words } : {}),
     };
   }
 

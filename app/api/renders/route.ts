@@ -8,6 +8,7 @@ import { checkDestination, describeRefusal } from "@/lib/webhooks/destinations";
 import { getRecording, mediaKeyFor } from "@/lib/db/repositories/recordings";
 import { hydrateEditState } from "@/lib/edit-state";
 import { buildEdl } from "@/lib/render/edl";
+import { codeVersion } from "@/lib/version";
 import type { Project } from "@/lib/app-data";
 
 const VALID_OUTPUTS: RenderOutput[] = ["video", "guide", "interactive", "clips"];
@@ -99,6 +100,8 @@ export async function POST(request: Request) {
       deletedSegments: state.deletedSegments,
       cutWords: state.cutWords,
       wordEdits: state.wordEdits,
+      // A narrated project keeps each chapter's footage whole. See BuildEdlInput.
+      continuous: Boolean(project.voiceId),
       captions: state.captions,
       zoomEnabled: state.zoomEnabled,
       resolution: (body.video?.resolution as "1080p") ?? "1080p",
@@ -147,6 +150,10 @@ export async function GET(request: Request) {
       minutes_billed: job.minutesBilled,
       outputs: job.outputs,
       narration: job.narration ?? null,
+      // Both sides of the comparison the dialog makes: the worker that did
+      // the work, and the app that is showing the result.
+      worker_version: job.workerVersion ?? null,
+      app_version: codeVersion(),
     });
   } catch {
     return NextResponse.json({ error: "Unknown render job." }, { status: 404 });

@@ -57,11 +57,27 @@ function edl(overrides: Partial<Edl> = {}): Edl {
 test("each surviving clip is trimmed and rebased before the concat", () => {
   const { filters, out } = buildCutFilters(edl());
   assert.equal(out, "vcat");
+  // Constant frame rate first: a screen capture writes frames only when the
+  // picture changes, and a trim of that stream would stop at its last frame.
+  assert.equal(filters[0], "[0:v]fps=30,split=2[v0][v1]");
   // setpts=PTS-STARTPTS is what makes the join continuous. Without it the
   // video freezes for the length of everything that was cut.
-  assert.equal(filters[0], "[0:v]trim=start=0:end=4,setpts=PTS-STARTPTS[c0]");
-  assert.equal(filters[1], "[0:v]trim=start=6:end=9,setpts=PTS-STARTPTS[c1]");
-  assert.equal(filters[2], "[c0][c1]concat=n=2:v=1:a=0[vcat]");
+  assert.equal(filters[1], "[v0]trim=start=0:end=4,setpts=PTS-STARTPTS[c0]");
+  assert.equal(filters[2], "[v1]trim=start=6:end=9,setpts=PTS-STARTPTS[c1]");
+  assert.equal(filters[3], "[c0][c1]concat=n=2:v=1:a=0[vcat]");
+});
+
+test("a sped-up clip has its timestamps scaled, and a held clip clones its last frame", () => {
+  const { filters } = buildCutFilters(
+    edl({
+      clips: [
+        { sourceStart: 0, sourceEnd: 4, outputStart: 0, speed: 2 },
+        { sourceStart: 6, sourceEnd: 8, outputStart: 2, holdSec: 1.5 },
+      ],
+    }),
+  );
+  assert.equal(filters[1], "[v0]trim=start=0:end=4,setpts=(PTS-STARTPTS)/2[c0]");
+  assert.equal(filters[2], "[v1]trim=start=6:end=8,setpts=PTS-STARTPTS,tpad=stop_mode=clone:stop_duration=1.5[c1]");
 });
 
 test("a single-clip edit skips the concat entirely", () => {
@@ -69,7 +85,7 @@ test("a single-clip edit skips the concat entirely", () => {
     edl({ clips: [{ sourceStart: 1, sourceEnd: 3, outputStart: 0 }], durationSec: 2 }),
   );
   assert.equal(out, "c0");
-  assert.equal(filters.length, 1);
+  assert.deepEqual(filters, ["[0:v]fps=30[v0]", "[v0]trim=start=1:end=3,setpts=PTS-STARTPTS[c0]"]);
 });
 
 // --- zoom ------------------------------------------------------------------

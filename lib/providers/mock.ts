@@ -41,11 +41,12 @@ export const mockTranscription: TranscriptionProvider = {
 export const mockSynthesis: SynthesisProvider = {
   name: "mock-synthesis",
   async synthesize({ text, voiceId, workspaceId }) {
-    const wordCount = text.trim().split(/\s+/).length;
+    const tokens = text.trim().split(/\s+/);
     return {
-      audioUrl: `mock://audio/${workspaceId}/${voiceId}/${wordCount}`,
-      durationSec: wordCount * 0.38,
+      audioUrl: `mock://audio/${workspaceId}/${voiceId}/${tokens.length}`,
+      durationSec: tokens.length * 0.38,
       sampleRate: 48000,
+      words: tokens.map((token, i) => ({ text: token, start: i * 0.38, end: i * 0.38 + 0.3 })),
     };
   },
   async listVoices() {

@@ -68,6 +68,13 @@ export interface SynthesisResult {
   storageUrl?: string;
   durationSec: number;
   sampleRate: number;
+  /**
+   * When each whitespace-separated token of the request's text is spoken,
+   * in seconds from the start of the clip, in order. Present when the vendor
+   * reports timing; absent otherwise, and the caller falls back to spreading
+   * the words evenly.
+   */
+  words?: { text: string; start: number; end: number }[];
 }
 
 /** A voice as the vendor describes it. */
@@ -197,6 +204,8 @@ export interface RenderJob {
   outputs: Partial<Record<RenderOutput, { status: string; url?: string }>>;
   /** Present when the render was narrated in a chosen voice. Shape: lib/render/narration.ts. */
   narration?: unknown;
+  /** The code version of the worker that produced a completed render. */
+  workerVersion?: string;
   error?: string;
 }
 

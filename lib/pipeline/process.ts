@@ -1,7 +1,11 @@
 import { getDb } from "@/lib/db/client";
 import * as s from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
-import { getRecording, setStatus, attachTranscript } from "@/lib/db/repositories/recordings";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { getRecording, setStatus, attachStillness, attachTranscript } from "@/lib/db/repositories/recordings";
+import { detectStillness } from "./stillness";
 import { replaceSegments, setProjectStatus } from "@/lib/db/repositories/projects";
 import { getStorage } from "@/lib/storage";
 import { getProviders } from "@/lib/providers";
@@ -26,6 +30,19 @@ import { listGlossary } from "@/lib/db/repositories/glossary";
 export type ProcessOutcome =
   | { ok: true; segments: number; durationSec: number; provider: string; words: number }
   | { ok: false; reason: string };
+
+async function measureStillness(recordingId: string, bytes: Uint8Array): Promise<void> {
+  const dir = await mkdtemp(path.join(tmpdir(), "demoriff-still-"));
+  try {
+    const file = path.join(dir, "take.webm");
+    await writeFile(file, bytes);
+    await attachStillness(recordingId, await detectStillness(file));
+  } catch (error) {
+    console.warn(`[process] stillness not measured for ${recordingId}:`, error instanceof Error ? error.message : error);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+}
 
 export async function processProject(
   workspaceId: string,
@@ -64,6 +81,11 @@ export async function processProject(
     // of this that works everywhere, and the only one that does not require
     // publishing a customer's screen to fetch it back.
     const bytes = await getStorage().get({ workspaceId, path: recording.mediaKey });
+
+    // Where the picture stands still, for fitting narration to it later.
+    // Best effort: a machine without ffmpeg still gets a transcript, and the
+    // retimer treats an unmeasured take as all motion.
+    void measureStillness(recording.id, bytes);
 
     // The workspace's own spellings: given to the transcriber so they come
     // back right, and applied to whatever still comes back wrong.

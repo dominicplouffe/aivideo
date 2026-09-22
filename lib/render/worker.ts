@@ -10,6 +10,7 @@ import { emitEvent, type WebhookEventType } from "@/lib/webhooks/outbound";
 import { buildEdl, validateEdl, type Edl } from "./edl";
 import { compile, probe, runFfmpeg, toSrt } from "./ffmpeg";
 import { narrate, type NarrationReport } from "./narration";
+import { codeVersion } from "@/lib/version";
 
 /**
  * The render worker.
@@ -418,6 +419,9 @@ export async function processOne(options: RenderWorkerOptions): Promise<RenderOu
       // Which voice spoke, and how each chapter's reading was fitted to its
       // footage. The export dialog reads this to say where a chapter ran long.
       ...(narrated ? { narration: narrated.report } : {}),
+      // Which code produced this. The app compares it with its own and warns
+      // when a worker started before the latest change did the rendering.
+      workerVersion: codeVersion(),
       // Seconds, not minutes: metering in minutes means rounding, and
       // rounding in our favour on every render is a choice, not an accident.
       billedSeconds: result.durationSec,
@@ -566,14 +570,17 @@ async function defaultNarrate(job: Job, edl: Edl) {
 
   const { getVoice } = await import("@/lib/db/repositories/voices");
   const { listGlossary } = await import("@/lib/db/repositories/glossary");
+  const { getRecording } = await import("@/lib/db/repositories/recordings");
   const { pronunciationsFor } = await import("@/lib/pipeline/glossary");
   const { getProviders } = await import("@/lib/providers");
+  const recording = project.recordingId ? await getRecording(job.workspaceId, project.recordingId) : null;
   return narrate({
     edl,
     project,
     workspaceId: job.workspaceId,
     synthesis: getProviders().synthesis,
     pronunciations: pronunciationsFor(await listGlossary(job.workspaceId)),
+    stillness: recording?.stillness ?? null,
     lookupVoice: getVoice,
   });
 }
@@ -612,9 +619,18 @@ async function defaultResolveEdl(job: Job): Promise<Edl> {
     });
   }
 
+  const { hydrateEditState } = await import("@/lib/edit-state");
+  const state = hydrateEditState(project.editState);
   return buildEdl({
     project,
     sourceUrl: payload.sourceUrl,
+    removeFillers: state.removeFillers,
+    deletedSegments: state.deletedSegments,
+    cutWords: state.cutWords,
+    wordEdits: state.wordEdits,
+    continuous: Boolean(project.voiceId),
+    captions: state.captions,
+    zoomEnabled: state.zoomEnabled,
     resolution: (payload.video?.resolution as "1080p") ?? "1080p",
     fps: (payload.video?.fps as 30 | 60) ?? 30,
   });

@@ -244,6 +244,7 @@ export function Canvas({
 export function TimelineStrip({
   project,
   state,
+  continuous = false,
   time,
   duration,
   activeSegment,
@@ -252,6 +253,8 @@ export function TimelineStrip({
 }: {
   project: Project;
   state: EditState;
+  /** Narrated: chapters play whole, so each weighs its full span. */
+  continuous?: boolean;
   time: number;
   duration: number;
   activeSegment: number | null;
@@ -307,7 +310,7 @@ export function TimelineStrip({
   // A chapter's share of the strip is its running time under this edit.
   // Silent footage plays as recorded; see `silentSpanSec`.
   const weightOf = (s: Segment, i: number) =>
-    s.words.length === 0
+    s.words.length === 0 || continuous
       ? silentSpanSec(s)
       : resolveWords(s, i, state)
           .filter((w) => !isWordRemoved(state, i, w.wordIndex, w))

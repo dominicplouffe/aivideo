@@ -93,6 +93,7 @@ export async function POST(request: Request, context: Context) {
     deletedSegments: state.deletedSegments,
     cutWords: state.cutWords,
     wordEdits: state.wordEdits,
+    continuous: true,
   });
   const availableSec = segmentOutputSeconds(edl, segment.id);
 

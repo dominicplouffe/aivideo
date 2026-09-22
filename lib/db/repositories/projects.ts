@@ -60,9 +60,10 @@ function toProject(
   );
   const durationSec = segs.reduce((total, seg, i) => {
     if (deleted.has(i)) return total;
-    if (seg.words.length === 0) {
-      // Silent footage plays as recorded; see `silentSpanSec`.
+    // Narrated, or silent: the chapter plays whole. See BuildEdlInput.continuous.
+    if (r.voiceId || seg.words.length === 0) {
       const span = silentSpanSec({ start: seg.startSec, end: seg.endSec });
+      if (r.voiceId) return total + span;
       return span > 0 ? total + span + 0.35 : total;
     }
     const spoken = seg.words

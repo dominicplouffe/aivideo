@@ -37,6 +37,20 @@ export interface EdlClip {
   outputStart: number;
   /** Why this range exists, for debugging a bad cut. */
   label?: string;
+  /**
+   * Playback rate, 1 when absent. Above 1 the footage runs faster than it
+   * was recorded; below 1, slower. Only meaningful under narration — with
+   * the recording's own audio the picture and sound are cut together and
+   * neither is retimed.
+   */
+  speed?: number;
+  /** Seconds the last frame is held after the range plays. 0 when absent. */
+  holdSec?: number;
+}
+
+/** How long a clip occupies on the finished timeline. */
+export function clipOutputSeconds(clip: EdlClip): number {
+  return (clip.sourceEnd - clip.sourceStart) / (clip.speed ?? 1) + (clip.holdSec ?? 0);
 }
 
 /** A camera move, positioned on the finished timeline. */
@@ -134,9 +148,9 @@ export function resolutionOf(name: string): { width: number; height: number } {
   return size;
 }
 
-/** Finished duration: the sum of what survived. */
+/** Finished duration: the sum of what survived, as it plays. */
 export function edlDuration(clips: EdlClip[]): number {
-  return clips.reduce((total, clip) => total + (clip.sourceEnd - clip.sourceStart), 0);
+  return clips.reduce((total, clip) => total + clipOutputSeconds(clip), 0);
 }
 
 /**
@@ -151,7 +165,7 @@ export function mapSourceToOutput(clips: EdlClip[], sourceTime: number): number 
   for (const clip of clips) {
     if (sourceTime < clip.sourceStart) return clip.outputStart;
     if (sourceTime <= clip.sourceEnd) {
-      return clip.outputStart + (sourceTime - clip.sourceStart);
+      return clip.outputStart + (sourceTime - clip.sourceStart) / (clip.speed ?? 1);
     }
   }
   return null;
@@ -167,14 +181,17 @@ export function mapSourceToOutput(clips: EdlClip[], sourceTime: number): number 
  */
 export function mapOutputToSource(clips: EdlClip[], outputTime: number): number | null {
   for (const clip of clips) {
-    const length = clip.sourceEnd - clip.sourceStart;
+    const length = clipOutputSeconds(clip);
     if (outputTime < clip.outputStart + length) {
-      return clip.sourceStart + Math.max(0, outputTime - clip.outputStart);
+      const playing = (clip.sourceEnd - clip.sourceStart) / (clip.speed ?? 1);
+      const into = Math.max(0, outputTime - clip.outputStart);
+      // Inside a held frame, the source is parked on the clip's last frame.
+      return into >= playing ? clip.sourceEnd : clip.sourceStart + into * (clip.speed ?? 1);
     }
   }
   // The very last frame has no "next clip" to belong to.
   const last = clips[clips.length - 1];
-  if (last && Math.abs(outputTime - (last.outputStart + (last.sourceEnd - last.sourceStart))) < 1e-6) {
+  if (last && Math.abs(outputTime - (last.outputStart + clipOutputSeconds(last))) < 1e-6) {
     return last.sourceEnd;
   }
   return null;
@@ -220,6 +237,18 @@ export interface BuildEdlInput {
   cutWords?: Set<string>;
   /** Words rewritten by hand; captions show the rewrite. */
   wordEdits?: Map<string, WordEdit>;
+  /**
+   * Narrated: each surviving chapter plays as continuous footage.
+   *
+   * The word-level cut exists for the recorded voice — audio and picture are
+   * trimmed identically, so removing a pause removes it from both. Under a
+   * synthetic voice that logic is wrong: the pauses are the seconds spent
+   * clicking and waiting, exactly the footage the narration has to sit over.
+   * So with a narrator the picture keeps every chapter whole, word cuts
+   * change only what is said, and captions come from the narration
+   * (`withNarration`) rather than from where the words were spoken.
+   */
+  continuous?: boolean;
   captions?: boolean;
   zoomEnabled?: boolean;
   /** Regions from the masking provider, in source time. */
@@ -256,6 +285,7 @@ export function buildEdl(input: BuildEdlInput): Edl {
     deletedSegments = new Set<number>(),
     cutWords = new Set<string>(),
     wordEdits = new Map<string, WordEdit>(),
+    continuous = false,
     captions = true,
     zoomEnabled = true,
     resolution = "1080p",
@@ -274,7 +304,16 @@ export function buildEdl(input: BuildEdlInput): Edl {
   // boundary, so captions and narration can be anchored per segment.
   const clips: EdlClip[] = [];
   let outputStart = 0;
-  for (const word of kept) {
+  if (continuous) {
+    project.segments.forEach((seg, segIndex) => {
+      if (deletedSegments.has(segIndex)) return;
+      const span = silentSpanSec(seg);
+      if (span <= 0) return;
+      clips.push({ sourceStart: seg.start, sourceEnd: seg.end, outputStart, label: seg.id });
+      outputStart += span;
+    });
+  }
+  for (const word of continuous ? [] : kept) {
     const last = clips[clips.length - 1];
     const contiguous =
       last !== undefined &&
@@ -304,7 +343,7 @@ export function buildEdl(input: BuildEdlInput): Edl {
       const segmentClips = clips.filter((c) => c.label === seg.id);
       if (segmentClips.length === 0) return;
       const at = segmentClips[0].outputStart;
-      const hold = segmentClips.reduce((t, c) => t + (c.sourceEnd - c.sourceStart), 0);
+      const hold = segmentClips.reduce((t, c) => t + clipOutputSeconds(c), 0);
       zooms.push({
         at,
         holdSec: hold,
@@ -339,7 +378,8 @@ export function buildEdl(input: BuildEdlInput): Edl {
 
   // Captions, grouped into readable cues on the finished timeline.
   const cues: EdlCaption[] = [];
-  if (captions) {
+  // Continuous footage is captioned from the narration, once it exists.
+  if (captions && !continuous) {
     let current: { words: string[]; from: number; until: number } | null = null;
     const flush = () => {
       if (current && current.words.length > 0) {
@@ -424,6 +464,8 @@ export interface NarrationClip {
   durationSec: number;
   voiceId?: string;
   tempo?: number;
+  /** Cues timed to this reading, on the finished timeline. */
+  captions?: EdlCaption[];
 }
 
 /**
@@ -452,18 +494,79 @@ export function narrationTracks(clips: EdlClip[], narration: NarrationClip[]): E
   return audio;
 }
 
-/** The same EDL with narration added, ahead of any music so the mix ducks it. */
+/**
+ * The same EDL with narration added, ahead of any music so the mix ducks it.
+ * A clip that brings caption cues replaces any earlier cues over its span.
+ */
 export function withNarration(edl: Edl, narration: NarrationClip[]): Edl {
   const music = edl.audio.filter((track) => track.kind === "music");
   const existing = edl.audio.filter((track) => track.kind === "narration");
-  return { ...edl, audio: [...existing, ...narrationTracks(edl.clips, narration), ...music] };
+  const tracks = narrationTracks(edl.clips, narration);
+  const cues = [...edl.captions, ...narration.flatMap((clip) => clip.captions ?? [])].sort(
+    (a, b) => a.from - b.from,
+  );
+  return { ...edl, audio: [...existing, ...tracks, ...music], captions: cues };
+}
+
+/**
+ * Caption cues for a chapter read aloud, spread over the reading.
+ *
+ * Synthesis gives back audio and a length, not word timings, so cues are
+ * placed by share of characters: a seven-word cue takes the slice of the
+ * reading its letters account for. Close enough to read along with, and
+ * honest about what is known.
+ */
+export function narrationCaptions(
+  words: string[],
+  at: number,
+  durationSec: number,
+): EdlCaption[] {
+  const groups: string[][] = [];
+  let current: string[] = [];
+  for (const word of words) {
+    current.push(word);
+    if (/[.!?]$/.test(word) || current.length >= 7) {
+      groups.push(current);
+      current = [];
+    }
+  }
+  if (current.length > 0) groups.push(current);
+  const weight = (group: string[]) => group.reduce((n, w) => n + w.length + 1, 0);
+  const total = groups.reduce((n, g) => n + weight(g), 0);
+  if (total === 0 || durationSec <= 0) return [];
+  const cues: EdlCaption[] = [];
+  let from = at;
+  for (const group of groups) {
+    const until = from + (durationSec * weight(group)) / total;
+    cues.push({ from, until, text: group.join(" ") });
+    from = until;
+  }
+  return cues;
 }
 
 /** How long a chapter's surviving footage runs on the finished timeline. */
 export function segmentOutputSeconds(edl: Edl, segmentId: string): number {
   return edl.clips
     .filter((clip) => clip.label === segmentId)
-    .reduce((total, clip) => total + (clip.sourceEnd - clip.sourceStart), 0);
+    .reduce((total, clip) => total + clipOutputSeconds(clip), 0);
+}
+
+/** The same EDL with a chapter's clips replaced, and every clip's output start recomputed. */
+export function withClipsFor(edl: Edl, segmentId: string, replacement: Omit<EdlClip, "outputStart">[]): Edl {
+  const next: EdlClip[] = [];
+  let outputStart = 0;
+  let replaced = false;
+  for (const clip of edl.clips) {
+    const batch: Omit<EdlClip, "outputStart">[] =
+      clip.label === segmentId ? (replaced ? [] : replacement) : [clip];
+    if (clip.label === segmentId) replaced = true;
+    for (const c of batch) {
+      const placed = { ...c, outputStart } as EdlClip;
+      next.push(placed);
+      outputStart += clipOutputSeconds(placed);
+    }
+  }
+  return { ...edl, clips: next, durationSec: edlDuration(next) };
 }
 
 /**
@@ -485,9 +588,21 @@ export function validateEdl(edl: Edl): string[] {
 
   let previousEnd = -Infinity;
   let expectedOutputStart = 0;
+  const narrated = edl.audio.some((track) => track.kind === "narration");
   edl.clips.forEach((clip, i) => {
     if (clip.sourceEnd <= clip.sourceStart) {
       problems.push(`Clip ${i} has no duration.`);
+    }
+    if (clip.speed !== undefined && (clip.speed < 0.25 || clip.speed > 4)) {
+      problems.push(`Clip ${i} plays at ${clip.speed}×, outside what reads as the same footage.`);
+    }
+    if (clip.holdSec !== undefined && clip.holdSec < 0) {
+      problems.push(`Clip ${i} has a negative hold.`);
+    }
+    if (!narrated && ((clip.speed !== undefined && clip.speed !== 1) || (clip.holdSec ?? 0) > 0)) {
+      // The recording's own audio is cut with the picture and cannot be
+      // retimed with it; a sped-up clip would drift out of sync with its sound.
+      problems.push(`Clip ${i} is retimed but the recording's own audio is in use.`);
     }
     if (clip.sourceStart < previousEnd) {
       problems.push(`Clip ${i} overlaps the previous clip.`);
@@ -499,7 +614,7 @@ export function validateEdl(edl: Edl): string[] {
       );
     }
     previousEnd = clip.sourceEnd;
-    expectedOutputStart += clip.sourceEnd - clip.sourceStart;
+    expectedOutputStart += clipOutputSeconds(clip);
   });
 
   if (Math.abs(edl.durationSec - edlDuration(edl.clips)) > 1e-6) {

@@ -94,6 +94,11 @@ export async function setStatus(
   await getDb().update(s.recordings).set({ status }).where(eq(s.recordings.id, id));
 }
 
+/** Stores where the picture stands still. Null when it could not be measured. */
+export async function attachStillness(recordingId: string, stillness: [number, number][] | null): Promise<void> {
+  await getDb().update(s.recordings).set({ stillness }).where(eq(s.recordings.id, recordingId));
+}
+
 /** Stores a word-level transcript against the take it came from. */
 export async function attachTranscript(
   id: string,

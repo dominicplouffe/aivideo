@@ -1,0 +1,56 @@
+import { execFile } from "node:child_process";
+
+/**
+ * Where a recording's picture stands still.
+ *
+ * A screen recording is unusually elastic: much of it is a UI waiting for
+ * the next click, and a still stretch can be held longer or run faster with
+ * nothing lost, where a stretch with motion — typing, scrolling, a dialog
+ * sliding in — has to stay near the speed it was recorded at. Knowing which
+ * is which is what lets narration be fitted to footage without the picture
+ * looking wrong. Measured once, when a take is processed, with ffmpeg's
+ * freeze detector; stored on the recording; read by the retimer.
+ */
+
+export type StillSpan = [start: number, end: number];
+
+export interface StillnessOptions {
+  /** Noise tolerance as a fraction of full scale; cursor blink stays below it. */
+  noise?: number;
+  /** A stretch shorter than this is not worth holding or hurrying. */
+  minSec?: number;
+  binary?: string;
+}
+
+/** Parses the freeze detector's log into spans. Exported for tests. */
+export function parseFreezeLog(stderr: string): StillSpan[] {
+  const spans: StillSpan[] = [];
+  let start: number | null = null;
+  for (const line of stderr.split(/\r?\n/)) {
+    const begun = line.match(/freeze_start:\s*([\d.]+)/);
+    if (begun) start = Number(begun[1]);
+    const ended = line.match(/freeze_end:\s*([\d.]+)/);
+    if (ended && start !== null) {
+      const end = Number(ended[1]);
+      if (end > start) spans.push([start, end]);
+      start = null;
+    }
+  }
+  return spans;
+}
+
+export function detectStillness(filePath: string, options: StillnessOptions = {}): Promise<StillSpan[]> {
+  const noise = options.noise ?? 0.003;
+  const minSec = options.minSec ?? 0.5;
+  return new Promise((resolve, reject) => {
+    execFile(
+      options.binary ?? "ffmpeg",
+      ["-hide_banner", "-nostats", "-i", filePath, "-an", "-vf", `freezedetect=n=${noise}:d=${minSec}`, "-f", "null", "-"],
+      { maxBuffer: 64 * 1024 * 1024 },
+      (error, _stdout, stderr) => {
+        if (error) return reject(error);
+        resolve(parseFreezeLog(String(stderr)));
+      },
+    );
+  });
+}

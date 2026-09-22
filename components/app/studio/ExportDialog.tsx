@@ -10,6 +10,15 @@ import { site } from "@/lib/site";
 
 type Step = "configure" | "rendering" | "done" | "error";
 
+/**
+ * How to start a worker here. In development the watching variant, which
+ * restarts itself on every code change the way `next dev` does — a worker
+ * started once and left running quietly renders with code the app has
+ * since moved past. In production a deploy restarts it, and the plain
+ * command is the one a process supervisor runs.
+ */
+const WORKER_COMMAND = process.env.NODE_ENV === "development" ? "npm run worker:dev" : "npm run worker";
+
 /** What the worker reports about a narrated render. See lib/render/narration.ts. */
 interface NarrationSummary {
   voice: { id: string; name: string };
@@ -21,6 +30,7 @@ interface NarrationSummary {
     pace: number;
     tempo: number;
     overrunSec: number;
+    retime?: { heldSec: number; hurriedSec: number; slowedSec: number; trimmedSec: number };
   }[];
 }
 
@@ -66,6 +76,8 @@ export function ExportDialog({
   const [failure, setFailure] = useState<string | null>(null);
   const [stalled, setStalled] = useState(false);
   const [narration, setNarration] = useState<NarrationSummary | null>(null);
+  // Set when the worker that rendered ran older code than the app.
+  const [staleWorker, setStaleWorker] = useState<{ worker: string; app: string } | null>(null);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
@@ -117,12 +129,19 @@ export function ExportDialog({
         error?: string;
         outputs?: Record<string, { status: string; url?: string }>;
         narration?: NarrationSummary | null;
+        worker_version?: string | null;
+        app_version?: string | null;
       };
 
       if (job.status === "completed") {
         setProgress(1);
         setVideoUrl(job.outputs?.video?.url ?? null);
         setNarration(job.narration ?? null);
+        setStaleWorker(
+          job.worker_version && job.app_version && job.worker_version !== job.app_version
+            ? { worker: job.worker_version, app: job.app_version }
+            : null,
+        );
         setStep("done");
         return;
       }
@@ -133,8 +152,12 @@ export function ExportDialog({
       }
 
       // Queued for a while with nobody claiming it means no worker is
-      // running. Saying so beats a progress bar that never moves.
-      if (job.status === "queued" && Date.now() - startedAt > 15_000) setStalled(true);
+      // running — or one worker busy with the render before this one.
+      // Saying so beats a progress bar that never moves, but it has to be
+      // re-decided on every poll: the first version set this once and left
+      // it set, so a job that waited its turn was reported as "no worker"
+      // for the whole of its own render.
+      setStalled(job.status === "queued" && Date.now() - startedAt > 15_000);
       setProgress((p) => Math.min(0.92, Math.max(p, job.progress ?? 0) + 0.02));
       timer.current = window.setTimeout(poll, 1500);
     };
@@ -307,16 +330,22 @@ export function ExportDialog({
                   />
                 </div>
                 <p className="mt-4 text-center text-[0.875rem] text-fg">
-                  {stalled ? "Waiting for a render worker…" : "Encoding your video…"}
+                  {stalled
+                    ? "Waiting for a render worker…"
+                    : project.voiceId
+                      ? "Narrating and encoding your video…"
+                      : "Encoding your video…"}
                 </p>
                 <p className="mt-1.5 text-center font-mono text-2xs text-fg-faint">
                   {Math.round(progress * 100)}%
                 </p>
                 {stalled ? (
                   <p className="mt-4 rounded-xl border border-amber-500/25 bg-amber-500/[0.07] p-3.5 text-center text-2xs leading-relaxed text-amber-200">
-                    The job is queued, but nothing has picked it up. Renders run in a separate
-                    process — start one with <code className="font-mono">npm run worker</code> and
-                    this will continue on its own.
+                    The job is queued and nothing has picked it up yet. Either a worker is busy
+                    with an earlier render and this one is next, or none is running — renders
+                    run in a separate process; start one with{" "}
+                    <code className="font-mono">{WORKER_COMMAND}</code> and this will continue on
+                    its own.
                   </p>
                 ) : null}
               </div>
@@ -347,6 +376,18 @@ export function ExportDialog({
                   </p>
                 </div>
               </div>
+
+              {staleWorker ? (
+                <p className="flex items-start gap-2.5 rounded-xl border border-amber-500/30 bg-amber-500/[0.08] p-3.5 text-[0.8125rem] leading-relaxed text-amber-200">
+                  <Icon name="alert" className="mt-0.5 size-4 shrink-0" strokeWidth={1.9} />
+                  <span>
+                    This was rendered by a worker running older code ({staleWorker.worker}) than
+                    the app ({staleWorker.app}). Edits made since it started may not be in the
+                    video. Restart it with <code className="font-mono">{WORKER_COMMAND}</code> and
+                    render again.
+                  </span>
+                </p>
+              ) : null}
 
               {narration ? <NarrationFit summary={narration} /> : null}
 
@@ -479,6 +520,46 @@ export function ExportDialog({
  * the panel behind this dialog.
  */
 function NarrationFit({ summary }: { summary: NarrationSummary }) {
+  // Footage bent to the reading: said per chapter where it was bent hard.
+  const bent = summary.chapters.filter(
+    (c) => c.retime && (c.retime.heldSec > 0.5 || c.retime.hurriedSec > 1 || c.retime.slowedSec > 1 || c.retime.trimmedSec > 0.2),
+  );
+  const totals = summary.chapters.reduce(
+    (t, c) => ({
+      held: t.held + (c.retime?.heldSec ?? 0),
+      hurried: t.hurried + (c.retime?.hurriedSec ?? 0),
+      trimmed: t.trimmed + (c.retime?.trimmedSec ?? 0),
+    }),
+    { held: 0, hurried: 0, trimmed: 0 },
+  );
+  if (summary.chapters.some((c) => c.retime)) {
+    return (
+      <div className="rounded-xl border border-[var(--line)] bg-ink-900/60 p-3.5 text-[0.8125rem] leading-relaxed text-fg-subtle">
+        <p>
+          The footage was fitted to the narration, word by word.
+          {totals.held > 0.5 ? ` Still frames held for ${totals.held.toFixed(1)}s.` : ""}
+          {totals.hurried > 1 ? ` ${totals.hurried.toFixed(1)}s of footage runs faster.` : ""}
+          {totals.trimmed > 0.2 ? ` ${totals.trimmed.toFixed(1)}s trimmed where nothing else fit.` : ""}
+          {totals.held <= 0.5 && totals.hurried <= 1 && totals.trimmed <= 0.2 ? " Nothing had to bend noticeably." : ""}
+        </p>
+        {bent.length > 0 ? (
+          <ul className="mt-2 space-y-1 text-2xs text-fg-faint">
+            {bent.map((c) => (
+              <li key={c.segIndex}>
+                <span className="font-medium text-fg-subtle">
+                  {String(c.segIndex + 1).padStart(2, "0")} {c.title}
+                </span>
+                {c.retime!.heldSec > 0.5 ? ` — held ${c.retime!.heldSec.toFixed(1)}s` : ""}
+                {c.retime!.hurriedSec > 1 ? ` — ${c.retime!.hurriedSec.toFixed(1)}s hurried` : ""}
+                {c.retime!.slowedSec > 1 ? ` — ${c.retime!.slowedSec.toFixed(1)}s slowed` : ""}
+                {c.retime!.trimmedSec > 0.2 ? ` — ${c.retime!.trimmedSec.toFixed(1)}s trimmed` : ""}
+              </li>
+            ))}
+          </ul>
+        ) : null}
+      </div>
+    );
+  }
   const fitted = summary.chapters.filter((c) => c.pace > 1 || c.tempo > 1 || c.overrunSec > 0);
   if (fitted.length === 0) {
     return (
