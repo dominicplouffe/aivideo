@@ -850,6 +850,7 @@ export function Studio({
                 }
               : null
           }
+          kitsAvailable={brandKits.length > 0}
           onClose={() => setExportOpen(false)}
         />
       ) : null}

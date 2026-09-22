@@ -57,12 +57,15 @@ export function ExportDialog({
   project,
   duration,
   brand = null,
+  kitsAvailable = false,
   onClose,
 }: {
   project: Project;
   duration: number;
   /** The kit the export will wear, for saying what it adds. */
   brand?: { name: string; cards: number; logo: boolean } | null;
+  /** Whether the workspace has kits at all: with none chosen, that is worth saying before the render. */
+  kitsAvailable?: boolean;
   onClose: () => void;
 }) {
   const [step, setStep] = useState<Step>("configure");
@@ -318,7 +321,16 @@ export function ExportDialog({
                   <p className="mt-0.5 text-2xs text-fg-faint">
                     {formatDuration(duration + (brand?.cards ?? 0) * CARD_SECONDS)} finished · billed from the encoded output, not this estimate
                   </p>
-                  {brand ? <p className="mt-0.5 text-2xs text-fg-faint">{brandLine(brand)}</p> : null}
+                  {brand ? (
+                    <p className="mt-0.5 text-2xs text-fg-faint">{brandLine(brand)}</p>
+                  ) : kitsAvailable ? (
+                    // Said here because an export with plain captions and no
+                    // cards, from a workspace that has a kit, is usually a
+                    // project that was never pointed at it.
+                    <p className="mt-0.5 text-2xs text-amber-300/90">
+                      No brand kit on this project: plain captions, no logo, no intro or outro. Choose one under Brand.
+                    </p>
+                  ) : null}
                 </div>
 
               </div>
