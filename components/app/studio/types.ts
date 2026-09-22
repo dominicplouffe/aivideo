@@ -7,6 +7,7 @@ import { chapterSpan, isWordRemoved, resolveWords, type EditState } from "@/lib/
 export {
   DEFAULT_EDIT_STATE,
   DEFAULT_SCENE_TIMING,
+  MAX_LEAD_IN_SEC,
   MIN_CHAPTER_SEC,
   chapterSpan,
   hydrateEditState,

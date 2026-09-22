@@ -131,6 +131,23 @@ test("over continuous footage the picture bends to the reading and the voice is 
   assert.ok(Math.abs(result.edl.captions[0].until - 6) < 1e-6);
 });
 
+test("a pause before the voice gives the picture a beat: the footage covers it and the reading starts later", async () => {
+  const p = project({ editState: { sceneTiming: [{ s: 0, mode: "fit", trimStart: 0, trimEnd: 0, lead: 1.5 }] } });
+  const edl = buildEdl({ project: p, sourceUrl: "file://a.mp4", continuous: true });
+  const { provider } = synthesizer(1); // seg_1: 3 words → 3s reading over 4s of footage
+  const result = await narrate({ edl, project: p, workspaceId: "ws", synthesis: provider, lookupVoice: lookup });
+  const seg1 = result!.edl.clips.filter((c) => c.label === "seg_1");
+  const plays = (cs: typeof seg1) => cs.reduce((n, c) => n + (c.sourceEnd - c.sourceStart) / (c.speed ?? 1) + (c.holdSec ?? 0), 0);
+  // The chapter occupies the pause plus the reading, 4.5s.
+  assert.ok(Math.abs(plays(seg1) - 4.5) < 1e-6, `plays ${plays(seg1)}`);
+  // The reading and its captions start after the pause.
+  assert.equal(result!.edl.audio[0].at, 1.5);
+  assert.equal(result!.edl.captions[0].from, 1.5);
+  assert.equal(result!.preview.audio[0].at, 1.5);
+  // The next chapter follows on from the whole 4.5s.
+  assert.ok(Math.abs(result!.edl.audio[1].at - 4.5) < 1e-6);
+});
+
 test("a sync point pins the word's frame in the fitted footage", async () => {
   // seg_1 is 0–4s of footage read in 6s at 2s a word. Pin "the" (word 1) to
   // 3.5s of footage: the first interval (0–3.5s of footage) must fill the

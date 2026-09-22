@@ -216,7 +216,7 @@ test("a narrated chapter's clip honours its trims", () => {
     project: project(),
     sourceUrl: "file://a.mp4",
     continuous: true,
-    sceneTiming: new Map([[1, { mode: "fit" as const, trimStartSec: 0.5, trimEndSec: 0.5 }]]),
+    sceneTiming: new Map([[1, { mode: "fit" as const, trimStartSec: 0.5, trimEndSec: 0.5, leadInSec: 0 }]]),
   });
   assert.deepEqual(edl.clips.map((c) => [c.sourceStart, c.sourceEnd]), [[0, 3], [5.5, 6.5]]);
 });

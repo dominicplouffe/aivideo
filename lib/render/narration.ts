@@ -251,25 +251,29 @@ export async function narrate(
 
     if (continuous) {
       // The footage bends to the reading. Anchors where a sentence ends on
-      // both clocks; still footage is held or hurried first.
+      // both clocks; still footage is held or hurried first. A lead-in is a
+      // beat of picture before the reading: the footage has to cover it too,
+      // and every moment of the reading sits that much later.
+      const lead = state.sceneTiming.get(segIndex)?.leadInSec ?? 0;
+      const occupies = lead + result.durationSec;
       const trimmed = chapterSpan(segment, segIndex, state);
       const anchors = anchorsFromWords(
         timed.map((w) => {
           const pinned = state.syncPoints.get(wordKey(segIndex, w.wordIndex));
           return {
             source: w.sourceStart,
-            output: w.start,
+            output: lead + w.start,
             sentenceEnd: /[.!?]$/.test(w.text),
             ...(pinned !== undefined ? { pinnedSource: Math.min(trimmed.end, Math.max(trimmed.start, pinned)) } : {}),
           };
         }),
-        { sourceStart: trimmed.start, sourceEnd: trimmed.end, narrationSec: result.durationSec },
+        { sourceStart: trimmed.start, sourceEnd: trimmed.end, narrationSec: occupies },
       );
       const bounds = chapterSpan(segment, segIndex, state);
       const fitted = retimeChapter({
         sourceStart: bounds.start,
         sourceEnd: bounds.end,
-        narrationSec: result.durationSec,
+        narrationSec: occupies,
         anchors,
         still: input.stillness ?? [],
         mode: state.sceneTiming.get(segIndex)?.mode ?? "fit",
@@ -279,7 +283,7 @@ export async function narrate(
         segment.id,
         fitted.clips.map((clip) => ({ ...clip, label: segment.id })),
       );
-      const chapterStart = working.clips.find((clip) => clip.label === segment.id)?.outputStart ?? 0;
+      const chapterStart = (working.clips.find((clip) => clip.label === segment.id)?.outputStart ?? 0) + lead;
       preview.audio.push({ segmentId: segment.id, url: result.audioUrl, at: chapterStart, durationSec: result.durationSec });
       preview.words.push(...wordMoments(chapterStart, result.durationSec));
       clips.push({
@@ -287,6 +291,8 @@ export async function narrate(
         url: result.storageUrl ?? result.audioUrl,
         durationSec: result.durationSec,
         voiceId: voice.id,
+        // The reading starts after the lead-in; see `narrationTracks`.
+        offsetSec: lead,
         ...(wantCaptions
           ? {
               captions:

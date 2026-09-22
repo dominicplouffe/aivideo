@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { cn, formatDuration } from "@/lib/utils";
 import { Icon } from "@/components/ui/Icon";
@@ -38,7 +39,7 @@ import {
 } from "./types";
 
 export function Studio({
-  project,
+  project: initialProject,
   transcriptionLive = true,
   transcriptionMissing = [],
 }: {
@@ -47,6 +48,11 @@ export function Studio({
   transcriptionLive?: boolean;
   transcriptionMissing?: string[];
 }) {
+  // Held here rather than read from the prop, because a split or merge
+  // reshapes the chapters on the server and the editor swaps the fresh
+  // project in without a page load. The page still remounts the Studio if
+  // it is navigated to with different chapters.
+  const [project, setProject] = useState(initialProject);
   // Seeded from what was saved last time. The editor used to start from the
   // defaults on every load, so a person who deleted three chapters and came
   // back the next morning found all three restored and no explanation.
@@ -372,6 +378,61 @@ export function Studio({
     [state, project.segments],
   );
 
+  /*
+   * Reshaping chapters. A split or merge rewrites the stored chapters and
+   * renumbers every edit on the server, so the unsaved edit is flushed first
+   * — otherwise the autosave, six hundred milliseconds later, would write
+   * the old numbering over the new — and the page is refreshed to load the
+   * chapters as they now are.
+   */
+  const router = useRouter();
+  const [reshaping, setReshaping] = useState(false);
+  const reshape = useCallback(
+    async (body: { action: "split"; segment_index: number; word_index: number } | { action: "merge"; segment_index: number }) => {
+      if (reshaping) return;
+      setReshaping(true);
+      setSaved("saving");
+      try {
+        if (dirty) {
+          const flushed = await fetch(`/api/projects/${project.id}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ edit_state: serializeEditState(state) }),
+          });
+          if (!flushed.ok) throw new Error("The edit could not be saved first.");
+          setDirty(false);
+        }
+        const response = await fetch(`/api/projects/${project.id}/segments`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        const result = (await response.json()) as { error?: string };
+        if (!response.ok) throw new Error(result.error ?? "The chapter could not be changed.");
+        // The chapters and the renumbered edit, straight from the server, so
+        // the editor shows exactly what was stored and nothing keyed on the
+        // old numbering survives on this side.
+        const fresh = await fetch(`/api/projects/${project.id}`);
+        const payload = (await fresh.json()) as { project?: Project };
+        if (!fresh.ok || !payload.project) throw new Error("The chapters changed but could not be reloaded.");
+        setProject(payload.project);
+        setState(hydrateEditState(payload.project.editState));
+        setSelected(null);
+        setPlanStatus("off");
+        setSaved("saved");
+        // Server components elsewhere (the project list, the header) learn
+        // of the change on their next render.
+        router.refresh();
+      } catch (error) {
+        setSaved("error");
+        console.error("[studio] reshape failed:", error);
+      } finally {
+        setReshaping(false);
+      }
+    },
+    [dirty, project.id, reshaping, router, state],
+  );
+
   const setWordsCut = useCallback((keys: string[], cut: boolean) => {
     setState((s) => {
       const next = new Set(s.cutWords);
@@ -579,6 +640,8 @@ export function Studio({
             onPin={narrated ? (key, label) => setPinning({ key, label }) : undefined}
             onUnpin={narrated ? unpin : undefined}
             pinningKey={pinning?.key ?? null}
+            onSplit={(segIndex, wordIndex) => void reshape({ action: "split", segment_index: segIndex, word_index: wordIndex })}
+            onMerge={(segIndex) => void reshape({ action: "merge", segment_index: segIndex })}
             onToggleFillers={() => patch({ removeFillers: !state.removeFillers })}
             onAsk={(text) => setAsk({ text, at: Date.now() })}
           />
@@ -663,6 +726,8 @@ export function Studio({
             onPin={narrated ? (key, label) => setPinning({ key, label }) : undefined}
             onUnpin={narrated ? unpin : undefined}
             pinningKey={pinning?.key ?? null}
+            onSplit={(segIndex, wordIndex) => void reshape({ action: "split", segment_index: segIndex, word_index: wordIndex })}
+            onMerge={(segIndex) => void reshape({ action: "merge", segment_index: segIndex })}
             onToggleFillers={() => patch({ removeFillers: !state.removeFillers })}
           />
         </div>

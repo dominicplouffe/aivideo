@@ -354,6 +354,106 @@ export async function saveVoice(
   return Boolean(updated);
 }
 
+/**
+ * Splits a chapter at a word: the word and everything after it become a new
+ * chapter, titled from its first words, beginning at the word's frame. The
+ * first half keeps the chapter's title, zoom and timing. Every edit that
+ * names a chapter is renumbered in the same transaction.
+ */
+export async function splitSegment(
+  workspaceId: string,
+  projectId: string,
+  segIndex: number,
+  wordIndex: number,
+): Promise<{ ok: true; segments: number } | { ok: false; reason: string }> {
+  const { remapStoredForSplit } = await import("@/lib/edit-state");
+  const { titleFor } = await import("@/lib/pipeline/segment");
+  return getDb().transaction(async (tx) => {
+    const [project] = await tx
+      .select({ id: s.projects.id, editState: s.projects.editState })
+      .from(s.projects)
+      .where(and(eq(s.projects.id, projectId), eq(s.projects.workspaceId, workspaceId), isNull(s.projects.deletedAt)))
+      .limit(1);
+    if (!project) return { ok: false as const, reason: "No such project." };
+    const rows = await tx.select().from(s.segments).where(eq(s.segments.projectId, projectId)).orderBy(s.segments.ordinal);
+    const row = rows[segIndex];
+    if (!row) return { ok: false as const, reason: "No such chapter." };
+    if (wordIndex <= 0 || wordIndex >= row.words.length) {
+      return { ok: false as const, reason: "A chapter can only be split between two of its words." };
+    }
+    const before = row.words.slice(0, wordIndex);
+    const after = row.words.slice(wordIndex);
+    const boundary = after[0].t;
+
+    // Later chapters move down one, from the last so no two share an ordinal.
+    for (let i = rows.length - 1; i > segIndex; i--) {
+      await tx.update(s.segments).set({ ordinal: i + 1 }).where(eq(s.segments.id, rows[i].id));
+    }
+    await tx.update(s.segments).set({ endSec: boundary, words: before }).where(eq(s.segments.id, row.id));
+    await tx.insert(s.segments).values({
+      projectId,
+      ordinal: segIndex + 1,
+      title: titleFor(after, segIndex + 1),
+      startSec: boundary,
+      endSec: row.endSec,
+      words: after,
+      action: null,
+      zoom: null,
+      zoomInferred: false,
+    });
+    await tx
+      .update(s.projects)
+      .set({
+        editState: remapStoredForSplit((project.editState ?? {}) as Record<string, unknown>, segIndex, wordIndex) as Record<string, unknown>,
+        updatedAt: new Date(),
+      })
+      .where(eq(s.projects.id, projectId));
+    return { ok: true as const, segments: rows.length + 1 };
+  });
+}
+
+/** Folds a chapter into the one before it, undoing a split or joining two the segmenter kept apart. */
+export async function mergeSegmentIntoPrevious(
+  workspaceId: string,
+  projectId: string,
+  segIndex: number,
+): Promise<{ ok: true; segments: number } | { ok: false; reason: string }> {
+  const { remapStoredForMerge } = await import("@/lib/edit-state");
+  return getDb().transaction(async (tx) => {
+    const [project] = await tx
+      .select({ id: s.projects.id, editState: s.projects.editState })
+      .from(s.projects)
+      .where(and(eq(s.projects.id, projectId), eq(s.projects.workspaceId, workspaceId), isNull(s.projects.deletedAt)))
+      .limit(1);
+    if (!project) return { ok: false as const, reason: "No such project." };
+    const rows = await tx.select().from(s.segments).where(eq(s.segments.projectId, projectId)).orderBy(s.segments.ordinal);
+    if (segIndex <= 0 || segIndex >= rows.length) return { ok: false as const, reason: "There is no chapter before this one to merge into." };
+    const previous = rows[segIndex - 1];
+    const row = rows[segIndex];
+
+    await tx
+      .update(s.segments)
+      .set({ endSec: row.endSec, words: [...previous.words, ...row.words] })
+      .where(eq(s.segments.id, previous.id));
+    await tx.delete(s.segments).where(eq(s.segments.id, row.id));
+    for (let i = segIndex + 1; i < rows.length; i++) {
+      await tx.update(s.segments).set({ ordinal: i - 1 }).where(eq(s.segments.id, rows[i].id));
+    }
+    await tx
+      .update(s.projects)
+      .set({
+        editState: remapStoredForMerge(
+          (project.editState ?? {}) as Record<string, unknown>,
+          segIndex,
+          previous.words.length,
+        ) as Record<string, unknown>,
+        updatedAt: new Date(),
+      })
+      .where(eq(s.projects.id, projectId));
+    return { ok: true as const, segments: rows.length - 1 };
+  });
+}
+
 /** Replaces a project's segments. Used once, when a transcript lands. */
 export async function replaceSegments(
   projectId: string,

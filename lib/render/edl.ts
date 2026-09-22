@@ -468,6 +468,8 @@ export interface NarrationClip {
   durationSec: number;
   voiceId?: string;
   tempo?: number;
+  /** Seconds after the chapter begins before the reading starts. */
+  offsetSec?: number;
   /** Cues timed to this reading, on the finished timeline. */
   captions?: EdlCaption[];
 }
@@ -488,7 +490,7 @@ export function narrationTracks(clips: EdlClip[], narration: NarrationClip[]): E
     audio.push({
       kind: "narration",
       url: clip.url,
-      at: first.outputStart,
+      at: first.outputStart + (clip.offsetSec ?? 0),
       durationSec: clip.durationSec,
       gainDb: 0,
       ...(clip.voiceId ? { voiceId: clip.voiceId } : {}),

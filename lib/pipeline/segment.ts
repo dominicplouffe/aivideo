@@ -49,7 +49,7 @@ function endsSentence(word: string): boolean {
  * nothing, and a person renaming a chapter is one click — whereas waiting
  * four seconds for a title nobody asked for is four seconds every time.
  */
-function titleFor(words: SegmentDraft["words"], ordinal: number): string {
+export function titleFor(words: SegmentDraft["words"], ordinal: number): string {
   const spoken = words
     .filter((word) => !word.cut)
     .map((word) => word.w)

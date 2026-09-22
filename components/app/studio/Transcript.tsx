@@ -47,6 +47,8 @@ export function Transcript({
   onPin,
   onUnpin,
   pinningKey,
+  onSplit,
+  onMerge,
   onAsk,
 }: {
   project: Project;
@@ -70,6 +72,10 @@ export function Transcript({
   onUnpin?: (key: string) => void;
   /** The word currently waiting for a frame, if any. */
   pinningKey?: string | null;
+  /** Starts a new chapter at this word (the word becomes its first). */
+  onSplit?: (segIndex: number, wordIndex: number) => void;
+  /** Folds this chapter into the one before it. */
+  onMerge?: (segIndex: number) => void;
   /** Sends a request to the Riff panel. Absent in read-only contexts. */
   onAsk?: (prompt: string) => void;
 }) {
@@ -318,6 +324,11 @@ export function Transcript({
             cut={selectionCut}
             onEdit={() => setEditing(true)}
             onCut={toggleSelected}
+            split={
+              onSplit && selection && selectedWords.length === 1 && selectedWords[0].wordIndex > 0
+                ? () => onSplit(selection.seg, selectedWords[0].wordIndex)
+                : undefined
+            }
             pin={
               onPin && selectedKeys.length === 1
                 ? {
@@ -389,6 +400,17 @@ export function Transcript({
                   </span>
                 ) : null}
 
+                {onMerge && segIndex > 0 ? (
+                  <button
+                    type="button"
+                    onClick={() => onMerge(segIndex)}
+                    aria-label="Merge into the previous scene"
+                    title="Merge into the previous scene"
+                    className="inline-flex size-6 shrink-0 items-center justify-center rounded-md text-fg-faint opacity-0 transition-colors group-hover/seg:opacity-100 hover:bg-ink-800 hover:text-fg"
+                  >
+                    <Icon name="arrowUpRight" className="size-3.5 -rotate-90" strokeWidth={1.9} />
+                  </button>
+                ) : null}
                 <button
                   type="button"
                   onClick={() => onToggleSegment(segIndex)}
@@ -493,7 +515,7 @@ export function Transcript({
 
         <p className="px-1 pt-1 text-2xs leading-relaxed text-fg-faint">
           Click or right-click a word to select it, shift-click to extend. Delete cuts it from the
-          video; Enter edits its spelling or how it is said.
+          video; Enter edits its spelling or how it is said; the toolbar can start a new scene at it.
         </p>
       </div>
     </div>
@@ -550,6 +572,7 @@ function SelectionToolbar({
   cut,
   onEdit,
   onCut,
+  split,
   pin,
 }: {
   anchor: Anchor;
@@ -558,6 +581,8 @@ function SelectionToolbar({
   cut: boolean;
   onEdit: () => void;
   onCut: () => void;
+  /** Present with one word selected that is not a chapter's first: start a new scene at it. */
+  split?: () => void;
   /** Present under a narrator with one word selected: pin it to a frame, or unpin it. */
   pin?: { pinned: boolean; onClick: () => void };
 }) {
@@ -593,6 +618,17 @@ function SelectionToolbar({
         {cut ? "Restore" : "Cut"} {count}
         <kbd className="rounded border border-current/30 px-1 font-mono text-[0.625rem] opacity-60">⌫</kbd>
       </button>
+      {split ? (
+        <button
+          type="button"
+          onClick={split}
+          title="Start a new scene at this word"
+          className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-2xs font-medium text-fg transition-colors hover:bg-ink-800"
+        >
+          <Icon name="layers" className="size-3" strokeWidth={2.2} />
+          New scene here
+        </button>
+      ) : null}
       {pin ? (
         <button
           type="button"

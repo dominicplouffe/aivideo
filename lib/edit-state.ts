@@ -42,9 +42,13 @@ export interface SceneTiming {
   mode: "fit" | "hold" | "stretch";
   trimStartSec: number;
   trimEndSec: number;
+  /** Seconds of picture before the reading begins: a beat to take the screen in. */
+  leadInSec: number;
 }
 
-export const DEFAULT_SCENE_TIMING: SceneTiming = { mode: "fit", trimStartSec: 0, trimEndSec: 0 };
+export const DEFAULT_SCENE_TIMING: SceneTiming = { mode: "fit", trimStartSec: 0, trimEndSec: 0, leadInSec: 0 };
+/** A pause before a scene longer than this is a scene of its own. */
+export const MAX_LEAD_IN_SEC = 10;
 /** A chapter keeps at least this much footage, however it is trimmed. */
 export const MIN_CHAPTER_SEC = 0.5;
 
@@ -95,6 +99,7 @@ export interface StoredSceneTiming {
   mode: SceneTiming["mode"];
   trimStart: number;
   trimEnd: number;
+  lead?: number;
 }
 
 export interface StoredEditState {
@@ -138,11 +143,12 @@ export function parseStoredSceneTiming(raw: unknown): (StoredSceneTiming & { key
   const e = raw as Record<string, unknown>;
   if (!Number.isInteger(e.s) || (e.s as number) < 0) return null;
   const mode = e.mode === "hold" || e.mode === "stretch" ? e.mode : "fit";
-  const seconds = (v: unknown) => (typeof v === "number" && Number.isFinite(v) && v >= 0 ? Math.min(v, 3600) : 0);
+  const seconds = (v: unknown, max = 3600) => (typeof v === "number" && Number.isFinite(v) && v >= 0 ? Math.min(v, max) : 0);
   const trimStart = seconds(e.trimStart);
   const trimEnd = seconds(e.trimEnd);
-  if (mode === "fit" && trimStart === 0 && trimEnd === 0) return null;
-  return { key: e.s as number, s: e.s as number, mode, trimStart, trimEnd };
+  const lead = seconds(e.lead, MAX_LEAD_IN_SEC);
+  if (mode === "fit" && trimStart === 0 && trimEnd === 0 && lead === 0) return null;
+  return { key: e.s as number, s: e.s as number, mode, trimStart, trimEnd, ...(lead > 0 ? { lead } : {}) };
 }
 
 /** A stored sync point that can be trusted, or null. */
@@ -196,7 +202,14 @@ export function hydrateEditState(stored: unknown): EditState {
   const sceneTiming = new Map<number, SceneTiming>();
   for (const entry of Array.isArray(raw.sceneTiming) ? raw.sceneTiming : []) {
     const parsed = parseStoredSceneTiming(entry);
-    if (parsed) sceneTiming.set(parsed.key, { mode: parsed.mode, trimStartSec: parsed.trimStart, trimEndSec: parsed.trimEnd });
+    if (parsed) {
+      sceneTiming.set(parsed.key, {
+        mode: parsed.mode,
+        trimStartSec: parsed.trimStart,
+        trimEndSec: parsed.trimEnd,
+        leadInSec: parsed.lead ?? 0,
+      });
+    }
   }
 
   const syncPoints = new Map<string, number>();
@@ -242,8 +255,14 @@ export function serializeEditState(state: EditState): StoredEditState {
     deletedSegments: [...state.deletedSegments].sort((a, b) => a - b),
     cutWords: [...state.cutWords].map(pair).sort((a, b) => a[0] - b[0] || a[1] - b[1]),
     sceneTiming: [...state.sceneTiming.entries()]
-      .filter(([, t]) => t.mode !== "fit" || t.trimStartSec > 0 || t.trimEndSec > 0)
-      .map(([s, t]) => ({ s, mode: t.mode, trimStart: t.trimStartSec, trimEnd: t.trimEndSec }))
+      .filter(([, t]) => t.mode !== "fit" || t.trimStartSec > 0 || t.trimEndSec > 0 || t.leadInSec > 0)
+      .map(([s, t]) => ({
+        s,
+        mode: t.mode,
+        trimStart: t.trimStartSec,
+        trimEnd: t.trimEndSec,
+        ...(t.leadInSec > 0 ? { lead: t.leadInSec } : {}),
+      }))
       .sort((a, b) => a.s - b.s),
     syncPoints: [...state.syncPoints.entries()]
       .map(([key, at]) => {
@@ -287,6 +306,67 @@ export function chapterSpan(
     if (end - start < MIN_CHAPTER_SEC) start = Math.max(seg.start, end - MIN_CHAPTER_SEC);
   }
   return { start, end };
+}
+
+/**
+ * The stored edit after a chapter is split at a word, or merged into the
+ * one before it.
+ *
+ * Everything in the edit that names a chapter is by number, so a split or
+ * a merge renumbers it all in one place: deleted scenes, word cuts and
+ * rewrites, scene timing, sync points. The first half of a split keeps the
+ * chapter's timing; the second half starts fresh. A merge gives the joined
+ * chapter the earlier one's timing and drops the later one's, since a
+ * chapter has one.
+ */
+export function remapStoredForSplit(stored: StoredEditState, segIndex: number, wordIndex: number): StoredEditState {
+  const seg = (s: number) => (s > segIndex ? s + 1 : s);
+  const word = (s: number, w: number): [number, number] =>
+    s === segIndex && w >= wordIndex ? [segIndex + 1, w - wordIndex] : [seg(s), w];
+  const deleted = (stored.deletedSegments ?? []).flatMap((s) => (s === segIndex ? [segIndex, segIndex + 1] : [seg(s)]));
+  return {
+    ...stored,
+    deletedSegments: [...new Set(deleted)].sort((a, b) => a - b),
+    cutWords: (stored.cutWords ?? []).map(([s, w]) => word(s, w)),
+    wordEdits: (stored.wordEdits ?? []).map((e) => {
+      const [s, w] = word(e.s, e.w);
+      return { ...e, s, w };
+    }),
+    sceneTiming: (stored.sceneTiming ?? []).map((t) => ({ ...t, s: seg(t.s) })),
+    syncPoints: (stored.syncPoints ?? []).map((p) => {
+      const [s, w] = word(p.s, p.w);
+      return { ...p, s, w };
+    }),
+  };
+}
+
+export function remapStoredForMerge(stored: StoredEditState, segIndex: number, previousWordCount: number): StoredEditState {
+  // Chapter `segIndex` folds into `segIndex - 1`; its words follow the earlier chapter's.
+  const seg = (s: number) => (s >= segIndex ? s - 1 : s);
+  const word = (s: number, w: number): [number, number] => (s === segIndex ? [segIndex - 1, w + previousWordCount] : [seg(s), w]);
+  const deleted = (stored.deletedSegments ?? [])
+    // The joined chapter is deleted only if both halves were.
+    .filter((s) => s !== segIndex && s !== segIndex - 1)
+    .map(seg)
+    .concat(
+      (stored.deletedSegments ?? []).includes(segIndex) && (stored.deletedSegments ?? []).includes(segIndex - 1)
+        ? [segIndex - 1]
+        : [],
+    );
+  return {
+    ...stored,
+    deletedSegments: [...new Set(deleted)].sort((a, b) => a - b),
+    cutWords: (stored.cutWords ?? []).map(([s, w]) => word(s, w)),
+    wordEdits: (stored.wordEdits ?? []).map((e) => {
+      const [s, w] = word(e.s, e.w);
+      return { ...e, s, w };
+    }),
+    sceneTiming: (stored.sceneTiming ?? []).filter((t) => t.s !== segIndex).map((t) => ({ ...t, s: seg(t.s) })),
+    syncPoints: (stored.syncPoints ?? []).map((p) => {
+      const [s, w] = word(p.s, p.w);
+      return { ...p, s, w };
+    }),
+  };
 }
 
 /** Whether this edit removes the word: a filler under the toggle, or a hand cut. */

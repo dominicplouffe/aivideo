@@ -39,6 +39,10 @@ export default async function StudioPage({ params }: { params: Promise<{ id: str
 
   return (
     <Studio
+      // A split or merge changes which chapters exist. Remount on that, and
+      // only on that, so the editor's state is rebuilt from the renumbered
+      // edit rather than kept from before the change.
+      key={project.segments.map((segment) => segment.id).join("|")}
       project={project}
       transcriptionLive={transcription?.live ?? true}
       transcriptionMissing={transcription?.missing ?? []}

@@ -12,7 +12,9 @@ import {
 import type { TranscriptionResult } from "@/lib/providers/types";
 import type { Project } from "@/lib/app-data";
 import { wordKey } from "@/lib/segments";
-import { chapterSpan, occurrencesOf, resolveWords, rewriteFor, withTrailingPunctuation } from "@/lib/edit-state";
+import {
+  chapterSpan, occurrencesOf, remapStoredForMerge, remapStoredForSplit, resolveWords, rewriteFor, withTrailingPunctuation,
+} from "@/lib/edit-state";
 
 /** Builds a transcript from "word@start-end" shorthand, so tests stay legible. */
 function transcript(spec: string, durationSec?: number): TranscriptionResult {
@@ -329,12 +331,12 @@ test("a narrated timeline plays each chapter whole, pauses and all", () => {
 
 test("scene timing trims the footage a narrated chapter plays, never below the minimum, and round-trips", () => {
   const seg = { start: 10, end: 20 };
-  const state = { ...DEFAULT_EDIT_STATE, sceneTiming: new Map([[0, { mode: "hold" as const, trimStartSec: 2, trimEndSec: 3 }]]) };
+  const state = { ...DEFAULT_EDIT_STATE, sceneTiming: new Map([[0, { mode: "hold" as const, trimStartSec: 2, trimEndSec: 3, leadInSec: 0 }]]) };
   assert.deepEqual(chapterSpan(seg, 0, state), { start: 12, end: 17 });
   // Untimed chapters are untouched.
   assert.deepEqual(chapterSpan(seg, 1, state), { start: 10, end: 20 });
   // Trims that would leave nothing are pulled back to the minimum.
-  const greedy = { ...DEFAULT_EDIT_STATE, sceneTiming: new Map([[0, { mode: "fit" as const, trimStartSec: 6, trimEndSec: 6 }]]) };
+  const greedy = { ...DEFAULT_EDIT_STATE, sceneTiming: new Map([[0, { mode: "fit" as const, trimStartSec: 6, trimEndSec: 6, leadInSec: 0 }]]) };
   const span = chapterSpan(seg, 0, greedy);
   assert.ok(span.end - span.start >= 0.5 - 1e-9);
 
@@ -342,7 +344,7 @@ test("scene timing trims the footage a narrated chapter plays, never below the m
   assert.deepEqual(stored.sceneTiming, [{ s: 0, mode: "hold", trimStart: 2, trimEnd: 3 }]);
   assert.deepEqual([...hydrateEditState(stored).sceneTiming.entries()], [...state.sceneTiming.entries()]);
   // A default entry is not stored; junk is dropped.
-  const dflt = { ...DEFAULT_EDIT_STATE, sceneTiming: new Map([[0, { mode: "fit" as const, trimStartSec: 0, trimEndSec: 0 }]]) };
+  const dflt = { ...DEFAULT_EDIT_STATE, sceneTiming: new Map([[0, { mode: "fit" as const, trimStartSec: 0, trimEndSec: 0, leadInSec: 0 }]]) };
   assert.deepEqual(serializeEditState(dflt).sceneTiming, []);
   assert.equal(hydrateEditState({ sceneTiming: [{ s: -1, mode: "hold" }, { s: 1, mode: "sideways", trimStart: -2 }] }).sceneTiming.size, 0);
 
@@ -360,6 +362,36 @@ test("sync points round-trip and junk is dropped", () => {
   assert.deepEqual(stored.syncPoints, [{ s: 0, w: 1, at: 3 }, { s: 2, w: 3, at: 41.25 }]);
   assert.deepEqual([...hydrateEditState(stored).syncPoints.entries()], [[wordKey(0, 1), 3], [wordKey(2, 3), 41.25]]);
   assert.equal(hydrateEditState({ syncPoints: [{ s: 0, w: 0, at: -1 }, { s: "a", w: 0, at: 1 }, { s: 0, w: 1 }] }).syncPoints.size, 0);
+});
+
+test("splitting a chapter at a word renumbers every edit that names a chapter, and merging undoes it", () => {
+  const stored = {
+    deletedSegments: [0, 2],
+    cutWords: [[1, 1], [1, 5], [2, 0]] as [number, number][],
+    wordEdits: [{ s: 1, w: 6, n: 2, text: "Claude" }],
+    sceneTiming: [{ s: 1, mode: "hold" as const, trimStart: 1, trimEnd: 0 }, { s: 2, mode: "stretch" as const, trimStart: 0, trimEnd: 0 }],
+    syncPoints: [{ s: 1, w: 2, at: 12 }, { s: 1, w: 7, at: 30 }],
+  };
+  // Split chapter 1 at its word 4: words 0–3 stay, 4+ become chapter 2; old chapter 2 becomes 3.
+  const split = remapStoredForSplit(stored, 1, 4);
+  assert.deepEqual(split.deletedSegments, [0, 3]);
+  assert.deepEqual(split.cutWords, [[1, 1], [2, 1], [3, 0]]);
+  assert.deepEqual(split.wordEdits, [{ s: 2, w: 2, n: 2, text: "Claude" }]);
+  assert.deepEqual(split.sceneTiming, [{ s: 1, mode: "hold", trimStart: 1, trimEnd: 0 }, { s: 3, mode: "stretch", trimStart: 0, trimEnd: 0 }]);
+  assert.deepEqual(split.syncPoints, [{ s: 1, w: 2, at: 12 }, { s: 2, w: 3, at: 30 }]);
+  // A deleted chapter split in two is two deleted chapters.
+  assert.deepEqual(remapStoredForSplit({ deletedSegments: [2] }, 2, 1).deletedSegments, [2, 3]);
+
+  // Merging chapter 2 back into chapter 1 (which has 4 words) restores the original numbering.
+  const merged = remapStoredForMerge(split, 2, 4);
+  assert.deepEqual(merged.deletedSegments, stored.deletedSegments);
+  assert.deepEqual(merged.cutWords, stored.cutWords);
+  assert.deepEqual(merged.wordEdits, stored.wordEdits);
+  assert.deepEqual(merged.sceneTiming, stored.sceneTiming);
+  assert.deepEqual(merged.syncPoints, stored.syncPoints);
+  // The joined chapter is deleted only when both halves were.
+  assert.deepEqual(remapStoredForMerge({ deletedSegments: [1, 2] }, 2, 3).deletedSegments, [1]);
+  assert.deepEqual(remapStoredForMerge({ deletedSegments: [2] }, 2, 3).deletedSegments, []);
 });
 
 test("keeping the fillers makes edited time and source time agree again", () => {

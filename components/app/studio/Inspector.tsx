@@ -6,7 +6,7 @@ import { Icon, type IconName } from "@/components/ui/Icon";
 import { Button } from "@/components/ui/Button";
 import type { Project, Segment } from "@/lib/app-data";
 import { localeLabel } from "@/lib/locales";
-import { chapterSpan, DEFAULT_SCENE_TIMING, MIN_CHAPTER_SEC, type EditState, type SceneTiming } from "./types";
+import { chapterSpan, DEFAULT_SCENE_TIMING, MAX_LEAD_IN_SEC, MIN_CHAPTER_SEC, type EditState, type SceneTiming } from "./types";
 
 type Tab = "scene" | "audio" | "brand" | "output" | "riff";
 
@@ -218,7 +218,7 @@ function SceneTimingControls({
   const set = (next: Partial<SceneTiming>) => {
     const merged = { ...timing, ...next };
     const map = new Map(state.sceneTiming);
-    if (merged.mode === "fit" && merged.trimStartSec === 0 && merged.trimEndSec === 0) map.delete(segmentIndex);
+    if (merged.mode === "fit" && merged.trimStartSec === 0 && merged.trimEndSec === 0 && merged.leadInSec === 0) map.delete(segmentIndex);
     else map.set(segmentIndex, merged);
     onState({ sceneTiming: map });
   };
@@ -273,6 +273,18 @@ function SceneTimingControls({
         label="Footage"
         value={`${(bounds.end - bounds.start).toFixed(1)}s of ${full.toFixed(1)}s`}
       />
+      <div className="mt-3">
+        <Stepper
+          label="Pause before the voice"
+          value={timing.leadInSec}
+          max={MAX_LEAD_IN_SEC}
+          step={step}
+          onChange={(v) => set({ leadInSec: v })}
+        />
+        <p className="mt-1.5 text-2xs leading-relaxed text-fg-faint">
+          The scene's picture starts on time; the voice comes in this much later. A beat to take a new screen in.
+        </p>
+      </div>
     </Group>
   );
 }
