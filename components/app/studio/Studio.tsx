@@ -368,7 +368,7 @@ export function Studio({
 
       {/* ---------------- body ---------------- */}
       <div className="grid min-h-0 flex-1 grid-cols-1 xl:grid-cols-[19rem_1fr_19rem] 2xl:grid-cols-[22rem_1fr_21rem]">
-        <div className="hidden min-h-0 min-w-0 xl:block">
+        <div className="hidden min-h-0 min-w-0 xl:flex xl:flex-col">
           <Transcript
             project={project}
             state={state}
@@ -411,7 +411,7 @@ export function Studio({
           />
         </div>
 
-        <div className="hidden min-h-0 min-w-0 xl:block">
+        <div className="hidden min-h-0 min-w-0 xl:flex xl:flex-col">
           <Inspector
             project={project}
             segment={inspected}

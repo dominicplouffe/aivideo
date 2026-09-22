@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { cn, formatDuration } from "@/lib/utils";
 import { Icon, type IconName } from "@/components/ui/Icon";
 import { Button } from "@/components/ui/Button";
@@ -84,10 +84,13 @@ export function Transcript({
    * Selecting, cutting and rewriting.
    *
    * Click a word to select it, shift-click to extend the selection through
-   * its chapter. Delete or Backspace cuts the selection, and the same key on
-   * words already cut restores them. Enter, or a double-click, opens the
-   * editor for the selection. The pill in the header does whatever the key
-   * would, so the shortcut has something to be learned from.
+   * its chapter, or right-click a word to select it. A toolbar appears at
+   * the selection — above it, or below when there is no room — with Edit
+   * and Cut, and follows the selection as the script scrolls, so the actions
+   * are where the eyes are and never up in a header that has scrolled away.
+   * Delete or Backspace cuts the selection, and the same key on words
+   * already cut restores them. Enter, or a double-click, opens the editor,
+   * which sits under the selection for the same reason.
    *
    * A selection is kept within one chapter: a span that crosses a chapter
    * boundary would cut across a title, and it is never what a person
@@ -135,6 +138,60 @@ export function Transcript({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [selection, editing, toggleSelected]);
+
+  /*
+   * Where the selection is on screen, in the scroll container's coordinates,
+   * so the toolbar and the editor can sit against it and move with it.
+   * Measured after paint and again on scroll and resize.
+   */
+  const scroller = useRef<HTMLDivElement>(null);
+  const [anchor, setAnchor] = useState<{ top: number; bottom: number; left: number; right: number } | null>(null);
+  const measure = useCallback(() => {
+    const container = scroller.current;
+    if (!container || !selection) {
+      setAnchor(null);
+      return;
+    }
+    const from = Math.min(selection.anchor, selection.focus);
+    const to = Math.max(selection.anchor, selection.focus);
+    const spans = [...container.querySelectorAll<HTMLElement>(`[data-word^="${selection.seg}:"]`)].filter((el) => {
+      const position = Number(el.dataset.word?.split(":")[1]);
+      return position >= from && position <= to;
+    });
+    if (spans.length === 0) {
+      setAnchor(null);
+      return;
+    }
+    const box = container.getBoundingClientRect();
+    let top = Infinity, bottom = -Infinity, left = Infinity, right = -Infinity;
+    for (const el of spans) {
+      const r = el.getBoundingClientRect();
+      top = Math.min(top, r.top);
+      bottom = Math.max(bottom, r.bottom);
+      left = Math.min(left, r.left);
+      right = Math.max(right, r.right);
+    }
+    setAnchor({
+      top: top - box.top + container.scrollTop,
+      bottom: bottom - box.top + container.scrollTop,
+      left: left - box.left + container.scrollLeft,
+      right: right - box.left + container.scrollLeft,
+    });
+  }, [selection]);
+
+  useLayoutEffect(() => {
+    measure();
+  }, [measure, resolved, editing]);
+  useEffect(() => {
+    const container = scroller.current;
+    if (!container) return;
+    container.addEventListener("scroll", measure, { passive: true });
+    window.addEventListener("resize", measure);
+    return () => {
+      container.removeEventListener("scroll", measure);
+      window.removeEventListener("resize", measure);
+    };
+  }, [measure]);
 
   const selectWord = (segIndex: number, position: number, extend: boolean) => {
     setEditing(false);
@@ -204,48 +261,20 @@ export function Transcript({
   }, [selection, selectedWords, project]);
 
   return (
-    <div className="flex min-h-0 flex-col border-r border-[var(--line)] bg-ink-950">
+    <div className="flex min-h-0 flex-1 flex-col border-r border-[var(--line)] bg-ink-950">
       <header className="flex items-center justify-between gap-3 border-b border-[var(--line)] px-4 py-3">
         <div className="flex items-center gap-2">
           <Icon name="doc" className="size-4 text-iris-400" strokeWidth={1.8} />
           <h2 className="text-[0.875rem] font-medium text-fg-strong">Script</h2>
         </div>
-        {selectedKeys.length > 0 && !editing ? (
-          <span className="flex items-center gap-1.5">
-            <button
-              type="button"
-              onClick={() => setEditing(true)}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--line)] px-2 py-1 text-2xs font-medium text-fg-subtle transition-colors hover:border-[var(--line-strong)] hover:text-fg"
-            >
-              <Icon name="wand" className="size-3" strokeWidth={2.2} />
-              Edit
-              <kbd className="rounded border border-current/30 px-1 font-mono text-[0.625rem] opacity-70">↵</kbd>
-            </button>
-            <button
-              type="button"
-              onClick={toggleSelected}
-              className={cn(
-                "inline-flex items-center gap-1.5 rounded-lg border px-2 py-1 text-2xs font-medium transition-colors",
-                selectionCut
-                  ? "border-mint-500/40 bg-mint-500/10 text-mint-300 hover:bg-mint-500/20"
-                  : "border-rose-500/40 bg-rose-500/10 text-rose-300 hover:bg-rose-500/20",
-              )}
-            >
-              <Icon name={selectionCut ? "refresh" : "scissors"} className="size-3" strokeWidth={2.2} />
-              {selectionCut ? "Restore" : "Cut"} {selectedKeys.length}
-              <kbd className="rounded border border-current/30 px-1 font-mono text-[0.625rem] opacity-70">⌫</kbd>
-            </button>
-          </span>
-        ) : (
-          <span className={cn("font-mono text-2xs", removed > 0 || corrected > 0 ? "text-mint-400" : "text-fg-faint")}>
-            {[
-              removed > 0 ? `${removed} word${removed === 1 ? "" : "s"} cut` : null,
-              corrected > 0 ? `${corrected} corrected` : null,
-            ]
-              .filter(Boolean)
-              .join(" · ") || "verbatim"}
-          </span>
-        )}
+        <span className={cn("font-mono text-2xs", removed > 0 || corrected > 0 ? "text-mint-400" : "text-fg-faint")}>
+          {[
+            removed > 0 ? `${removed} word${removed === 1 ? "" : "s"} cut` : null,
+            corrected > 0 ? `${corrected} corrected` : null,
+          ]
+            .filter(Boolean)
+            .join(" · ") || "verbatim"}
+        </span>
       </header>
 
       {/*
@@ -269,7 +298,28 @@ export function Transcript({
           : null}
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
+      <div ref={scroller} className="relative min-h-0 flex-1 overflow-y-auto px-4 py-4">
+        {anchor && selectedWords.length > 0 && !editing ? (
+          <SelectionToolbar
+            anchor={anchor}
+            container={scroller.current}
+            count={selectedKeys.length}
+            cut={selectionCut}
+            onEdit={() => setEditing(true)}
+            onCut={toggleSelected}
+          />
+        ) : null}
+        {anchor && editing && selection && selectedWords.length > 0 ? (
+          <FloatingCard anchor={anchor} container={scroller.current}>
+            <WordEditor
+              key={`${selection.seg}:${Math.min(selection.anchor, selection.focus)}:${Math.max(selection.anchor, selection.focus)}`}
+              words={selectedWords}
+              otherOccurrences={otherOccurrences}
+              onApply={applyEdit}
+              onCancel={() => setEditing(false)}
+            />
+          </FloatingCard>
+        ) : null}
         {project.segments.map((seg, segIndex) => {
           const deleted = state.deletedSegments.has(segIndex);
           const isActive = activeSegment === segIndex;
@@ -366,6 +416,7 @@ export function Transcript({
                     return (
                       <span
                         key={w.wordIndex}
+                        data-word={`${segIndex}:${position}`}
                         onClick={(e) => {
                           if (edited) onSeek(edited.start);
                           selectWord(segIndex, position, e.shiftKey);
@@ -374,6 +425,14 @@ export function Transcript({
                           e.preventDefault();
                           selectWord(segIndex, position, false);
                           setEditing(true);
+                        }}
+                        onContextMenu={(e) => {
+                          // The toolbar is the context menu: right-click
+                          // selects the word (keeping a selection it is
+                          // already part of) and the actions appear on it.
+                          e.preventDefault();
+                          if (!isSelected) selectWord(segIndex, position, false);
+                          setEditing(false);
                         }}
                         title={title}
                         className={cn(
@@ -395,24 +454,132 @@ export function Transcript({
                 </p>
               )}
 
-              {editing && selection?.seg === segIndex && selectedWords.length > 0 ? (
-                <WordEditor
-                  key={`${segIndex}:${from}:${to}`}
-                  words={selectedWords}
-                  otherOccurrences={otherOccurrences}
-                  onApply={applyEdit}
-                  onCancel={() => setEditing(false)}
-                />
-              ) : null}
             </section>
           );
         })}
 
         <p className="px-1 pt-1 text-2xs leading-relaxed text-fg-faint">
-          Click a word to select it, shift-click to extend. Delete cuts it from the video; Enter
-          edits its spelling or how it is said.
+          Click or right-click a word to select it, shift-click to extend. Delete cuts it from the
+          video; Enter edits its spelling or how it is said.
         </p>
       </div>
+    </div>
+  );
+}
+
+type Anchor = { top: number; bottom: number; left: number; right: number };
+
+/**
+ * Places a child against the selection inside the scroll container.
+ *
+ * Above the selection by default, below when the selection is at the top of
+ * the view, and never past either edge horizontally. Measured after mount,
+ * so the first paint may be a frame off; nobody sees it.
+ */
+function useFloatingPosition(
+  anchor: Anchor,
+  container: HTMLDivElement | null,
+  prefer: "above" | "below",
+) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [style, setStyle] = useState<{ top: number; left: number } | null>(null);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el || !container) return;
+    const width = el.offsetWidth;
+    const height = el.offsetHeight;
+    const viewTop = container.scrollTop;
+    const viewBottom = container.scrollTop + container.clientHeight;
+    const gap = 6;
+    let top: number;
+    if (prefer === "above") {
+      top = anchor.top - height - gap;
+      if (top < viewTop + 4) top = anchor.bottom + gap;
+    } else {
+      top = anchor.bottom + gap;
+      if (top + height > viewBottom - 4 && anchor.top - height - gap >= viewTop + 4) {
+        top = anchor.top - height - gap;
+      }
+    }
+    const centre = (anchor.left + anchor.right) / 2;
+    const maxLeft = Math.max(8, container.clientWidth - width - 8);
+    const left = Math.min(maxLeft, Math.max(8, prefer === "above" ? centre - width / 2 : anchor.left));
+    setStyle({ top, left });
+  }, [anchor, container, prefer]);
+  return { ref, style };
+}
+
+/** Edit and Cut, at the selection. What Descript calls the selection toolbar. */
+function SelectionToolbar({
+  anchor,
+  container,
+  count,
+  cut,
+  onEdit,
+  onCut,
+}: {
+  anchor: Anchor;
+  container: HTMLDivElement | null;
+  count: number;
+  cut: boolean;
+  onEdit: () => void;
+  onCut: () => void;
+}) {
+  const { ref, style } = useFloatingPosition(anchor, container, "above");
+  return (
+    <div
+      ref={ref}
+      role="toolbar"
+      aria-label="Selection actions"
+      style={style ? { top: style.top, left: style.left } : { top: anchor.top, left: anchor.left, visibility: "hidden" }}
+      className="absolute z-20 flex items-center gap-1 rounded-lg border border-[var(--line-strong)] bg-ink-900 p-1 shadow-[0_12px_32px_-12px_rgba(0,0,0,0.6)]"
+      // Pressing a button must not drop the selection the toolbar is for.
+      onMouseDown={(e) => e.preventDefault()}
+    >
+      <button
+        type="button"
+        onClick={onEdit}
+        className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-2xs font-medium text-fg transition-colors hover:bg-ink-800"
+      >
+        <Icon name="wand" className="size-3" strokeWidth={2.2} />
+        Edit
+        <kbd className="rounded border border-current/30 px-1 font-mono text-[0.625rem] opacity-60">↵</kbd>
+      </button>
+      <button
+        type="button"
+        onClick={onCut}
+        className={cn(
+          "inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-2xs font-medium transition-colors",
+          cut ? "text-mint-300 hover:bg-mint-500/15" : "text-rose-300 hover:bg-rose-500/15",
+        )}
+      >
+        <Icon name={cut ? "refresh" : "scissors"} className="size-3" strokeWidth={2.2} />
+        {cut ? "Restore" : "Cut"} {count}
+        <kbd className="rounded border border-current/30 px-1 font-mono text-[0.625rem] opacity-60">⌫</kbd>
+      </button>
+    </div>
+  );
+}
+
+/** A card under the selection: the word editor's home. */
+function FloatingCard({
+  anchor,
+  container,
+  children,
+}: {
+  anchor: Anchor;
+  container: HTMLDivElement | null;
+  children: React.ReactNode;
+}) {
+  const { ref, style } = useFloatingPosition(anchor, container, "below");
+  const width = Math.min(380, (container?.clientWidth ?? 400) - 16);
+  return (
+    <div
+      ref={ref}
+      style={{ width, ...(style ? { top: style.top, left: style.left } : { top: anchor.bottom, left: anchor.left, visibility: "hidden" }) }}
+      className="absolute z-20 shadow-[0_16px_40px_-16px_rgba(0,0,0,0.7)]"
+    >
+      {children}
     </div>
   );
 }
@@ -474,7 +641,7 @@ function WordEditor({
 
   return (
     <div
-      className="mt-3 rounded-xl border border-iris-500/35 bg-ink-900 p-3"
+      className="rounded-xl border border-iris-500/35 bg-ink-900 p-3"
       onKeyDown={(e) => {
         if (e.key === "Escape") {
           e.preventDefault();

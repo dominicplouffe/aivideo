@@ -48,6 +48,21 @@ export async function PUT(request: Request, context: Context) {
   }
 
   const bytes = new Uint8Array(await request.arrayBuffer());
+  if (declared > 0 && bytes.byteLength !== declared) {
+    // Fewer bytes than the browser said it was sending is not a take, it is
+    // the first part of one. Next's proxy buffering does exactly this past
+    // its body-size limit and reports nothing to the client, which is how a
+    // nine-minute recording was stored, transcribed and edited as thirty
+    // seconds. Refused loudly, with the number, so the cause is findable.
+    return NextResponse.json(
+      {
+        error:
+          `The upload arrived incomplete: ${bytes.byteLength} of ${declared} bytes. ` +
+          "The server is cutting request bodies short — check its body-size limit — and the take was not stored.",
+      },
+      { status: 400 },
+    );
+  }
   if (bytes.byteLength === 0) {
     // A zero-byte take is a capture that failed, and storing it would leave
     // a project that plays nothing with no sign of why.

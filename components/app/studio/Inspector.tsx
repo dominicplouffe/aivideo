@@ -66,7 +66,7 @@ export function Inspector({
   }, [ask]);
 
   return (
-    <aside className="flex min-h-0 w-full flex-col border-l border-[var(--line)] bg-ink-950">
+    <aside className="flex min-h-0 w-full flex-1 flex-col border-l border-[var(--line)] bg-ink-950">
       <div className="flex shrink-0 border-b border-[var(--line)]">
         {tabs.map((t) => (
           <button
