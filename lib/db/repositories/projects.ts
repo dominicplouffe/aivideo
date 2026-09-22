@@ -326,6 +326,101 @@ export async function createProject(input: {
   return project;
 }
 
+/**
+ * A second project cut from the same take: the chapters, every edit and
+ * the chosen voice as they stand this moment, under a new name, so somebody
+ * can try a different cut without touching the one they have. The
+ * recording is shared, not copied — nothing is uploaded or transcribed
+ * again — and the copy has no share, renders or view counts of its own yet.
+ */
+export async function duplicateProject(
+  workspaceId: string,
+  projectId: string,
+  ownerId: string | null,
+): Promise<{ ok: true; project: Project } | { ok: false; reason: string; status: 404 | 409 }> {
+  const outcome = await getDb().transaction(async (tx) => {
+    const [source] = await tx
+      .select()
+      .from(s.projects)
+      .where(and(eq(s.projects.id, projectId), eq(s.projects.workspaceId, workspaceId), isNull(s.projects.deletedAt)))
+      .limit(1);
+    if (!source) return { ok: false as const, reason: "No such project.", status: 404 as const };
+    if (source.status === "processing") {
+      return {
+        ok: false as const,
+        reason: "That project is still being processed. Copy it once its chapters are ready.",
+        status: 409 as const,
+      };
+    }
+    const rows = await tx.select().from(s.segments).where(eq(s.segments.projectId, projectId)).orderBy(s.segments.ordinal);
+
+    const title = copyTitle(source.title);
+    const taken = new Set(
+      (
+        await tx
+          .select({ slug: s.projects.slug })
+          .from(s.projects)
+          .where(eq(s.projects.workspaceId, workspaceId))
+      ).map((row) => row.slug),
+    );
+    const base = slugify(title) || "untitled-recording";
+    let slug = base;
+    for (let n = 2; taken.has(slug); n++) slug = `${base}-${n}`;
+
+    const [row] = await tx
+      .insert(s.projects)
+      .values({
+        workspaceId,
+        recordingId: source.recordingId,
+        ownerId,
+        slug,
+        title,
+        description: source.description,
+        // A published project's copy is not published: the share belongs to
+        // the original. Everything else keeps its footing.
+        status: source.status === "published" ? "ready" : source.status,
+        collection: source.collection,
+        brandKitId: source.brandKitId,
+        voiceId: source.voiceId,
+        editState: source.editState,
+        sourceDurationSec: source.sourceDurationSec,
+      })
+      .returning();
+
+    if (rows.length > 0) {
+      await tx.insert(s.segments).values(
+        rows.map((seg) => ({
+          projectId: row.id,
+          ordinal: seg.ordinal,
+          title: seg.title,
+          startSec: seg.startSec,
+          endSec: seg.endSec,
+          action: seg.action,
+          words: seg.words,
+          zoom: seg.zoom,
+          zoomInferred: seg.zoomInferred,
+        })),
+      );
+    }
+    return { ok: true as const, row };
+  });
+  if (!outcome.ok) return outcome;
+  const [project] = await hydrate([outcome.row]);
+  return { ok: true, project };
+}
+
+/**
+ * "Launch demo" → "Launch demo (copy)"; a copy of a copy is
+ * "Launch demo (copy 2)", not "Launch demo (copy) (copy)".
+ */
+export function copyTitle(title: string): string {
+  const match = /^(.*?)\s\(copy(?: (\d+))?\)$/.exec(title.trim());
+  const stem = match ? match[1] : title.trim();
+  const n = match ? Number(match[2] ?? 1) + 1 : 1;
+  const suffix = n === 1 ? " (copy)" : ` (copy ${n})`;
+  return `${stem.slice(0, 140 - suffix.length)}${suffix}`;
+}
+
 /** Saves the Studio's edit decisions. The only writer of `edit_state`. */
 export async function saveEditState(
   workspaceId: string,

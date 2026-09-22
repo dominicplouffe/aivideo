@@ -433,6 +433,38 @@ export function Studio({
     [dirty, project.id, reshaping, router, state],
   );
 
+  /*
+   * A copy to experiment on. The unsaved edit is flushed first for the same
+   * reason as above: the copy should carry what is on screen, not what was
+   * on screen six hundred milliseconds ago. Then the copy opens, and this
+   * project stays exactly as it was.
+   */
+  const [copying, setCopying] = useState<"idle" | "working" | "error">("idle");
+  const duplicate = useCallback(async () => {
+    if (copying === "working") return;
+    setCopying("working");
+    try {
+      if (dirty) {
+        setSaved("saving");
+        const flushed = await fetch(`/api/projects/${project.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ edit_state: serializeEditState(state) }),
+        });
+        if (!flushed.ok) throw new Error("The edit could not be saved first.");
+        setDirty(false);
+        setSaved("saved");
+      }
+      const response = await fetch(`/api/projects/${project.id}/duplicate`, { method: "POST" });
+      const result = (await response.json()) as { project?: Project; error?: string };
+      if (!response.ok || !result.project) throw new Error(result.error ?? "The project could not be copied.");
+      router.push(`/app/studio/${result.project.id}`);
+    } catch (error) {
+      setCopying("error");
+      console.error("[studio] duplicate failed:", error);
+    }
+  }, [copying, dirty, project.id, router, state]);
+
   const setWordsCut = useCallback((keys: string[], cut: boolean) => {
     setState((s) => {
       const next = new Set(s.cutWords);
@@ -581,6 +613,27 @@ export function Studio({
               </>
             )}
           </span>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={duplicate}
+            disabled={copying === "working"}
+            title={
+              copying === "error"
+                ? "The copy failed. Try again."
+                : "Make a copy of this project to try something different, keeping this one as it is"
+            }
+            className={cn(copying === "error" && "text-rose-300")}
+          >
+            <Icon
+              name={copying === "error" ? "alert" : "copy"}
+              className={cn("size-4", copying === "working" && "animate-pulse")}
+              strokeWidth={1.8}
+            />
+            <span className="hidden sm:inline">
+              {copying === "working" ? "Copying…" : copying === "error" ? "Copy failed" : "Make a copy"}
+            </span>
+          </Button>
           <Button href={`/d/${project.slug}`} variant="ghost" size="sm">
             <Icon name="eye" className="size-4" strokeWidth={1.8} />
             <span className="hidden sm:inline">Preview</span>

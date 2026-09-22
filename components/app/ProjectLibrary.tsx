@@ -70,6 +70,56 @@ function RetryButton({ projectId }: { projectId: string }) {
   );
 }
 
+/**
+ * A copy of the project to experiment on, opened in the Studio as soon as
+ * it exists. Same shape as the retry button: the card around it is a link,
+ * and this must not follow it.
+ */
+function CopyButton({ projectId, tone }: { projectId: string; tone: "overlay" | "row" }) {
+  const router = useRouter();
+  const [state, setState] = useState<"idle" | "working" | "error">("idle");
+
+  return (
+    <button
+      type="button"
+      disabled={state === "working"}
+      aria-label="Make a copy"
+      title={state === "error" ? "The copy failed. Try again." : "Make a copy to try something different"}
+      onClick={async (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        setState("working");
+        try {
+          const response = await fetch(`/api/projects/${projectId}/duplicate`, { method: "POST" });
+          const result = (await response.json()) as { project?: { id: string } };
+          if (!response.ok || !result.project) throw new Error("copy failed");
+          router.push(`/app/studio/${result.project.id}`);
+        } catch {
+          setState("error");
+        }
+      }}
+      className={cn(
+        "inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-2xs font-medium transition-colors",
+        state === "error"
+          ? "border-rose-500/40 bg-rose-500/15 text-rose-200"
+          : tone === "overlay"
+            // On the thumbnail, over footage of any brightness.
+            ? "border-white/15 bg-black/60 text-white/90 backdrop-blur-sm hover:bg-black/75"
+            // In a table row, on the page background in either theme.
+            : "border-[var(--line)] bg-transparent text-fg-subtle hover:bg-ink-850 hover:text-fg",
+        state === "working" && "cursor-wait opacity-70",
+      )}
+    >
+      <Icon
+        name={state === "error" ? "alert" : "copy"}
+        className={cn("size-3", state === "working" && "animate-pulse")}
+        strokeWidth={2.2}
+      />
+      {state === "working" ? "Copying…" : state === "error" ? "Copy failed" : "Copy"}
+    </button>
+  );
+}
+
 /** A stable hue per address, so two people never share an avatar colour. */
 function hueFor(email: string): number {
   return [...email].reduce((n, c) => (n * 31 + c.charCodeAt(0)) % 360, 7);
@@ -271,6 +321,11 @@ export function ProjectLibrary({
                       <span className="absolute top-2.5 left-2.5">
                         <StatusPill status={p.status} />
                       </span>
+                      {p.status !== "processing" ? (
+                        <span className="absolute top-2.5 right-2.5 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+                          <CopyButton projectId={p.id} tone="overlay" />
+                        </span>
+                      ) : null}
                       {p.status === "failed" ? (
                         <span className="absolute right-2.5 bottom-2.5">
                           <RetryButton projectId={p.id} />
@@ -325,6 +380,7 @@ export function ProjectLibrary({
               <span className="w-20 text-right">Views</span>
               <span className="w-20 text-right">Completion</span>
               <span className="w-24 text-right">Updated</span>
+              <span className="w-20" aria-hidden />
             </div>
             <ul className="divide-y divide-[var(--line)]">
               {filtered.map((p) => (
@@ -351,6 +407,11 @@ export function ProjectLibrary({
                     </span>
                     <span className="w-24 text-right text-[0.75rem] text-fg-faint">
                       {relativeTime(p.updatedAt)}
+                    </span>
+                    <span className="flex w-20 justify-end">
+                      {p.status !== "processing" ? (
+                        <CopyButton projectId={p.id} tone="row" />
+                      ) : null}
                     </span>
                   </Link>
                 </li>
