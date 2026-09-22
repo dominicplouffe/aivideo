@@ -32,6 +32,14 @@ export interface RetimeInput {
   sourceEnd: number;
   /** How long the narration for this chapter runs. */
   narrationSec: number;
+  /**
+   * `fit` (default) is the judgement described above. `hold` plays the
+   * footage as recorded and parks on the last frame for the rest of the
+   * reading, or ends the footage where the reading ends. `stretch` plays it
+   * at one speed so it ends with the reading, within what still reads as the
+   * same footage; anything past that is held or trimmed.
+   */
+  mode?: "fit" | "hold" | "stretch";
   /** Interior anchors, in source order. The chapter's ends are implicit. */
   anchors?: Anchor[];
   /** Where the picture stands still, absolute source seconds. */
@@ -173,6 +181,34 @@ function fitInterval(ps: Piece[], need: number): void {
 }
 
 export function retimeChapter(input: RetimeInput): { clips: RetimedClip[]; summary: RetimeSummary } {
+  const span = input.sourceEnd - input.sourceStart;
+  const summaryOf = (clips: RetimedClip[]): RetimeSummary => ({
+    heldSec: round(clips.reduce((n, c) => n + (c.holdSec ?? 0), 0)),
+    hurriedSec: round(clips.filter((c) => (c.speed ?? 1) > 1 + TOLERANCE).reduce((n, c) => n + (c.sourceEnd - c.sourceStart), 0)),
+    slowedSec: round(clips.filter((c) => (c.speed ?? 1) < 1 - TOLERANCE).reduce((n, c) => n + (c.sourceEnd - c.sourceStart), 0)),
+    trimmedSec: round(Math.max(0, span - clips.reduce((n, c) => n + (c.sourceEnd - c.sourceStart), 0))),
+  });
+
+  if (input.mode === "hold") {
+    const played = Math.min(span, input.narrationSec);
+    const clip: RetimedClip = { sourceStart: input.sourceStart, sourceEnd: input.sourceStart + played };
+    if (input.narrationSec > span) clip.holdSec = roundSpeed(input.narrationSec - span);
+    const clips = [clip];
+    return { clips, summary: summaryOf(clips) };
+  }
+
+  if (input.mode === "stretch") {
+    const wanted = span / input.narrationSec;
+    const speed = Math.min(4, Math.max(0.25, wanted));
+    const plays = span / speed;
+    const clip: RetimedClip = { sourceStart: input.sourceStart, sourceEnd: input.sourceEnd };
+    if (Math.abs(speed - 1) > 1e-6) clip.speed = roundSpeed(speed);
+    if (plays < input.narrationSec - 1e-6) clip.holdSec = roundSpeed(input.narrationSec - plays);
+    else if (plays > input.narrationSec + 1e-6) clip.sourceEnd = input.sourceStart + input.narrationSec * speed;
+    const clips = [clip];
+    return { clips, summary: summaryOf(clips) };
+  }
+
   const still = input.still ?? [];
   const anchors: Anchor[] = [
     { source: input.sourceStart, output: 0 },

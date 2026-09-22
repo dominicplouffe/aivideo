@@ -1,7 +1,7 @@
 import type { Project } from "@/lib/app-data";
 import type { SynthesisProvider } from "@/lib/providers/types";
 import { ProviderError } from "@/lib/providers/errors";
-import { hydrateEditState, isWordRemoved, resolveWords, type EditState } from "@/lib/edit-state";
+import { chapterSpan, hydrateEditState, isWordRemoved, resolveWords, type EditState } from "@/lib/edit-state";
 import {
   narrationCaptions, segmentOutputSeconds, withClipsFor, withNarration,
   type Edl, type EdlCaption, type NarrationClip,
@@ -55,6 +55,16 @@ export interface NarratedChapter {
 export interface NarrationReport {
   voice: { id: string; name: string };
   chapters: NarratedChapter[];
+}
+
+/**
+ * What a browser needs to play the narrated edit without rendering it: the
+ * readings as playable URLs placed on the finished timeline, and each
+ * surviving word's moment on that timeline, so the script can follow along.
+ */
+export interface NarrationPreview {
+  audio: { segmentId: string; url: string; at: number; durationSec: number }[];
+  words: { segIndex: number; wordIndex: number; start: number; end: number }[];
 }
 
 export interface NarrateInput {
@@ -142,7 +152,9 @@ function captionsFromTimings(
   return cues;
 }
 
-export async function narrate(input: NarrateInput): Promise<{ edl: Edl; report: NarrationReport } | null> {
+export async function narrate(
+  input: NarrateInput,
+): Promise<{ edl: Edl; report: NarrationReport; preview: NarrationPreview } | null> {
   const { project, edl } = input;
   if (!project.voiceId) return null;
 
@@ -175,6 +187,7 @@ export async function narrate(input: NarrateInput): Promise<{ edl: Edl; report: 
   const wantCaptions = input.captions ?? state.captions;
   const clips: NarrationClip[] = [];
   const chapters: NarratedChapter[] = [];
+  const preview: NarrationPreview = { audio: [], words: [] };
   let working = edl;
 
   for (const [segIndex, segment] of project.segments.entries()) {
@@ -191,7 +204,13 @@ export async function narrate(input: NarrateInput): Promise<{ edl: Edl; report: 
           .filter(Boolean)
           .map((token) => respell(token, pronunciations))
           .join(" ");
-        return { text: word.text, spoken, sourceStart: word.t, tokens: spoken.split(/\s+/).filter(Boolean).length };
+        return {
+          text: word.text,
+          spoken,
+          sourceStart: word.t,
+          wordIndex: word.wordIndex,
+          tokens: spoken.split(/\s+/).filter(Boolean).length,
+        };
       })
       .filter((word) => word.tokens > 0);
     const text = kept.map((w) => w.spoken).join(" ").trim();
@@ -207,30 +226,44 @@ export async function narrate(input: NarrateInput): Promise<{ edl: Edl; report: 
 
     // The vendor's timing per transcript word: the first token's start and
     // the last token's end of the tokens that word sent.
-    const timed: { text: string; start: number; end: number; sourceStart: number }[] = [];
+    const timed: { text: string; start: number; end: number; sourceStart: number; wordIndex: number }[] = [];
     if (result.words && result.words.length === kept.reduce((n, w) => n + w.tokens, 0)) {
       let cursor = 0;
       for (const word of kept) {
         const first = result.words[cursor];
         const last = result.words[cursor + word.tokens - 1];
-        timed.push({ text: word.text, start: first.start, end: last.end, sourceStart: word.sourceStart });
+        timed.push({ text: word.text, start: first.start, end: last.end, sourceStart: word.sourceStart, wordIndex: word.wordIndex });
         cursor += word.tokens;
       }
     }
+    // Without vendor timings, words are spread evenly over the reading so
+    // the preview still has something to follow.
+    const wordMoments = (at: number, seconds: number) =>
+      timed.length > 0
+        ? timed.map((w) => ({ segIndex, wordIndex: w.wordIndex, start: at + w.start, end: at + w.end }))
+        : kept.map((w, i) => ({
+            segIndex,
+            wordIndex: w.wordIndex,
+            start: at + (seconds * i) / kept.length,
+            end: at + (seconds * (i + 1)) / kept.length,
+          }));
 
     if (continuous) {
       // The footage bends to the reading. Anchors where a sentence ends on
       // both clocks; still footage is held or hurried first.
+      const trimmed = chapterSpan(segment, segIndex, state);
       const anchors = anchorsFromWords(
         timed.map((w) => ({ source: w.sourceStart, output: w.start, sentenceEnd: /[.!?]$/.test(w.text) })),
-        { sourceStart: segment.start, sourceEnd: segment.end, narrationSec: result.durationSec },
+        { sourceStart: trimmed.start, sourceEnd: trimmed.end, narrationSec: result.durationSec },
       );
+      const bounds = chapterSpan(segment, segIndex, state);
       const fitted = retimeChapter({
-        sourceStart: segment.start,
-        sourceEnd: segment.end,
+        sourceStart: bounds.start,
+        sourceEnd: bounds.end,
         narrationSec: result.durationSec,
         anchors,
         still: input.stillness ?? [],
+        mode: state.sceneTiming.get(segIndex)?.mode ?? "fit",
       });
       working = withClipsFor(
         working,
@@ -238,6 +271,8 @@ export async function narrate(input: NarrateInput): Promise<{ edl: Edl; report: 
         fitted.clips.map((clip) => ({ ...clip, label: segment.id })),
       );
       const chapterStart = working.clips.find((clip) => clip.label === segment.id)?.outputStart ?? 0;
+      preview.audio.push({ segmentId: segment.id, url: result.audioUrl, at: chapterStart, durationSec: result.durationSec });
+      preview.words.push(...wordMoments(chapterStart, result.durationSec));
       clips.push({
         segmentId: segment.id,
         url: result.storageUrl ?? result.audioUrl,
@@ -277,6 +312,8 @@ export async function narrate(input: NarrateInput): Promise<{ edl: Edl; report: 
       tempo = Math.min(TEMPO_MAX, result.durationSec / availableSec);
     }
     const spokenSec = result.durationSec / tempo;
+    preview.audio.push({ segmentId: segment.id, url: result.audioUrl, at: chapterStart, durationSec: spokenSec });
+    preview.words.push(...wordMoments(chapterStart, spokenSec));
     clips.push({
       segmentId: segment.id,
       url: result.storageUrl ?? result.audioUrl,
@@ -301,5 +338,6 @@ export async function narrate(input: NarrateInput): Promise<{ edl: Edl; report: 
   return {
     edl: withNarration(working, clips),
     report: { voice: { id: voice.id, name: voice.name }, chapters },
+    preview,
   };
 }

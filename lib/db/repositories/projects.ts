@@ -3,6 +3,7 @@ import { getDb } from "../client";
 import * as s from "../schema";
 import type { Project, Segment, ProjectStatus, OutputKind } from "@/lib/app-data";
 import { silentSpanSec, wordKey } from "@/lib/segments";
+import { chapterSpan, hydrateEditState } from "@/lib/edit-state";
 import { slugify } from "@/lib/utils";
 
 /**
@@ -62,8 +63,11 @@ function toProject(
     if (deleted.has(i)) return total;
     // Narrated, or silent: the chapter plays whole. See BuildEdlInput.continuous.
     if (r.voiceId || seg.words.length === 0) {
+      if (r.voiceId) {
+        const bounds = chapterSpan({ start: seg.startSec, end: seg.endSec }, i, hydrateEditState(r.editState));
+        return total + silentSpanSec(bounds);
+      }
       const span = silentSpanSec({ start: seg.startSec, end: seg.endSec });
-      if (r.voiceId) return total + span;
       return span > 0 ? total + span + 0.35 : total;
     }
     const spoken = seg.words

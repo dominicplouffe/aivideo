@@ -100,6 +100,7 @@ export async function POST(request: Request) {
       deletedSegments: state.deletedSegments,
       cutWords: state.cutWords,
       wordEdits: state.wordEdits,
+      sceneTiming: state.sceneTiming,
       // A narrated project keeps each chapter's footage whole. See BuildEdlInput.
       continuous: Boolean(project.voiceId),
       captions: state.captions,

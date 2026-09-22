@@ -12,7 +12,7 @@ import {
 import type { TranscriptionResult } from "@/lib/providers/types";
 import type { Project } from "@/lib/app-data";
 import { wordKey } from "@/lib/segments";
-import { occurrencesOf, resolveWords, withTrailingPunctuation } from "@/lib/edit-state";
+import { chapterSpan, occurrencesOf, resolveWords, withTrailingPunctuation } from "@/lib/edit-state";
 
 /** Builds a transcript from "word@start-end" shorthand, so tests stay legible. */
 function transcript(spec: string, durationSec?: number): TranscriptionResult {
@@ -316,6 +316,33 @@ test("a narrated timeline plays each chapter whole, pauses and all", () => {
   // Cutting a word folds its time into its neighbour rather than removing footage.
   const cut = buildTimeline(project, { ...DEFAULT_EDIT_STATE, cutWords: new Set([wordKey(0, 1)]) }, { continuous: true });
   assert.deepEqual(cut.map((w) => [w.text, w.start, w.end]), [["Open", 0, 2], ["Then", 2, 3.5]]);
+});
+
+test("scene timing trims the footage a narrated chapter plays, never below the minimum, and round-trips", () => {
+  const seg = { start: 10, end: 20 };
+  const state = { ...DEFAULT_EDIT_STATE, sceneTiming: new Map([[0, { mode: "hold" as const, trimStartSec: 2, trimEndSec: 3 }]]) };
+  assert.deepEqual(chapterSpan(seg, 0, state), { start: 12, end: 17 });
+  // Untimed chapters are untouched.
+  assert.deepEqual(chapterSpan(seg, 1, state), { start: 10, end: 20 });
+  // Trims that would leave nothing are pulled back to the minimum.
+  const greedy = { ...DEFAULT_EDIT_STATE, sceneTiming: new Map([[0, { mode: "fit" as const, trimStartSec: 6, trimEndSec: 6 }]]) };
+  const span = chapterSpan(seg, 0, greedy);
+  assert.ok(span.end - span.start >= 0.5 - 1e-9);
+
+  const stored = serializeEditState(state);
+  assert.deepEqual(stored.sceneTiming, [{ s: 0, mode: "hold", trimStart: 2, trimEnd: 3 }]);
+  assert.deepEqual([...hydrateEditState(stored).sceneTiming.entries()], [...state.sceneTiming.entries()]);
+  // A default entry is not stored; junk is dropped.
+  const dflt = { ...DEFAULT_EDIT_STATE, sceneTiming: new Map([[0, { mode: "fit" as const, trimStartSec: 0, trimEndSec: 0 }]]) };
+  assert.deepEqual(serializeEditState(dflt).sceneTiming, []);
+  assert.equal(hydrateEditState({ sceneTiming: [{ s: -1, mode: "hold" }, { s: 1, mode: "sideways", trimStart: -2 }] }).sceneTiming.size, 0);
+
+  // The continuous timeline plays the trimmed span.
+  const project = projectWith([
+    { ordinal: 0, title: "a", startSec: 10, endSec: 20, words: [{ w: "Open", t: 11, d: 0.5 }, { w: "board.", t: 18, d: 0.5 }] },
+  ]);
+  const timeline = buildTimeline(project, state, { continuous: true });
+  assert.deepEqual(timeline.map((w) => [w.start, w.end, w.srcStart]), [[0, 5, 12], [5, 5, 17]]);
 });
 
 test("keeping the fillers makes edited time and source time agree again", () => {

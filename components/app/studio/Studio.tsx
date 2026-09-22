@@ -8,7 +8,19 @@ import { Button } from "@/components/ui/Button";
 import { StatusPill } from "@/components/app/Shared";
 import type { Project } from "@/lib/app-data";
 import { wordKey } from "@/lib/segments";
-import { Canvas, TimelineStrip } from "./Canvas";
+import { Canvas, TimelineStrip, type NarratedPreviewControl } from "./Canvas";
+import { clipOutputSeconds, mapOutputToSource, type EdlClip } from "@/lib/render/edl";
+
+/** The narrated edit as the server planned it, for playing in the browser. */
+interface NarrationPlan {
+  /** The edit and voice it was planned for; a different key means it is stale. */
+  key: string;
+  voice: { id: string; name: string };
+  durationSec: number;
+  clips: EdlClip[];
+  audio: { segmentId: string; url: string; at: number; durationSec: number }[];
+  words: { seg: number; word: number; start: number; end: number }[];
+}
 import { Transcript, type WordEditChange } from "./Transcript";
 import { Inspector, type StudioVoice } from "./Inspector";
 import { ExportDialog } from "./ExportDialog";
@@ -20,6 +32,8 @@ import {
   timelineDuration,
   wordAt,
   type EditState,
+  resolveWords,
+  type EditedWord,
 } from "./types";
 
 export function Studio({
@@ -68,11 +82,110 @@ export function Studio({
   const raf = useRef<number | null>(null);
   const last = useRef<number>(0);
 
-  const timeline = useMemo(
+  /*
+   * The narrated preview.
+   *
+   * The render fits the footage to the readings; until the plan exists the
+   * Studio can only guess at that. "Hear it narrated" asks the server for the
+   * plan — every chapter read in the chosen voice, the footage fitted — and
+   * the player then follows it: the video runs at each clip's speed, parks
+   * on held frames, and the readings play over it. The readings are cached,
+   * so a later render buys nothing twice. Any edit makes the plan stale and
+   * the button offers to refresh it.
+   */
+  const [plan, setPlan] = useState<NarrationPlan | null>(null);
+  const [planStatus, setPlanStatus] = useState<"off" | "loading" | "on" | "error">("off");
+  const [planError, setPlanError] = useState<string | null>(null);
+  const planKey = `${JSON.stringify(serializeEditState(state))}|${voiceId ?? ""}`;
+  const planStale = plan !== null && plan.key !== planKey;
+  const previewing = planStatus === "on" && plan !== null && !planStale;
+
+  const fetchPlan = useCallback(async () => {
+    const key = planKey;
+    setPlanStatus("loading");
+    setPlanError(null);
+    try {
+      const response = await fetch(`/api/projects/${project.id}/narration/plan`, { method: "POST" });
+      const body = (await response.json()) as {
+        error?: string;
+        voice?: { id: string; name: string };
+        duration_sec?: number;
+        clips?: { segment_id: string; source_start: number; source_end: number; output_start: number; speed: number; hold_sec: number }[];
+        audio?: { segment_id: string; url: string; at: number; duration_sec: number }[];
+        words?: { seg: number; word: number; start: number; end: number }[];
+      };
+      if (!response.ok || !body.clips) throw new Error(body.error ?? "The preview did not come back.");
+      setPlan({
+        key,
+        voice: body.voice ?? { id: voiceId ?? "", name: "" },
+        durationSec: body.duration_sec ?? 0,
+        clips: body.clips.map((c) => ({
+          label: c.segment_id,
+          sourceStart: c.source_start,
+          sourceEnd: c.source_end,
+          outputStart: c.output_start,
+          ...(c.speed !== 1 ? { speed: c.speed } : {}),
+          ...(c.hold_sec > 0 ? { holdSec: c.hold_sec } : {}),
+        })),
+        audio: (body.audio ?? []).map((a) => ({ segmentId: a.segment_id, url: a.url, at: a.at, durationSec: a.duration_sec })),
+        words: body.words ?? [],
+      });
+      setPlanStatus("on");
+      setTime(0);
+    } catch (cause) {
+      setPlanStatus("error");
+      setPlanError(cause instanceof Error ? cause.message : String(cause));
+    }
+  }, [planKey, project.id, voiceId]);
+
+  // Leaving the voice behind leaves the preview behind.
+  useEffect(() => {
+    if (!narrated) setPlanStatus("off");
+  }, [narrated]);
+
+  const editedTimeline = useMemo(
     () => buildTimeline(project, state, { continuous: narrated }),
     [project, state, narrated],
   );
-  const duration = useMemo(() => timelineDuration(timeline), [timeline]);
+  // Under the plan, the words sit where the narrator says them and the
+  // source frame comes from the plan's clips, speeds and holds.
+  const planTimeline = useMemo((): EditedWord[] => {
+    if (!previewing || !plan) return [];
+    return plan.words
+      .map((w) => {
+        const seg = project.segments[w.seg];
+        const word = seg ? resolveWords(seg, w.seg, state).find((r) => r.wordIndex === w.word) : undefined;
+        if (!word) return null;
+        return {
+          segIndex: w.seg,
+          wordIndex: w.word,
+          text: word.text,
+          start: w.start,
+          end: w.end,
+          srcStart: mapOutputToSource(plan.clips, w.start) ?? word.t,
+          cut: false,
+          em: word.em,
+          silent: false,
+        };
+      })
+      .filter((w): w is EditedWord => w !== null)
+      .sort((a, b) => a.start - b.start);
+  }, [previewing, plan, project.segments, state]);
+  const timeline = previewing ? planTimeline : editedTimeline;
+  const duration = useMemo(
+    () => (previewing && plan ? plan.durationSec : timelineDuration(editedTimeline)),
+    [previewing, plan, editedTimeline],
+  );
+  const planClipAt = useMemo(() => {
+    if (!previewing || !plan) return null;
+    return plan.clips.find((c) => time >= c.outputStart && time < c.outputStart + clipOutputSeconds(c)) ?? null;
+  }, [previewing, plan, time]);
+  const chapterSeconds = useMemo(() => {
+    if (!previewing || !plan) return undefined;
+    const out: Record<string, number> = {};
+    for (const c of plan.clips) out[c.label ?? ""] = (out[c.label ?? ""] ?? 0) + clipOutputSeconds(c);
+    return out;
+  }, [previewing, plan]);
   const active = useMemo(() => wordAt(timeline, time), [timeline, time]);
   const activeSegIndex = active?.segIndex ?? null;
   const activeSegment = activeSegIndex !== null ? project.segments[activeSegIndex] : null;
@@ -253,7 +366,31 @@ export function Studio({
   const savedMinutes = ((project.sourceDurationSec - duration) / 60).toFixed(1);
 
   // Where the source file should be, for the frame the playhead is over.
-  const sourceTime = useMemo(() => sourceTimeAt(timeline, time), [timeline, time]);
+  const sourceTime = useMemo(
+    () => (previewing && plan ? mapOutputToSource(plan.clips, time) : sourceTimeAt(timeline, time)),
+    [previewing, plan, timeline, time],
+  );
+  const narratedPreview: NarratedPreviewControl | undefined = narrated
+    ? {
+        status: planStatus,
+        stale: planStale,
+        error: planError,
+        voiceName: narrator?.name ?? "the chosen voice",
+        onToggle: () => {
+          if (planStatus === "on" && !planStale) {
+            setPlanStatus("off");
+            setTime(0);
+          } else {
+            void fetchPlan();
+          }
+        },
+        audio: previewing && plan ? plan.audio : [],
+        playbackRate: planClipAt?.speed ?? 1,
+        holding:
+          planClipAt !== null &&
+          time - planClipAt.outputStart >= (planClipAt.sourceEnd - planClipAt.sourceStart) / (planClipAt.speed ?? 1),
+      }
+    : undefined;
   // Only when the bytes arrived. A recording row exists from the moment
   // somebody presses record, so pointing a <video> at one that never
   // finished uploading is a guaranteed 404.
@@ -403,6 +540,7 @@ export function Studio({
             state={state}
             mediaUrl={mediaUrl}
             sourceTime={sourceTime}
+            narration={narratedPreview}
             onScrub={seek}
             onTogglePlay={() => setPlaying((p) => !p)}
           />
@@ -410,6 +548,7 @@ export function Studio({
             project={project}
             state={state}
             continuous={narrated}
+            chapterSeconds={chapterSeconds}
             time={time}
             duration={duration}
             activeSegment={selected ?? activeSegIndex}

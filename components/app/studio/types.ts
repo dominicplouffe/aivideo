@@ -1,11 +1,14 @@
 import type { Project, Segment } from "@/lib/app-data";
 import { silentSpanSec } from "@/lib/segments";
-import { isWordRemoved, resolveWords, type EditState } from "@/lib/edit-state";
+import { chapterSpan, isWordRemoved, resolveWords, type EditState } from "@/lib/edit-state";
 
 // The edit model lives in lib so the server can share it; the editor
 // re-exports it so its components keep one import path.
 export {
   DEFAULT_EDIT_STATE,
+  DEFAULT_SCENE_TIMING,
+  MIN_CHAPTER_SEC,
+  chapterSpan,
   hydrateEditState,
   isWordRemoved,
   normalizeToken,
@@ -14,7 +17,7 @@ export {
   serializeEditState,
   withTrailingPunctuation,
 } from "@/lib/edit-state";
-export type { EditState, ResolvedWord, StoredEditState, WordEdit } from "@/lib/edit-state";
+export type { EditState, ResolvedWord, SceneTiming, StoredEditState, WordEdit } from "@/lib/edit-state";
 
 export interface EditedWord {
   segIndex: number;
@@ -62,19 +65,22 @@ export function buildTimeline(
   project.segments.forEach((seg: Segment, segIndex) => {
     if (state.deletedSegments.has(segIndex)) return;
     if (options.continuous && seg.words.length > 0) {
-      const span = silentSpanSec(seg);
+      const bounds = chapterSpan(seg, segIndex, state);
+      const span = silentSpanSec(bounds);
       if (span <= 0) return;
       const kept = resolveWords(seg, segIndex, state).filter(
         (w) => !isWordRemoved(state, segIndex, w.wordIndex, w),
       );
       if (kept.length === 0) {
-        out.push({ segIndex, wordIndex: 0, text: "", start: t, end: t + span, srcStart: seg.start, cut: false, em: false, silent: true });
+        out.push({ segIndex, wordIndex: 0, text: "", start: t, end: t + span, srcStart: bounds.start, cut: false, em: false, silent: true });
         t += span;
         return;
       }
+      // Words keep their place in the footage, clamped into the trimmed span.
+      const clamp = (v: number) => Math.min(bounds.end, Math.max(bounds.start, v));
       kept.forEach((w, i) => {
-        const srcStart = i === 0 ? seg.start : w.t;
-        const srcEnd = i === kept.length - 1 ? seg.end : kept[i + 1].t;
+        const srcStart = i === 0 ? bounds.start : clamp(w.t);
+        const srcEnd = i === kept.length - 1 ? bounds.end : clamp(kept[i + 1].t);
         const length = Math.max(0, srcEnd - srcStart);
         out.push({
           segIndex,

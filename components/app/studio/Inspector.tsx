@@ -6,7 +6,7 @@ import { Icon, type IconName } from "@/components/ui/Icon";
 import { Button } from "@/components/ui/Button";
 import type { Project, Segment } from "@/lib/app-data";
 import { localeLabel } from "@/lib/locales";
-import type { EditState } from "./types";
+import { chapterSpan, DEFAULT_SCENE_TIMING, MIN_CHAPTER_SEC, type EditState, type SceneTiming } from "./types";
 
 type Tab = "scene" | "audio" | "brand" | "output" | "riff";
 
@@ -88,7 +88,15 @@ export function Inspector({
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto">
-        {tab === "scene" ? <SceneTab segment={segment} state={state} onState={onState} /> : null}
+        {tab === "scene" ? (
+          <SceneTab
+            segment={segment}
+            segmentIndex={segmentIndex}
+            state={state}
+            onState={onState}
+            narrated={voiceId !== null}
+          />
+        ) : null}
         {tab === "audio" ? (
           <AudioTab
             project={project}
@@ -115,14 +123,19 @@ export function Inspector({
 
 function SceneTab({
   segment,
+  segmentIndex,
   state,
   onState,
+  narrated,
 }: {
   segment: Segment | null;
+  segmentIndex: number | null;
   state: EditState;
   onState: (p: Partial<EditState>) => void;
+  /** A voice narrates: the footage bends to the reading, and how is a per-scene choice. */
+  narrated: boolean;
 }) {
-  if (!segment) {
+  if (!segment || segmentIndex === null) {
     return <Empty text="Select a scene in the timeline or the script to inspect it." />;
   }
   return (
@@ -133,6 +146,10 @@ function SceneTab({
           <p className="mt-1 font-mono text-2xs text-cyan-300">{segment.action}</p>
         ) : null}
       </Group>
+
+      {narrated ? (
+        <SceneTimingControls segment={segment} segmentIndex={segmentIndex} state={state} onState={onState} />
+      ) : null}
 
       <Group label="Camera">
         <SwitchRow
@@ -171,6 +188,133 @@ function SceneTab({
         scanned this panel comes back reading the manifest. Until then it
         says nothing, which is the only honest thing it can say.
       */}
+    </div>
+  );
+}
+
+/**
+ * How this chapter's footage meets its reading.
+ *
+ * Three ways, the ones Synthesia gives a scene: Fit, the retimer's own
+ * judgement; Hold, footage as recorded then a held frame; Stretch, one speed
+ * to the reading's end. And two trims, for the fumbling before the point
+ * and the wait after it. Saved with the edit, so the preview and the render
+ * both follow them.
+ */
+function SceneTimingControls({
+  segment,
+  segmentIndex,
+  state,
+  onState,
+}: {
+  segment: Segment;
+  segmentIndex: number;
+  state: EditState;
+  onState: (p: Partial<EditState>) => void;
+}) {
+  const timing = state.sceneTiming.get(segmentIndex) ?? DEFAULT_SCENE_TIMING;
+  const full = segment.end - segment.start;
+  const bounds = chapterSpan(segment, segmentIndex, state);
+  const set = (next: Partial<SceneTiming>) => {
+    const merged = { ...timing, ...next };
+    const map = new Map(state.sceneTiming);
+    if (merged.mode === "fit" && merged.trimStartSec === 0 && merged.trimEndSec === 0) map.delete(segmentIndex);
+    else map.set(segmentIndex, merged);
+    onState({ sceneTiming: map });
+  };
+  const step = 0.5;
+  const maxStart = Math.max(0, full - MIN_CHAPTER_SEC - timing.trimEndSec);
+  const maxEnd = Math.max(0, full - MIN_CHAPTER_SEC - timing.trimStartSec);
+  const modes: { id: SceneTiming["mode"]; label: string; hint: string }[] = [
+    { id: "fit", label: "Fit", hint: "Hold or hurry still footage; keep motion near its speed" },
+    { id: "hold", label: "Hold", hint: "Play as recorded, then hold the last frame" },
+    { id: "stretch", label: "Stretch", hint: "One speed, ending with the reading" },
+  ];
+
+  return (
+    <Group label="Footage timing">
+      <div className="grid grid-cols-3 gap-1 rounded-lg border border-[var(--line)] p-1" role="radiogroup" aria-label="Footage timing">
+        {modes.map((m) => (
+          <button
+            key={m.id}
+            type="button"
+            role="radio"
+            aria-checked={timing.mode === m.id}
+            title={m.hint}
+            onClick={() => set({ mode: m.id })}
+            className={cn(
+              "rounded-md px-2 py-1.5 text-2xs font-medium transition-colors",
+              timing.mode === m.id ? "bg-iris-500/15 text-iris-300" : "text-fg-subtle hover:bg-ink-800 hover:text-fg",
+            )}
+          >
+            {m.label}
+          </button>
+        ))}
+      </div>
+      <p className="mt-1.5 text-2xs leading-relaxed text-fg-faint">{modes.find((m) => m.id === timing.mode)?.hint}.</p>
+
+      <div className="mt-3 grid grid-cols-2 gap-2">
+        <Stepper
+          label="Trim start"
+          value={timing.trimStartSec}
+          max={maxStart}
+          step={step}
+          onChange={(v) => set({ trimStartSec: v })}
+        />
+        <Stepper
+          label="Trim end"
+          value={timing.trimEndSec}
+          max={maxEnd}
+          step={step}
+          onChange={(v) => set({ trimEndSec: v })}
+        />
+      </div>
+      <Readout
+        label="Footage"
+        value={`${(bounds.end - bounds.start).toFixed(1)}s of ${full.toFixed(1)}s`}
+      />
+    </Group>
+  );
+}
+
+function Stepper({
+  label,
+  value,
+  max,
+  step,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  max: number;
+  step: number;
+  onChange: (v: number) => void;
+}) {
+  const clamp = (v: number) => Math.max(0, Math.min(max, Math.round(v / step) * step));
+  return (
+    <div className="rounded-lg border border-[var(--line)] px-2.5 py-2">
+      <span className="block text-2xs text-fg-faint">{label}</span>
+      <div className="mt-1 flex items-center gap-1.5">
+        <button
+          type="button"
+          aria-label={`${label} less`}
+          disabled={value <= 0}
+          onClick={() => onChange(clamp(value - step))}
+          className="inline-flex size-6 items-center justify-center rounded-md bg-ink-800 text-fg transition-colors hover:bg-ink-750 disabled:opacity-40"
+        >
+          −
+        </button>
+        <span className="min-w-[3.25rem] text-center font-mono text-[0.8125rem] text-fg tabular-nums">{value.toFixed(1)}s</span>
+        <button
+          type="button"
+          aria-label={`${label} more`}
+          disabled={value >= max}
+          onClick={() => onChange(clamp(value + step))}
+          className="inline-flex size-6 items-center justify-center rounded-md bg-ink-800 text-fg transition-colors hover:bg-ink-750 disabled:opacity-40"
+        >
+          +
+        </button>
+      </div>
     </div>
   );
 }

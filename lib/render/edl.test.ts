@@ -211,6 +211,16 @@ test("a narrated project keeps each chapter's footage whole and cuts only words"
   assert.deepEqual(dropped.clips.map((c) => [c.sourceStart, c.sourceEnd, c.outputStart]), [[5, 7, 0]]);
 });
 
+test("a narrated chapter's clip honours its trims", () => {
+  const edl = buildEdl({
+    project: project(),
+    sourceUrl: "file://a.mp4",
+    continuous: true,
+    sceneTiming: new Map([[1, { mode: "fit" as const, trimStartSec: 0.5, trimEndSec: 0.5 }]]),
+  });
+  assert.deepEqual(edl.clips.map((c) => [c.sourceStart, c.sourceEnd]), [[0, 3], [5.5, 6.5]]);
+});
+
 test("narration captions spread the chapter's words over the reading", () => {
   const cues = narrationCaptions(["Open", "the", "board.", "Then", "save."], 10, 4);
   assert.equal(cues.length, 2);

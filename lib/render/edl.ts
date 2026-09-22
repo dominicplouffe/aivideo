@@ -1,6 +1,6 @@
 import type { Project, Segment } from "@/lib/app-data";
 import { silentSpanSec, wordKey } from "@/lib/segments";
-import { resolveWords, type WordEdit } from "@/lib/edit-state";
+import { chapterSpan, resolveWords, type SceneTiming, type WordEdit } from "@/lib/edit-state";
 import type { MaskedRegion } from "@/lib/providers/types";
 
 /**
@@ -249,6 +249,8 @@ export interface BuildEdlInput {
    * (`withNarration`) rather than from where the words were spoken.
    */
   continuous?: boolean;
+  /** Per-chapter footage timing under a narrator; trims apply to the continuous clips. */
+  sceneTiming?: Map<number, SceneTiming>;
   captions?: boolean;
   zoomEnabled?: boolean;
   /** Regions from the masking provider, in source time. */
@@ -286,6 +288,7 @@ export function buildEdl(input: BuildEdlInput): Edl {
     cutWords = new Set<string>(),
     wordEdits = new Map<string, WordEdit>(),
     continuous = false,
+    sceneTiming = new Map<number, SceneTiming>(),
     captions = true,
     zoomEnabled = true,
     resolution = "1080p",
@@ -307,9 +310,10 @@ export function buildEdl(input: BuildEdlInput): Edl {
   if (continuous) {
     project.segments.forEach((seg, segIndex) => {
       if (deletedSegments.has(segIndex)) return;
-      const span = silentSpanSec(seg);
+      const bounds = chapterSpan(seg, segIndex, { sceneTiming });
+      const span = silentSpanSec(bounds);
       if (span <= 0) return;
-      clips.push({ sourceStart: seg.start, sourceEnd: seg.end, outputStart, label: seg.id });
+      clips.push({ sourceStart: bounds.start, sourceEnd: bounds.end, outputStart, label: seg.id });
       outputStart += span;
     });
   }

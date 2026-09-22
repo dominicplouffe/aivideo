@@ -68,6 +68,27 @@ test("a shorter reading hurries still footage first, then motion, then trims", (
   assert.ok(harsh.clips.every((c) => (c.speed ?? 1) <= 1.5 + 1e-9));
 });
 
+test("hold plays as recorded then parks; a shorter reading ends the footage where it ends", () => {
+  const longer = retimeChapter({ sourceStart: 0, sourceEnd: 6, narrationSec: 10, mode: "hold" });
+  assert.deepEqual(longer.clips, [{ sourceStart: 0, sourceEnd: 6, holdSec: 4 }]);
+  assert.equal(longer.summary.heldSec, 4);
+  const shorter = retimeChapter({ sourceStart: 0, sourceEnd: 6, narrationSec: 4, mode: "hold" });
+  assert.deepEqual(shorter.clips, [{ sourceStart: 0, sourceEnd: 4 }]);
+  assert.equal(shorter.summary.trimmedSec, 2);
+});
+
+test("stretch runs the footage at one speed to the reading's end, within what still reads", () => {
+  const { clips } = retimeChapter({ sourceStart: 0, sourceEnd: 6, narrationSec: 12, mode: "stretch" });
+  assert.deepEqual(clips, [{ sourceStart: 0, sourceEnd: 6, speed: 0.5 }]);
+  // Past 4× the rest is trimmed; below 0.25× the rest is held.
+  const fast = retimeChapter({ sourceStart: 0, sourceEnd: 20, narrationSec: 2, mode: "stretch" });
+  assert.equal(fast.clips[0].speed, 4);
+  assert.ok(Math.abs(plays(fast.clips) - 2) < 1e-6);
+  const slow = retimeChapter({ sourceStart: 0, sourceEnd: 1, narrationSec: 10, mode: "stretch" });
+  assert.equal(slow.clips[0].speed, 0.25);
+  assert.ok(Math.abs(plays(slow.clips) - 10) < 1e-6);
+});
+
 test("anchors split the chapter so each sentence lands on its own footage", () => {
   // Two sentences: footage 0–4 and 4–10; narration 0–2 and 2–8.
   const { clips } = retimeChapter({

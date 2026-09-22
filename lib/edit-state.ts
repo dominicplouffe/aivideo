@@ -27,9 +27,32 @@ export interface WordEdit {
   spoken?: string;
 }
 
+/**
+ * How a chapter's footage meets its reading, when a voice narrates.
+ *
+ * `fit` is the retimer's judgement: still footage held or hurried first,
+ * motion kept near its recorded speed, trimming last. `hold` plays the
+ * footage as recorded and parks on the last frame until the reading ends,
+ * or ends the footage where the reading does. `stretch` runs the footage at
+ * one speed so it ends with the reading. The trims take footage off the
+ * chapter's start and end before any of that — the seconds of fumbling
+ * before the point, or the wait after it.
+ */
+export interface SceneTiming {
+  mode: "fit" | "hold" | "stretch";
+  trimStartSec: number;
+  trimEndSec: number;
+}
+
+export const DEFAULT_SCENE_TIMING: SceneTiming = { mode: "fit", trimStartSec: 0, trimEndSec: 0 };
+/** A chapter keeps at least this much footage, however it is trimmed. */
+export const MIN_CHAPTER_SEC = 0.5;
+
 export interface EditState {
   removeFillers: boolean;
   deletedSegments: Set<number>;
+  /** Per-chapter footage timing under a narrator, keyed by chapter index. Absent means `fit`, untrimmed. */
+  sceneTiming: Map<number, SceneTiming>;
   /**
    * Words cut by hand, keyed with `wordKey`. Independent of the filler
    * toggle: a filler is removed by the toggle whether or not it is here, and
@@ -60,9 +83,17 @@ export interface StoredWordEdit {
   spoken?: string;
 }
 
+export interface StoredSceneTiming {
+  s: number;
+  mode: SceneTiming["mode"];
+  trimStart: number;
+  trimEnd: number;
+}
+
 export interface StoredEditState {
   removeFillers?: boolean;
   deletedSegments?: number[];
+  sceneTiming?: StoredSceneTiming[];
   /** `[chapter index, word index]` pairs; see `wordKey`. */
   cutWords?: [number, number][];
   wordEdits?: StoredWordEdit[];
@@ -81,6 +112,7 @@ export const MAX_EDIT_SPAN = 40;
 export const DEFAULT_EDIT_STATE: EditState = {
   removeFillers: true,
   deletedSegments: new Set<number>(),
+  sceneTiming: new Map<number, SceneTiming>(),
   cutWords: new Set<string>(),
   wordEdits: new Map<string, WordEdit>(),
   studioSound: true,
@@ -89,6 +121,19 @@ export const DEFAULT_EDIT_STATE: EditState = {
   presenter: false,
   zoomEnabled: true,
 };
+
+/** A stored scene timing that can be trusted, or null. Defaults are not stored. */
+export function parseStoredSceneTiming(raw: unknown): (StoredSceneTiming & { key: number }) | null {
+  if (!raw || typeof raw !== "object") return null;
+  const e = raw as Record<string, unknown>;
+  if (!Number.isInteger(e.s) || (e.s as number) < 0) return null;
+  const mode = e.mode === "hold" || e.mode === "stretch" ? e.mode : "fit";
+  const seconds = (v: unknown) => (typeof v === "number" && Number.isFinite(v) && v >= 0 ? Math.min(v, 3600) : 0);
+  const trimStart = seconds(e.trimStart);
+  const trimEnd = seconds(e.trimEnd);
+  if (mode === "fit" && trimStart === 0 && trimEnd === 0) return null;
+  return { key: e.s as number, s: e.s as number, mode, trimStart, trimEnd };
+}
 
 /** A stored word edit that can be trusted, or null. */
 export function parseStoredWordEdit(raw: unknown): (StoredWordEdit & { key: string }) | null {
@@ -129,8 +174,15 @@ export function hydrateEditState(stored: unknown): EditState {
     }
   }
 
+  const sceneTiming = new Map<number, SceneTiming>();
+  for (const entry of Array.isArray(raw.sceneTiming) ? raw.sceneTiming : []) {
+    const parsed = parseStoredSceneTiming(entry);
+    if (parsed) sceneTiming.set(parsed.key, { mode: parsed.mode, trimStartSec: parsed.trimStart, trimEndSec: parsed.trimEnd });
+  }
+
   return {
     removeFillers: flag(raw.removeFillers, DEFAULT_EDIT_STATE.removeFillers),
+    sceneTiming,
     deletedSegments: new Set(
       Array.isArray(raw.deletedSegments)
         ? raw.deletedSegments.filter((n): n is number => Number.isInteger(n) && n >= 0)
@@ -163,6 +215,10 @@ export function serializeEditState(state: EditState): StoredEditState {
     removeFillers: state.removeFillers,
     deletedSegments: [...state.deletedSegments].sort((a, b) => a - b),
     cutWords: [...state.cutWords].map(pair).sort((a, b) => a[0] - b[0] || a[1] - b[1]),
+    sceneTiming: [...state.sceneTiming.entries()]
+      .filter(([, t]) => t.mode !== "fit" || t.trimStartSec > 0 || t.trimEndSec > 0)
+      .map(([s, t]) => ({ s, mode: t.mode, trimStart: t.trimStartSec, trimEnd: t.trimEndSec }))
+      .sort((a, b) => a.s - b.s),
     wordEdits: [...state.wordEdits.entries()]
       .map(([key, edit]) => {
         const [s, w] = pair(key);
@@ -175,6 +231,30 @@ export function serializeEditState(state: EditState): StoredEditState {
     presenter: state.presenter,
     zoomEnabled: state.zoomEnabled,
   };
+}
+
+/**
+ * The footage a chapter contributes under a narrator: its span, less the
+ * trims, never shorter than `MIN_CHAPTER_SEC`. A trim that would leave less
+ * is pulled back rather than refused, so the chapter always has a picture.
+ */
+export function chapterSpan(
+  seg: Pick<Segment, "start" | "end">,
+  segIndex: number,
+  state: Pick<EditState, "sceneTiming">,
+): { start: number; end: number } {
+  const timing = state.sceneTiming.get(segIndex) ?? DEFAULT_SCENE_TIMING;
+  const full = seg.end - seg.start;
+  if (full <= MIN_CHAPTER_SEC) return { start: seg.start, end: seg.end };
+  let start = seg.start + timing.trimStartSec;
+  let end = seg.end - timing.trimEndSec;
+  if (end - start < MIN_CHAPTER_SEC) {
+    // Both trims cannot be honoured; keep the start trim and give the end back.
+    end = Math.min(seg.end, start + MIN_CHAPTER_SEC);
+    if (end > seg.end) end = seg.end;
+    if (end - start < MIN_CHAPTER_SEC) start = Math.max(seg.start, end - MIN_CHAPTER_SEC);
+  }
+  return { start, end };
 }
 
 /** Whether this edit removes the word: a filler under the toggle, or a hand cut. */

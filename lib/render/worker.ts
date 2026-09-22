@@ -628,6 +628,7 @@ async function defaultResolveEdl(job: Job): Promise<Edl> {
     deletedSegments: state.deletedSegments,
     cutWords: state.cutWords,
     wordEdits: state.wordEdits,
+    sceneTiming: state.sceneTiming,
     continuous: Boolean(project.voiceId),
     captions: state.captions,
     zoomEnabled: state.zoomEnabled,

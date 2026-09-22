@@ -6,7 +6,23 @@ import { Icon } from "@/components/ui/Icon";
 import { MockApp } from "@/components/marketing/MockApp";
 import type { Project, Segment } from "@/lib/app-data";
 import { silentSpanSec, wordKey } from "@/lib/segments";
-import { isWordRemoved, resolveWords, type EditState } from "./types";
+import { chapterSpan, isWordRemoved, resolveWords, type EditState } from "./types";
+
+/** The narrated preview's control and playback state, from the Studio. */
+export interface NarratedPreviewControl {
+  status: "off" | "loading" | "on" | "error";
+  /** The plan no longer matches the edit; the button offers a refresh. */
+  stale: boolean;
+  error: string | null;
+  voiceName: string;
+  onToggle: () => void;
+  /** The readings to play over the picture, on the edited timeline. Empty when off. */
+  audio: { segmentId: string; url: string; at: number; durationSec: number }[];
+  /** The video's rate for the clip under the playhead. */
+  playbackRate: number;
+  /** The playhead is inside a held frame: the picture stays put while the reading continues. */
+  holding: boolean;
+}
 
 export function Canvas({
   project,
@@ -18,6 +34,7 @@ export function Canvas({
   state,
   mediaUrl,
   sourceTime,
+  narration,
   onScrub,
   onTogglePlay,
 }: {
@@ -32,6 +49,8 @@ export function Canvas({
   mediaUrl?: string | null;
   /** Where the playhead points in the *source* file, not the edited one. */
   sourceTime?: number | null;
+  /** Present when a voice is chosen: the narrated preview and its state. */
+  narration?: NarratedPreviewControl;
   onScrub: (t: number) => void;
   onTogglePlay: () => void;
 }) {
@@ -41,14 +60,50 @@ export function Canvas({
 
   const video = useRef<HTMLVideoElement>(null);
 
+  const previewing = narration?.status === "on" && !narration.stale && narration.audio.length > 0;
+  const holding = previewing && narration.holding;
+
   // Play and pause follow the Studio's transport rather than the video's own
-  // controls, so the spacebar means one thing everywhere in the editor.
+  // controls, so the spacebar means one thing everywhere in the editor. In a
+  // held frame the picture stays put while the transport keeps running.
   useEffect(() => {
     const el = video.current;
     if (!el) return;
-    if (playing) void el.play().catch(() => {});
+    if (playing && !holding) void el.play().catch(() => {});
     else el.pause();
-  }, [playing, mediaUrl]);
+  }, [playing, holding, mediaUrl]);
+
+  // Under the plan the picture runs at each clip's speed.
+  useEffect(() => {
+    const el = video.current;
+    if (!el) return;
+    const rate = previewing ? narration.playbackRate : 1;
+    if (Math.abs(el.playbackRate - rate) > 1e-3) el.playbackRate = Math.min(4, Math.max(0.25, rate));
+  }, [previewing, narration?.playbackRate]);
+
+  // The readings, played over the picture from where the playhead is. One
+  // element, re-pointed as the playhead crosses into another chapter.
+  const reader = useRef<HTMLAudioElement | null>(null);
+  useEffect(() => {
+    if (!previewing) {
+      reader.current?.pause();
+      return;
+    }
+    const clip = narration.audio.find((a) => time >= a.at && time < a.at + a.durationSec);
+    if (!clip || !playing) {
+      reader.current?.pause();
+      return;
+    }
+    if (!reader.current) reader.current = new Audio();
+    const el = reader.current;
+    if (el.src !== new URL(clip.url, window.location.href).href) {
+      el.src = clip.url;
+    }
+    const want = time - clip.at;
+    if (Math.abs(el.currentTime - want) > 0.3) el.currentTime = want;
+    if (el.paused) void el.play().catch(() => {});
+  }, [previewing, narration?.audio, time, playing]);
+  useEffect(() => () => reader.current?.pause(), []);
 
   // Seek only when the file has drifted from where the edit says it should
   // be. Writing `currentTime` on every frame would re-decode continuously
@@ -68,11 +123,12 @@ export function Canvas({
   }, [sourceTime]);
 
   // `studioSound` is the Studio's mute, and a preview that ignores it is a
-  // preview of a different video than the one being exported.
+  // preview of a different video than the one being exported. Under a
+  // narrator the recording's own voice is replaced, so it is silenced.
   useEffect(() => {
     const el = video.current;
-    if (el) el.muted = !state.studioSound;
-  }, [state.studioSound]);
+    if (el) el.muted = previewing || !state.studioSound;
+  }, [state.studioSound, previewing]);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -184,6 +240,41 @@ export function Canvas({
               <Icon name={playing ? "pause" : "play"} className="size-3.5" strokeWidth={2.2} />
             </button>
 
+            {narration ? (
+              <button
+                type="button"
+                onClick={narration.onToggle}
+                disabled={narration.status === "loading"}
+                title={
+                  narration.status === "error"
+                    ? narration.error ?? "The preview failed."
+                    : narration.stale && narration.status === "on"
+                      ? "The edit changed since this preview was planned."
+                      : `Play the edit as it will render, read by ${narration.voiceName}.`
+                }
+                aria-pressed={previewing}
+                className={cn(
+                  "inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg border px-2.5 text-2xs font-medium transition-colors",
+                  previewing
+                    ? "border-cyan-500/40 bg-cyan-500/12 text-cyan-300 hover:bg-cyan-500/20"
+                    : narration.status === "error"
+                      ? "border-rose-500/40 text-rose-300 hover:bg-rose-500/10"
+                      : "border-[var(--line)] text-fg-subtle hover:border-[var(--line-strong)] hover:text-fg",
+                )}
+              >
+                <Icon name="mic" className={cn("size-3.5", narration.status === "loading" && "animate-pulse")} strokeWidth={2} />
+                {narration.status === "loading"
+                  ? "Planning…"
+                  : previewing
+                    ? "Narrated"
+                    : narration.status === "on" && narration.stale
+                      ? "Refresh preview"
+                      : narration.status === "error"
+                        ? "Preview failed"
+                        : "Hear it narrated"}
+              </button>
+            ) : null}
+
             <span className="shrink-0 font-mono text-2xs text-fg-muted tabular-nums">
               {formatDuration(time)}
             </span>
@@ -245,6 +336,7 @@ export function TimelineStrip({
   project,
   state,
   continuous = false,
+  chapterSeconds,
   time,
   duration,
   activeSegment,
@@ -255,6 +347,8 @@ export function TimelineStrip({
   state: EditState;
   /** Narrated: chapters play whole, so each weighs its full span. */
   continuous?: boolean;
+  /** Under a narrated preview, how long each chapter runs on the fitted timeline, by segment id. */
+  chapterSeconds?: Record<string, number>;
   time: number;
   duration: number;
   activeSegment: number | null;
@@ -310,9 +404,13 @@ export function TimelineStrip({
   // A chapter's share of the strip is its running time under this edit.
   // Silent footage plays as recorded; see `silentSpanSec`.
   const weightOf = (s: Segment, i: number) =>
-    s.words.length === 0 || continuous
-      ? silentSpanSec(s)
-      : resolveWords(s, i, state)
+    chapterSeconds
+      ? chapterSeconds[s.id] ?? 0
+      : continuous
+        ? silentSpanSec(chapterSpan(s, i, state))
+        : s.words.length === 0
+          ? silentSpanSec(s)
+          : resolveWords(s, i, state)
           .filter((w) => !isWordRemoved(state, i, w.wordIndex, w))
           .reduce((m, w) => m + w.d, 0);
   const totalWeight = live.reduce((n, { s, i }) => n + weightOf(s, i), 0);
