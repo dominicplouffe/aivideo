@@ -14,8 +14,8 @@ export {
   normalizeToken,
   occurrencesOf,
   resolveWords,
+  rewriteFor,
   serializeEditState,
-  withTrailingPunctuation,
 } from "@/lib/edit-state";
 export type { EditState, ResolvedWord, SceneTiming, StoredEditState, WordEdit } from "@/lib/edit-state";
 

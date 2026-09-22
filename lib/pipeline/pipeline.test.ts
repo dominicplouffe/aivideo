@@ -12,7 +12,7 @@ import {
 import type { TranscriptionResult } from "@/lib/providers/types";
 import type { Project } from "@/lib/app-data";
 import { wordKey } from "@/lib/segments";
-import { chapterSpan, occurrencesOf, resolveWords, withTrailingPunctuation } from "@/lib/edit-state";
+import { chapterSpan, occurrencesOf, resolveWords, rewriteFor, withTrailingPunctuation } from "@/lib/edit-state";
 
 /** Builds a transcript from "word@start-end" shorthand, so tests stay legible. */
 function transcript(spec: string, durationSec?: number): TranscriptionResult {
@@ -291,10 +291,19 @@ test("apply to all finds every place the transcriber wrote the phrase, punctuati
     { segIndex: 0, wordIndex: 1, span: 3 },
     { segIndex: 0, wordIndex: 5, span: 3 },
   ]);
-  // The transcriber's trailing punctuation stays unless the person typed their own.
+  // Glossary terms name the word, so the transcriber's punctuation stays.
   assert.equal(withTrailingPunctuation("Claude", "O."), "Claude.");
   assert.equal(withTrailingPunctuation("Claude", "o"), "Claude");
   assert.equal(withTrailingPunctuation("Claude!", "O."), "Claude!");
+
+  // A rewrite is what was typed. Deleting the comma deletes it; adding one adds it.
+  assert.equal(rewriteFor("Qore", "Core,", "Core,"), "Qore");
+  assert.equal(rewriteFor("Qore.", "Core", "Core"), "Qore.");
+  // Punctuation left as it was: each other occurrence keeps its own.
+  assert.equal(rewriteFor("Hi,", "hello,", "hello."), "Hi.");
+  assert.equal(rewriteFor("Hi,", "hello,", "hello"), "Hi");
+  // Punctuation changed: the change applies everywhere.
+  assert.equal(rewriteFor("Hi.", "hello,", "hello,"), "Hi.");
 });
 
 test("a narrated timeline plays each chapter whole, pauses and all", () => {

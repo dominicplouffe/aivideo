@@ -9,7 +9,7 @@ import { silentSpanSec, wordKey } from "@/lib/segments";
 import {
   occurrencesOf,
   resolveWords,
-  withTrailingPunctuation,
+  rewriteFor,
   type EditState,
   type EditedWord,
   type ResolvedWord,
@@ -232,9 +232,10 @@ export function Transcript({
     const spoken = edit.spoken?.trim() || null;
 
     const changes: WordEditChange[] = [];
+    const editedLast = originalWords[originalWords.length - 1];
     const target = (segIndex: number, wordIndex: number, n: number, lastOriginal: string) => {
       const key = wordKey(segIndex, wordIndex);
-      const shown = withTrailingPunctuation(text, lastOriginal);
+      const shown = rewriteFor(text, editedLast, lastOriginal);
       const isOriginal =
         !spoken &&
         shown === project.segments[segIndex].words.slice(wordIndex, wordIndex + n).map((w) => w.w).join(" ");

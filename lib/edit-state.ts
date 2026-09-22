@@ -408,10 +408,35 @@ export function occurrencesOf(
 /**
  * The replacement text an occurrence should get: the person's text, with
  * the trailing punctuation the transcriber put on that occurrence, unless
- * the person typed their own.
+ * the person typed their own. For glossary terms, which name a word and
+ * not its punctuation.
  */
 export function withTrailingPunctuation(text: string, originalLastWord: string): string {
   if (/[.,!?;:]$/.test(text)) return text;
   const trailing = originalLastWord.match(/[.,!?;:]+$/)?.[0] ?? "";
   return text + trailing;
+}
+
+const trailingOf = (word: string) => word.match(/[.,!?;:]+$/)?.[0] ?? "";
+
+/**
+ * What a rewrite gives each occurrence, when the person typed `text` over
+ * a selection whose last word was `editedLast`.
+ *
+ * What was typed is what is shown: a comma deleted in the field is a comma
+ * gone, and one added is one added. The first version put the original's
+ * punctuation back whenever the typed text had none, which made it
+ * impossible to remove a comma at all. The one refinement is for "Apply to
+ * all": when the person left the punctuation exactly as the transcriber
+ * had it, each other occurrence keeps its own — so "hello," and "hello."
+ * become "Hi," and "Hi." rather than both taking the first one's comma.
+ */
+export function rewriteFor(text: string, editedLast: string, occurrenceLast: string): string {
+  const typed = trailingOf(text);
+  const edited = trailingOf(editedLast);
+  if (typed === edited) {
+    // Punctuation untouched: this occurrence keeps its own.
+    return text.slice(0, text.length - typed.length) + trailingOf(occurrenceLast);
+  }
+  return text;
 }
