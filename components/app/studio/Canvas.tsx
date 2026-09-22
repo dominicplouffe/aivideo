@@ -1,12 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useRef } from "react";
-import { cn, formatDuration, stablePercent } from "@/lib/utils";
+import { useEffect, useRef } from "react";
+import { cn, formatDuration } from "@/lib/utils";
 import { Icon } from "@/components/ui/Icon";
 import { MockApp } from "@/components/marketing/MockApp";
 import type { Project, Segment } from "@/lib/app-data";
-import { silentSpanSec, wordKey } from "@/lib/segments";
-import { chapterSpan, isWordRemoved, resolveWords, type EditState } from "./types";
+import type { EditState } from "./types";
 
 /** The narrated preview's control and playback state, from the Studio. */
 export interface NarratedPreviewControl {
@@ -35,6 +34,7 @@ export function Canvas({
   mediaUrl,
   sourceTime,
   narration,
+  pinning,
   onScrub,
   onTogglePlay,
 }: {
@@ -51,6 +51,8 @@ export function Canvas({
   sourceTime?: number | null;
   /** Present when a voice is chosen: the narrated preview and its state. */
   narration?: NarratedPreviewControl;
+  /** A word is waiting to be pinned to the frame under the playhead. */
+  pinning?: { label: string; onConfirm: () => void; onCancel: () => void };
   onScrub: (t: number) => void;
   onTogglePlay: () => void;
 }) {
@@ -229,6 +231,33 @@ export function Canvas({
             ) : null}
           </div>
 
+          {pinning ? (
+            <div
+              role="status"
+              className="mt-3 flex flex-wrap items-center gap-3 rounded-xl border border-amber-500/40 bg-amber-500/10 px-3.5 py-2.5 text-[0.8125rem] text-amber-200"
+            >
+              <Icon name="target" className="size-4 shrink-0" strokeWidth={2.2} />
+              <span className="min-w-0 flex-1">
+                Scrub to the frame that <span className="font-medium text-amber-100">“{pinning.label}”</span> should land on,
+                then pin it.
+              </span>
+              <button
+                type="button"
+                onClick={pinning.onConfirm}
+                className="rounded-lg bg-amber-400 px-2.5 py-1 text-2xs font-semibold text-ink-950 transition-colors hover:bg-amber-300"
+              >
+                Pin here
+              </button>
+              <button
+                type="button"
+                onClick={pinning.onCancel}
+                className="text-2xs text-amber-200/80 underline-offset-2 hover:underline"
+              >
+                Cancel
+              </button>
+            </div>
+          ) : null}
+
           {/* transport */}
           <div className="mt-3 flex items-center gap-3 rounded-xl border border-[var(--line)] bg-ink-950 px-3.5 py-2.5">
             <button
@@ -325,202 +354,6 @@ export function Canvas({
             </div>
           ) : null}
         </div>
-      </div>
-    </div>
-  );
-}
-
-/* ---------------------------------------------------------- timeline strip */
-
-export function TimelineStrip({
-  project,
-  state,
-  continuous = false,
-  chapterSeconds,
-  time,
-  duration,
-  activeSegment,
-  onScrub,
-  onSelectSegment,
-}: {
-  project: Project;
-  state: EditState;
-  /** Narrated: chapters play whole, so each weighs its full span. */
-  continuous?: boolean;
-  /** Under a narrated preview, how long each chapter runs on the fitted timeline, by segment id. */
-  chapterSeconds?: Record<string, number>;
-  time: number;
-  duration: number;
-  activeSegment: number | null;
-  onScrub: (t: number) => void;
-  onSelectSegment: (i: number) => void;
-}) {
-  const live = project.segments
-    .map((s, i) => ({ s, i }))
-    .filter(({ i }) => !state.deletedSegments.has(i));
-
-  /**
-   * The speech lane, bucketed across the source recording.
-   *
-   * Density is the fraction of each bucket that carries a spoken word, which
-   * is a real property of the transcript. `cut` marks a bucket containing
-   * words the current edit removes, so the red bars line up with what
-   * actually disappears.
-   */
-  const speech = useMemo(() => {
-    const BUCKETS = 110;
-    const words = project.segments.flatMap((segment, segIndex) =>
-      resolveWords(segment, segIndex, state).map((word) => ({ ...word, segIndex })),
-    );
-
-    const span = Math.max(
-      project.sourceDurationSec,
-      words.reduce((end, word) => Math.max(end, word.t + word.d), 0),
-      1,
-    );
-    const bucketSec = span / BUCKETS;
-
-    const bars = Array.from({ length: BUCKETS }, () => ({ spoken: 0, cut: false }));
-    for (const word of words) {
-      const index = Math.min(BUCKETS - 1, Math.max(0, Math.floor(word.t / bucketSec)));
-      bars[index].spoken += word.d;
-      if (
-        word.cut ||
-        state.deletedSegments.has(word.segIndex) ||
-        state.cutWords.has(wordKey(word.segIndex, word.wordIndex))
-      ) {
-        bars[index].cut = true;
-      }
-    }
-
-    // Clamped at 1: several short words can overflow a bucket, and a bar
-    // taller than the lane is a rendering bug rather than a louder moment.
-    return bars.map((bar) => ({
-      density: Math.min(1, bar.spoken / bucketSec),
-      cut: bar.cut,
-    }));
-  }, [project.segments, project.sourceDurationSec, state]);
-
-  // A chapter's share of the strip is its running time under this edit.
-  // Silent footage plays as recorded; see `silentSpanSec`.
-  const weightOf = (s: Segment, i: number) =>
-    chapterSeconds
-      ? chapterSeconds[s.id] ?? 0
-      : continuous
-        ? silentSpanSec(chapterSpan(s, i, state))
-        : s.words.length === 0
-          ? silentSpanSec(s)
-          : resolveWords(s, i, state)
-          .filter((w) => !isWordRemoved(state, i, w.wordIndex, w))
-          .reduce((m, w) => m + w.d, 0);
-  const totalWeight = live.reduce((n, { s, i }) => n + weightOf(s, i), 0);
-
-  let acc = 0;
-  const laid = live.map(({ s, i }) => {
-    const w = weightOf(s, i);
-    const start = acc;
-    acc += w;
-    return { s, i, start, width: w / Math.max(0.01, totalWeight) };
-  });
-
-  const playheadPct = duration ? (time / duration) * 100 : 0;
-
-  return (
-    <div className="border-t border-[var(--line)] bg-ink-950 px-4 py-3">
-      <div className="mb-2 flex items-center justify-between">
-        <span className="font-mono text-2xs tracking-[0.14em] text-fg-faint uppercase">Timeline</span>
-        <div className="flex items-center gap-3 font-mono text-2xs text-fg-faint">
-          <span>{laid.length} scenes</span>
-          <span>{state.removeFillers ? "fillers cut" : "verbatim"}</span>
-          <span className="text-fg-muted tabular-nums">{formatDuration(duration)}</span>
-        </div>
-      </div>
-
-      <div
-        className="relative"
-        onClick={(e) => {
-          const rect = e.currentTarget.getBoundingClientRect();
-          onScrub(((e.clientX - rect.left) / rect.width) * duration);
-        }}
-      >
-        {/* scene lane */}
-        <div className="flex h-11 gap-px overflow-hidden rounded-lg border border-[var(--line)]">
-          {laid.map(({ s, i, width }) => (
-            <button
-              key={s.id}
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                onSelectSegment(i);
-              }}
-              title={s.title}
-              style={{ width: `${width * 100}%` }}
-              className={cn(
-                "group relative flex min-w-0 items-center overflow-hidden px-2 text-left transition-colors",
-                activeSegment === i
-                  ? "bg-[color-mix(in_oklab,var(--color-iris-500)_24%,transparent)]"
-                  : "bg-ink-900 hover:bg-ink-850",
-              )}
-            >
-              <span className="truncate text-[0.6875rem] text-fg-muted">{s.title}</span>
-              {s.zoom && s.zoom.scale > 1.2 && state.zoomEnabled ? (
-                <span className="absolute top-1 right-1 inline-flex items-center gap-0.5 rounded bg-cyan-500/20 px-1 font-mono text-[0.5rem] text-cyan-300">
-                  <Icon name="zoom" className="size-2" strokeWidth={3} />
-                  {s.zoom.scale.toFixed(1)}
-                </span>
-              ) : null}
-            </button>
-          ))}
-        </div>
-
-        {/*
-          Speech across the source take.
-
-          This was `Math.sin` at three frequencies, with the "cut" bars at a
-          hardcoded list of indices — `[12, 13, 34, 35, 36, 61, 62, 88, 89]`
-          — which turned red when filler removal was on. It sat directly
-          under a real video and read as measured audio.
-
-          It is measured now, from the transcript rather than the waveform:
-          each bar is how much of that slice of the recording was speech, and
-          a bar is red when the words in it are ones the edit removes. It is
-          labelled for what it is, because it is not an amplitude plot.
-        */}
-        <div className="mt-1 flex items-center gap-2">
-          <span className="w-16 shrink-0 font-mono text-[0.5rem] tracking-[0.1em] text-fg-faint uppercase">
-            Speech
-          </span>
-          <div className="flex h-7 flex-1 items-center gap-px overflow-hidden rounded-lg border border-[var(--line)] bg-ink-900 px-1">
-            {speech.map((bar, i) => (
-              <span
-                key={i}
-                className={cn(
-                  "flex-1 rounded-full transition-all duration-500",
-                  bar.cut && state.removeFillers
-                    ? "bg-rose-500/45"
-                    : bar.density > 0
-                      ? state.studioSound
-                        ? "bg-cyan-400/65"
-                        : "bg-fg-faint/45"
-                      : "bg-fg-faint/12",
-                )}
-                // `stablePercent` rather than a template string: heights
-                // derived from floats are a hydration mismatch waiting to
-                // happen when Node and the browser round differently.
-                style={{ height: stablePercent(Math.max(0.08, bar.density)) }}
-              />
-            ))}
-          </div>
-        </div>
-
-        {/* playhead */}
-        <span
-          aria-hidden
-          className="pointer-events-none absolute top-0 bottom-0 w-px bg-iris-400"
-          style={{ left: `${playheadPct}%` }}
-        >
-          <span className="absolute -top-1 -left-[3px] size-[7px] rotate-45 rounded-[1px] bg-iris-400" />
-        </span>
       </div>
     </div>
   );

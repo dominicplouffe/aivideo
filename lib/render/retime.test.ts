@@ -117,6 +117,32 @@ test("anchors come from sentence ends, thinned so intervals stay long enough to 
   assert.deepEqual(anchorsFromWords(words, { sourceStart: 0, sourceEnd: 7, narrationSec: 7 }), [{ source: 4, output: 3.5 }]);
 });
 
+test("a pinned word is an anchor at the frame the person chose, and sentence anchors defer to it", () => {
+  const words = [
+    { source: 1.0, output: 0.9, sentenceEnd: true },
+    { source: 2.0, output: 1.8, sentenceEnd: false }, // sentence anchor candidate at 2.0/1.8
+    { source: 4.0, output: 3.5, sentenceEnd: true, pinnedSource: 6.0 }, // pinned: this word lands on 6.0s of footage
+    { source: 5.0, output: 4.6, sentenceEnd: false }, // would cross the pin's source; dropped
+    { source: 8.0, output: 7.0, sentenceEnd: true },
+    { source: 9.0, output: 8.2, sentenceEnd: false },
+  ];
+  const anchors = anchorsFromWords(words, { sourceStart: 0, sourceEnd: 12, narrationSec: 10 });
+  assert.deepEqual(anchors, [
+    { source: 2, output: 1.8 },
+    { source: 6, output: 3.5 },
+    { source: 9, output: 8.2 },
+  ]);
+  // Pins that disagree with each other: the earlier one stands.
+  const clash = anchorsFromWords(
+    [
+      { source: 2, output: 2, sentenceEnd: false, pinnedSource: 7 },
+      { source: 4, output: 4, sentenceEnd: false, pinnedSource: 5 },
+    ],
+    { sourceStart: 0, sourceEnd: 12, narrationSec: 10 },
+  );
+  assert.deepEqual(clash, [{ source: 7, output: 2 }]);
+});
+
 test("the freeze log becomes still spans", () => {
   const log = [
     "[freezedetect @ 0x1] lavfi.freezedetect.freeze_start: 3.2",

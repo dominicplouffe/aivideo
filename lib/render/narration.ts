@@ -7,6 +7,7 @@ import {
   type Edl, type EdlCaption, type NarrationClip,
 } from "./edl";
 import { anchorsFromWords, retimeChapter, type RetimeSummary } from "./retime";
+import { wordKey } from "@/lib/segments";
 import type { StillSpan } from "@/lib/pipeline/stillness";
 
 /**
@@ -253,7 +254,15 @@ export async function narrate(
       // both clocks; still footage is held or hurried first.
       const trimmed = chapterSpan(segment, segIndex, state);
       const anchors = anchorsFromWords(
-        timed.map((w) => ({ source: w.sourceStart, output: w.start, sentenceEnd: /[.!?]$/.test(w.text) })),
+        timed.map((w) => {
+          const pinned = state.syncPoints.get(wordKey(segIndex, w.wordIndex));
+          return {
+            source: w.sourceStart,
+            output: w.start,
+            sentenceEnd: /[.!?]$/.test(w.text),
+            ...(pinned !== undefined ? { pinnedSource: Math.min(trimmed.end, Math.max(trimmed.start, pinned)) } : {}),
+          };
+        }),
         { sourceStart: trimmed.start, sourceEnd: trimmed.end, narrationSec: result.durationSec },
       );
       const bounds = chapterSpan(segment, segIndex, state);

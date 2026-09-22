@@ -54,6 +54,13 @@ export interface EditState {
   /** Per-chapter footage timing under a narrator, keyed by chapter index. Absent means `fit`, untrimmed. */
   sceneTiming: Map<number, SceneTiming>;
   /**
+   * Sync points: a word pinned to a frame. Keyed with `wordKey`; the value is
+   * the source second the word should land on. The retimer treats a pin as
+   * an anchor it may not move, so the person can say "this word, this
+   * screen" where the automatic fit guessed wrong.
+   */
+  syncPoints: Map<string, number>;
+  /**
    * Words cut by hand, keyed with `wordKey`. Independent of the filler
    * toggle: a filler is removed by the toggle whether or not it is here, and
    * a word here is removed whatever the toggle says.
@@ -94,6 +101,8 @@ export interface StoredEditState {
   removeFillers?: boolean;
   deletedSegments?: number[];
   sceneTiming?: StoredSceneTiming[];
+  /** `{ s, w, at }`: chapter index, word index, source second. */
+  syncPoints?: { s: number; w: number; at: number }[];
   /** `[chapter index, word index]` pairs; see `wordKey`. */
   cutWords?: [number, number][];
   wordEdits?: StoredWordEdit[];
@@ -113,6 +122,7 @@ export const DEFAULT_EDIT_STATE: EditState = {
   removeFillers: true,
   deletedSegments: new Set<number>(),
   sceneTiming: new Map<number, SceneTiming>(),
+  syncPoints: new Map<string, number>(),
   cutWords: new Set<string>(),
   wordEdits: new Map<string, WordEdit>(),
   studioSound: true,
@@ -133,6 +143,15 @@ export function parseStoredSceneTiming(raw: unknown): (StoredSceneTiming & { key
   const trimEnd = seconds(e.trimEnd);
   if (mode === "fit" && trimStart === 0 && trimEnd === 0) return null;
   return { key: e.s as number, s: e.s as number, mode, trimStart, trimEnd };
+}
+
+/** A stored sync point that can be trusted, or null. */
+export function parseStoredSyncPoint(raw: unknown): { key: string; s: number; w: number; at: number } | null {
+  if (!raw || typeof raw !== "object") return null;
+  const e = raw as Record<string, unknown>;
+  const ints = [e.s, e.w].every((n) => Number.isInteger(n) && (n as number) >= 0);
+  if (!ints || typeof e.at !== "number" || !Number.isFinite(e.at) || e.at < 0 || e.at > 86_400) return null;
+  return { key: wordKey(e.s as number, e.w as number), s: e.s as number, w: e.w as number, at: Math.round(e.at * 1000) / 1000 };
 }
 
 /** A stored word edit that can be trusted, or null. */
@@ -180,9 +199,16 @@ export function hydrateEditState(stored: unknown): EditState {
     if (parsed) sceneTiming.set(parsed.key, { mode: parsed.mode, trimStartSec: parsed.trimStart, trimEndSec: parsed.trimEnd });
   }
 
+  const syncPoints = new Map<string, number>();
+  for (const entry of Array.isArray(raw.syncPoints) ? raw.syncPoints : []) {
+    const parsed = parseStoredSyncPoint(entry);
+    if (parsed) syncPoints.set(parsed.key, parsed.at);
+  }
+
   return {
     removeFillers: flag(raw.removeFillers, DEFAULT_EDIT_STATE.removeFillers),
     sceneTiming,
+    syncPoints,
     deletedSegments: new Set(
       Array.isArray(raw.deletedSegments)
         ? raw.deletedSegments.filter((n): n is number => Number.isInteger(n) && n >= 0)
@@ -219,6 +245,12 @@ export function serializeEditState(state: EditState): StoredEditState {
       .filter(([, t]) => t.mode !== "fit" || t.trimStartSec > 0 || t.trimEndSec > 0)
       .map(([s, t]) => ({ s, mode: t.mode, trimStart: t.trimStartSec, trimEnd: t.trimEndSec }))
       .sort((a, b) => a.s - b.s),
+    syncPoints: [...state.syncPoints.entries()]
+      .map(([key, at]) => {
+        const [s, w] = pair(key);
+        return { s, w, at };
+      })
+      .sort((a, b) => a.s - b.s || a.w - b.w),
     wordEdits: [...state.wordEdits.entries()]
       .map(([key, edit]) => {
         const [s, w] = pair(key);

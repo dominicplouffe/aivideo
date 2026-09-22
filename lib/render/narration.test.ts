@@ -131,6 +131,21 @@ test("over continuous footage the picture bends to the reading and the voice is 
   assert.ok(Math.abs(result.edl.captions[0].until - 6) < 1e-6);
 });
 
+test("a sync point pins the word's frame in the fitted footage", async () => {
+  // seg_1 is 0–4s of footage read in 6s at 2s a word. Pin "the" (word 1) to
+  // 3.5s of footage: the first interval (0–3.5s of footage) must fill the
+  // 2s before "the" is read, and the rest (3.5–4s) the remaining 4s.
+  const p = project({ editState: { syncPoints: [{ s: 0, w: 1, at: 3.5 }] } });
+  const edl = buildEdl({ project: p, sourceUrl: "file://a.mp4", continuous: true });
+  const { provider } = synthesizer(2);
+  const result = await narrate({ edl, project: p, workspaceId: "ws", synthesis: provider, lookupVoice: lookup });
+  const seg1 = result!.edl.clips.filter((c) => c.label === "seg_1");
+  const before = seg1.filter((c) => c.sourceEnd <= 3.5 + 1e-6);
+  const plays = (cs: typeof seg1) => cs.reduce((n, c) => n + (c.sourceEnd - c.sourceStart) / (c.speed ?? 1) + (c.holdSec ?? 0), 0);
+  assert.ok(Math.abs(plays(before) - 2) < 1e-6, `footage before the pin plays ${plays(before)}s`);
+  assert.ok(Math.abs(plays(seg1) - 6) < 1e-6);
+});
+
 test("glossary respellings are applied per word so the vendor's timings still map onto the transcript", async () => {
   const p = project({ editState: { wordEdits: [{ s: 0, w: 1, n: 1, text: "Qore" }] } });
   const edl = buildEdl({ project: p, sourceUrl: "file://a.mp4", continuous: true });

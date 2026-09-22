@@ -43,6 +43,10 @@ export function Transcript({
   onCutWords,
   onEditWords,
   onGlossary,
+  pinnedKeys,
+  onPin,
+  onUnpin,
+  pinningKey,
   onAsk,
 }: {
   project: Project;
@@ -60,6 +64,12 @@ export function Transcript({
   onEditWords: (changes: WordEditChange[]) => void;
   /** Remembers a rewrite for the workspace: future recordings get it too. */
   onGlossary: (term: { heard: string; text: string; spoken: string | null }) => void;
+  /** Sync points, when a voice narrates: which words are pinned, and how to pin or unpin one. */
+  pinnedKeys?: Set<string>;
+  onPin?: (key: string, label: string) => void;
+  onUnpin?: (key: string) => void;
+  /** The word currently waiting for a frame, if any. */
+  pinningKey?: string | null;
   /** Sends a request to the Riff panel. Absent in read-only contexts. */
   onAsk?: (prompt: string) => void;
 }) {
@@ -307,6 +317,17 @@ export function Transcript({
             cut={selectionCut}
             onEdit={() => setEditing(true)}
             onCut={toggleSelected}
+            pin={
+              onPin && selectedKeys.length === 1
+                ? {
+                    pinned: pinnedKeys?.has(selectedKeys[0]) ?? false,
+                    onClick: () =>
+                      pinnedKeys?.has(selectedKeys[0])
+                        ? onUnpin?.(selectedKeys[0])
+                        : onPin(selectedKeys[0], selectedWords[0]?.text.replace(/[.,!?;:]+$/, "") ?? ""),
+                  }
+                : undefined
+            }
           />
         ) : null}
         {anchor && editing && selection && selectedWords.length > 0 ? (
@@ -405,6 +426,8 @@ export function Transcript({
                     const isNow = activeWord?.segIndex === segIndex && activeWord?.wordIndex === w.wordIndex;
                     const isSelected = position >= from && position <= to;
                     const saysDifferently = w.spoken !== w.text;
+                    const pinned = pinnedKeys?.has(key) ?? false;
+                    const awaitingPin = pinningKey === key;
                     const bare = (s: string) => s.replace(/[.,!?;:]+$/, "");
                     const title = handCut
                       ? "Cut by hand. Select it and press Delete to restore."
@@ -445,9 +468,18 @@ export function Transcript({
                           saysDifferently && "underline decoration-dotted decoration-iris-400/70 underline-offset-4",
                           isNow && "bg-iris-500/25 text-fg-strong",
                           isSelected && "bg-iris-500/20 ring-1 ring-iris-400/70",
+                          awaitingPin && "bg-amber-500/20 ring-1 ring-amber-400/70",
                         )}
                       >
-                        {w.text}{" "}
+                        {w.text}
+                        {pinned ? (
+                          <Icon
+                            name="target"
+                            className="ml-0.5 inline size-2.5 -translate-y-px text-amber-400"
+                            strokeWidth={3}
+                            aria-label="pinned to a frame"
+                          />
+                        ) : null}{" "}
                       </span>
                     );
                   })}
@@ -517,6 +549,7 @@ function SelectionToolbar({
   cut,
   onEdit,
   onCut,
+  pin,
 }: {
   anchor: Anchor;
   container: HTMLDivElement | null;
@@ -524,6 +557,8 @@ function SelectionToolbar({
   cut: boolean;
   onEdit: () => void;
   onCut: () => void;
+  /** Present under a narrator with one word selected: pin it to a frame, or unpin it. */
+  pin?: { pinned: boolean; onClick: () => void };
 }) {
   const { ref, style } = useFloatingPosition(anchor, container, "above");
   return (
@@ -557,6 +592,20 @@ function SelectionToolbar({
         {cut ? "Restore" : "Cut"} {count}
         <kbd className="rounded border border-current/30 px-1 font-mono text-[0.625rem] opacity-60">⌫</kbd>
       </button>
+      {pin ? (
+        <button
+          type="button"
+          onClick={pin.onClick}
+          title={pin.pinned ? "Unpin this word from its frame" : "Pin this word to a frame of the footage"}
+          className={cn(
+            "inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-2xs font-medium transition-colors",
+            pin.pinned ? "text-amber-300 hover:bg-amber-500/15" : "text-fg hover:bg-ink-800",
+          )}
+        >
+          <Icon name="target" className="size-3" strokeWidth={2.2} />
+          {pin.pinned ? "Unpin" : "Pin to frame"}
+        </button>
+      ) : null}
     </div>
   );
 }

@@ -253,26 +253,65 @@ export function retimeChapter(input: RetimeInput): { clips: RetimedClip[]; summa
 }
 
 /**
- * Anchors from words timed on both clocks, thinned so no two are closer
- * than `MIN_ANCHOR_GAP_SEC` on either clock. Sentence ends are preferred as
- * anchors: a cut of pace between sentences is where a viewer expects one.
+ * Anchors from words timed on both clocks.
+ *
+ * A pinned word — one the person tied to a frame — is an anchor no matter
+ * what, at the frame they chose. Around the pins, sentence ends are anchors
+ * too, thinned so no two anchors are closer than `MIN_ANCHOR_GAP_SEC` on
+ * either clock: a change of pace between sentences is where a viewer expects
+ * one, and too many changes make the picture stutter. Anything that would
+ * make either clock run backwards is dropped, pins excepted — a pin that
+ * contradicts an earlier pin wins over the sentence anchors between them.
  */
 export function anchorsFromWords(
-  words: { source: number; output: number; sentenceEnd: boolean }[],
+  words: { source: number; output: number; sentenceEnd: boolean; pinnedSource?: number }[],
   bounds: { sourceStart: number; sourceEnd: number; narrationSec: number },
 ): Anchor[] {
-  const out: Anchor[] = [];
-  let lastSource = bounds.sourceStart;
-  let lastOutput = 0;
+  const inside = (a: Anchor) =>
+    a.source > bounds.sourceStart && a.source < bounds.sourceEnd && a.output > 0 && a.output < bounds.narrationSec;
+  const pins: Anchor[] = words
+    .filter((w) => w.pinnedSource !== undefined)
+    .map((w) => ({ source: w.pinnedSource!, output: w.output }))
+    .filter(inside)
+    .sort((a, b) => a.output - b.output);
+  // Pins must agree with each other: a later pin cannot point earlier in the footage.
+  const agreed: Anchor[] = [];
+  for (const pin of pins) {
+    if (agreed.length === 0 || pin.source > agreed[agreed.length - 1].source) agreed.push(pin);
+  }
+
+  const nearAPin = (a: Anchor) =>
+    agreed.some(
+      (p) => Math.abs(p.source - a.source) < MIN_ANCHOR_GAP_SEC || Math.abs(p.output - a.output) < MIN_ANCHOR_GAP_SEC,
+    );
+  const candidates: Anchor[] = [];
   words.forEach((w, i) => {
     // An anchor sits at the start of the word after a sentence end.
     const previous = words[i - 1];
     if (!previous?.sentenceEnd) return;
-    if (w.source - lastSource < MIN_ANCHOR_GAP_SEC || w.output - lastOutput < MIN_ANCHOR_GAP_SEC) return;
+    const anchor = { source: w.source, output: w.output };
+    if (!inside(anchor) || nearAPin(anchor)) return;
     if (bounds.sourceEnd - w.source < MIN_ANCHOR_GAP_SEC || bounds.narrationSec - w.output < MIN_ANCHOR_GAP_SEC) return;
-    out.push({ source: w.source, output: w.output });
-    lastSource = w.source;
-    lastOutput = w.output;
+    candidates.push(anchor);
   });
+
+  const all = [...agreed.map((a) => ({ ...a, pinned: true })), ...candidates.map((a) => ({ ...a, pinned: false }))].sort(
+    (a, b) => a.output - b.output,
+  );
+  const out: Anchor[] = [];
+  let lastSource = bounds.sourceStart;
+  let lastOutput = 0;
+  for (const a of all) {
+    if (!a.pinned) {
+      if (a.source - lastSource < MIN_ANCHOR_GAP_SEC || a.output - lastOutput < MIN_ANCHOR_GAP_SEC) continue;
+      // A sentence anchor may not cross the next pin on either clock.
+      const nextPin = agreed.find((p) => p.output > a.output);
+      if (nextPin && (a.source >= nextPin.source || nextPin.output - a.output < MIN_ANCHOR_GAP_SEC)) continue;
+      if (a.source <= lastSource) continue;
+    }
+    out.push({ source: a.source, output: a.output });
+    lastSource = a.source;
+    lastOutput = a.output;
+  }
   return out;
 }

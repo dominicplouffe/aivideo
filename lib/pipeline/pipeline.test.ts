@@ -345,6 +345,14 @@ test("scene timing trims the footage a narrated chapter plays, never below the m
   assert.deepEqual(timeline.map((w) => [w.start, w.end, w.srcStart]), [[0, 5, 12], [5, 5, 17]]);
 });
 
+test("sync points round-trip and junk is dropped", () => {
+  const state = { ...DEFAULT_EDIT_STATE, syncPoints: new Map([[wordKey(2, 3), 41.25], [wordKey(0, 1), 3]]) };
+  const stored = serializeEditState(state);
+  assert.deepEqual(stored.syncPoints, [{ s: 0, w: 1, at: 3 }, { s: 2, w: 3, at: 41.25 }]);
+  assert.deepEqual([...hydrateEditState(stored).syncPoints.entries()], [[wordKey(0, 1), 3], [wordKey(2, 3), 41.25]]);
+  assert.equal(hydrateEditState({ syncPoints: [{ s: 0, w: 0, at: -1 }, { s: "a", w: 0, at: 1 }, { s: 0, w: 1 }] }).syncPoints.size, 0);
+});
+
 test("keeping the fillers makes edited time and source time agree again", () => {
   const drafts = segmentTranscript(transcript("So@0-0.3 um@0.3-1.3 click.@1.3-1.6"));
   const timeline = buildTimeline(projectWith(drafts), {

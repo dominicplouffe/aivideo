@@ -8,7 +8,8 @@ import { Button } from "@/components/ui/Button";
 import { StatusPill } from "@/components/app/Shared";
 import type { Project } from "@/lib/app-data";
 import { wordKey } from "@/lib/segments";
-import { Canvas, TimelineStrip, type NarratedPreviewControl } from "./Canvas";
+import { Canvas, type NarratedPreviewControl } from "./Canvas";
+import { Timeline } from "./Timeline";
 import { clipOutputSeconds, mapOutputToSource, type EdlClip } from "@/lib/render/edl";
 
 /** The narrated edit as the server planned it, for playing in the browser. */
@@ -328,6 +329,46 @@ export function Studio({
     }
   }, []);
 
+  /*
+   * Sync points. A word selected in the script, then a frame chosen on the
+   * player: the retimer must land that word on that frame. Pinning is a
+   * two-step gesture — Pin in the script's toolbar, scrub, Pin here in the
+   * transport — because the frame is chosen by looking at the picture,
+   * which the script panel cannot show.
+   */
+  const [pinning, setPinning] = useState<{ key: string; label: string } | null>(null);
+  const pinHere = useCallback(
+    (at: number) => {
+      if (!pinning) return;
+      setState((s) => {
+        const next = new Map(s.syncPoints);
+        next.set(pinning.key, Math.round(at * 1000) / 1000);
+        return { ...s, syncPoints: next };
+      });
+      setDirty(true);
+      setPinning(null);
+    },
+    [pinning],
+  );
+  const unpin = useCallback((key: string) => {
+    setState((s) => {
+      const next = new Map(s.syncPoints);
+      next.delete(key);
+      return { ...s, syncPoints: next };
+    });
+    setDirty(true);
+  }, []);
+  const pins = useMemo(
+    () =>
+      [...state.syncPoints.keys()].map((key) => {
+        const [segIndex, wordIndex] = key.split(":").map(Number);
+        const seg = project.segments[segIndex];
+        const word = seg ? resolveWords(seg, segIndex, state).find((r) => r.wordIndex === wordIndex) : undefined;
+        return { key, label: word?.text ?? "", segIndex, wordIndex };
+      }),
+    [state, project.segments],
+  );
+
   const setWordsCut = useCallback((keys: string[], cut: boolean) => {
     setState((s) => {
       const next = new Set(s.cutWords);
@@ -348,6 +389,7 @@ export function Studio({
         e.preventDefault();
         setPlaying((p) => !p);
       }
+      if (e.key === "Escape") setPinning(null);
       if (e.key === "ArrowRight") seek(time + (e.shiftKey ? 5 : 1));
       if (e.key === "ArrowLeft") seek(time - (e.shiftKey ? 5 : 1));
     };
@@ -524,6 +566,10 @@ export function Studio({
             onCutWords={setWordsCut}
             onEditWords={editWords}
             onGlossary={(term) => void rememberTerm(term)}
+            pinnedKeys={narrated ? new Set(state.syncPoints.keys()) : undefined}
+            onPin={narrated ? (key, label) => setPinning({ key, label }) : undefined}
+            onUnpin={narrated ? unpin : undefined}
+            pinningKey={pinning?.key ?? null}
             onToggleFillers={() => patch({ removeFillers: !state.removeFillers })}
             onAsk={(text) => setAsk({ text, at: Date.now() })}
           />
@@ -541,17 +587,33 @@ export function Studio({
             mediaUrl={mediaUrl}
             sourceTime={sourceTime}
             narration={narratedPreview}
+            pinning={
+              pinning
+                ? {
+                    label: pinning.label,
+                    onConfirm: () => {
+                      if (sourceTime != null) pinHere(sourceTime);
+                    },
+                    onCancel: () => setPinning(null),
+                  }
+                : undefined
+            }
             onScrub={seek}
             onTogglePlay={() => setPlaying((p) => !p)}
           />
-          <TimelineStrip
+          <Timeline
             project={project}
             state={state}
+            timeline={timeline}
+            duration={duration}
+            time={time}
+            playing={playing}
+            activeSegment={selected ?? activeSegIndex}
             continuous={narrated}
             chapterSeconds={chapterSeconds}
-            time={time}
-            duration={duration}
-            activeSegment={selected ?? activeSegIndex}
+            mediaUrl={mediaUrl}
+            pins={narrated ? pins : []}
+            onUnpin={unpin}
             onScrub={seek}
             onSelectSegment={setSelected}
           />
@@ -588,6 +650,10 @@ export function Studio({
             onCutWords={setWordsCut}
             onEditWords={editWords}
             onGlossary={(term) => void rememberTerm(term)}
+            pinnedKeys={narrated ? new Set(state.syncPoints.keys()) : undefined}
+            onPin={narrated ? (key, label) => setPinning({ key, label }) : undefined}
+            onUnpin={narrated ? unpin : undefined}
+            pinningKey={pinning?.key ?? null}
             onToggleFillers={() => patch({ removeFillers: !state.removeFillers })}
           />
         </div>
