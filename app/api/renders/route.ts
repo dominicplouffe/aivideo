@@ -8,6 +8,7 @@ import { checkDestination, describeRefusal } from "@/lib/webhooks/destinations";
 import { getRecording, mediaKeyFor } from "@/lib/db/repositories/recordings";
 import { hydrateEditState } from "@/lib/edit-state";
 import { buildEdl } from "@/lib/render/edl";
+import { brandForProject } from "@/lib/render/brand-for-project";
 import { codeVersion } from "@/lib/version";
 import type { Project } from "@/lib/app-data";
 
@@ -17,7 +18,6 @@ interface RenderPayload {
   project_id?: string;
   outputs?: string[];
   locales?: string[];
-  brand_kit?: string;
   video?: { resolution?: string; fps?: number; aspects?: string[] };
   webhook_url?: string;
 }
@@ -81,6 +81,7 @@ export async function POST(request: Request) {
   // It is the edit as it stood when the button was pressed; a worker that
   // rebuilds it an hour later renders whatever the project has become since.
   let edl: unknown = null;
+  let brandKitId: string | null = null;
   if (actor && project.recordingId) {
     const recording = await getRecording(actor.workspaceId, project.recordingId);
     if (!recording?.mediaKey) {
@@ -91,6 +92,8 @@ export async function POST(request: Request) {
     }
 
     const state = hydrateEditState(project.editState);
+    const wearing = await brandForProject(actor.workspaceId, project);
+    brandKitId = wearing.kitId;
     edl = buildEdl({
       project,
       // Not a signed URL: the worker reads storage directly. See the
@@ -103,7 +106,9 @@ export async function POST(request: Request) {
       sceneTiming: state.sceneTiming,
       // A narrated project keeps each chapter's footage whole. See BuildEdlInput.
       continuous: Boolean(project.voiceId),
-      captions: state.captions,
+      // A locked kit keeps its captions on.
+      captions: state.captions || wearing.locked,
+      brand: wearing.brand,
       zoomEnabled: state.zoomEnabled,
       resolution: (body.video?.resolution as "1080p") ?? "1080p",
       fps: (body.video?.fps as 30) ?? 30,
@@ -116,7 +121,9 @@ export async function POST(request: Request) {
     title: project.title,
     outputs,
     locales: body.locales ?? ["en-US"],
-    brandKitId: body.brand_kit ?? "kit_meridian_primary",
+    // The kit the project wears, for the record. A fixture id sat here
+    // for a long time; nothing read it, and nothing should have.
+    brandKitId,
     video: body.video as never,
     webhookUrl: body.webhook_url,
     idempotencyKey: request.headers.get("Idempotency-Key") ?? undefined,

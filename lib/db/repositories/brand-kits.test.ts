@@ -6,6 +6,7 @@ import * as s from "@/lib/db/schema";
 import { eraseWorkspace } from "@/lib/db/erase";
 import { createBrandKit, deleteBrandKit, getBrandKit, listBrandKits, setBrandKitLogo, updateBrandKit } from "./brand-kits";
 import { createProject, saveBrandKit } from "./projects";
+import { brandForProject } from "@/lib/render/brand-for-project";
 
 const RUN = isDatabaseConfigured();
 const WS = "88888888-8888-4888-8888-888888888888";
@@ -47,6 +48,25 @@ describe("brand kits", { skip: !RUN && "DATABASE_URL not set" }, () => {
     assert.ok(await deleteBrandKit(WS, kit.id));
     const [row] = await getDb().select({ brandKitId: s.projects.brandKitId }).from(s.projects).where(eq(s.projects.id, project.id));
     assert.equal(row.brandKitId, null);
+  });
+
+  it("resolves a project's kit for the encoder, with the logo where the worker can read it", async () => {
+    const kit = await createBrandKit({ workspaceId: WS, name: "Worn", tokens: { intro: "Ask once", outro: "Qore can" }, locked: true });
+    await setBrandKitLogo(WS, kit.id, { key: `brand/${kit.id}/logo-2.png`, contentType: "image/png" });
+    const project = await createProject({ workspaceId: WS, recordingId: null, ownerId: MEMBER, title: "Wears it too" });
+    await saveBrandKit(WS, project.id, kit.id);
+
+    const wearing = await brandForProject(WS, { brandKitId: kit.id, title: project.title });
+    assert.equal(wearing.kitId, kit.id);
+    assert.equal(wearing.locked, true);
+    assert.equal(wearing.brand?.intro?.title, "Wears it too");
+    assert.equal(wearing.brand?.intro?.line, "Ask once");
+    assert.equal(wearing.brand?.outro?.line, "Qore can");
+    assert.equal(wearing.brand?.logo?.url, `storage://${WS}/brand/${kit.id}/logo-2.png`);
+
+    const bare = await brandForProject(WS, { brandKitId: null, title: "Plain" });
+    assert.equal(bare.brand, undefined);
+    assert.equal(bare.locked, false);
   });
 
   it("does not show another workspace's kit", async () => {

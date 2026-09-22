@@ -7,7 +7,7 @@ import { ProviderError } from "@/lib/providers/errors";
 import { recordQuietly } from "@/lib/audit/log";
 import { checkBeforeWork, markNoticeSent, meter } from "@/lib/billing/metering";
 import { emitEvent, type WebhookEventType } from "@/lib/webhooks/outbound";
-import { buildEdl, validateEdl, type Edl, brandForRender, totalDurationSec, type EdlBrand } from "./edl";
+import { buildEdl, validateEdl, type Edl, totalDurationSec } from "./edl";
 import { compile, probe, runFfmpeg, toSrt } from "./ffmpeg";
 import { narrate, type NarrationReport } from "./narration";
 import { codeVersion } from "@/lib/version";
@@ -632,23 +632,8 @@ async function defaultResolveEdl(job: Job): Promise<Edl> {
   const { hydrateEditState } = await import("@/lib/edit-state");
   const state = hydrateEditState(project.editState);
 
-  // The kit the project wears, resolved for the encoder. A locked kit keeps
-  // its captions on whatever the Studio's switch says.
-  let brand: EdlBrand | undefined;
-  let locked = false;
-  if (project.brandKitId) {
-    const { getBrandKit } = await import("@/lib/db/repositories/brand-kits");
-    const { resolveBrand } = await import("@/lib/brand");
-    const kit = await getBrandKit(job.workspaceId, project.brandKitId);
-    if (kit) {
-      const resolved = resolveBrand(kit.tokens);
-      brand = brandForRender(resolved, {
-        logoUrl: resolved.logo ? `storage://${job.workspaceId}/${resolved.logo.key}` : null,
-        title: project.title,
-      });
-      locked = kit.locked;
-    }
-  }
+  const { brandForProject } = await import("./brand-for-project");
+  const { brand, locked } = await brandForProject(job.workspaceId, project);
 
   return buildEdl({
     project,

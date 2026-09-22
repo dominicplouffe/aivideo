@@ -171,7 +171,8 @@ export interface RenderRequest {
   projectId: string;
   outputs: RenderOutput[];
   locales: string[];
-  brandKitId: string;
+  /** The kit the project wore when the job was made, or null for none. */
+  brandKitId: string | null;
   video?: { resolution: "720p" | "1080p" | "1440p" | "2160p"; fps: 30 | 60; aspects: string[] };
   webhookUrl?: string;
   idempotencyKey?: string;
