@@ -335,6 +335,13 @@ export function Canvas({
             </span>
           </div>
 
+          {narration?.status === "error" && narration.error ? (
+            <p role="alert" className="mt-2 flex items-start gap-2 rounded-lg border border-rose-500/30 bg-rose-500/[0.07] px-3 py-2 text-2xs leading-relaxed text-rose-200">
+              <Icon name="alert" className="mt-px size-3.5 shrink-0" strokeWidth={2} />
+              <span>{narration.error}</span>
+            </p>
+          ) : null}
+
           {/* current step */}
           {segment ? (
             <div className="mt-2.5 flex flex-wrap items-center gap-2.5 px-1">

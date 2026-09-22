@@ -86,6 +86,9 @@ export async function POST(request: Request, context: Context) {
     });
   } catch (error) {
     if (error instanceof ProviderError) {
+      // In the server log as well as the response: a 409 in the request log
+      // alone says nothing about which vendor refused, or why.
+      console.warn(`[narration] ${error.detail.provider} refused (${error.detail.status ?? "no status"}${error.detail.code ? ` ${error.detail.code}` : ""}): ${error.message}`);
       return NextResponse.json({ error: error.message }, { status: error.retryable ? 502 : 409 });
     }
     throw error;

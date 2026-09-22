@@ -196,6 +196,39 @@ test("elevenlabs derives exact duration from the PCM byte count", async () => {
   setStorage(null);
 });
 
+test("elevenlabs refusals keep the vendor's code, and momentary ones are retried once", async () => {
+  const { adapter } = recordingStorage();
+  setStorage(adapter);
+  let calls = 0;
+  const provider = new ElevenLabsSynthesis({
+    apiKey: "k",
+    retryDelayMs: 1,
+    fetchImpl: async () => {
+      calls += 1;
+      if (calls === 1) {
+        return jsonResponse({ detail: { status: "detected_unusual_activity", message: "Unusual activity detected." } }, 401);
+      }
+      return speech(new Uint8Array(24000 * 2));
+    },
+  });
+  const result = await provider.synthesize({ text: "Hi.", voiceId: "v1", locale: "en-US", workspaceId: WORKSPACE });
+  assert.equal(calls, 2, "a 401 for unusual activity is momentary, not a bad key");
+  assert.equal(result.durationSec, 1);
+
+  // Out of characters is permanent, and said so a person can act on it.
+  const broke = new ElevenLabsSynthesis({
+    apiKey: "k",
+    retryDelayMs: 1,
+    fetchImpl: async () => jsonResponse({ detail: { status: "quota_exceeded", message: "This request exceeds your quota." } }, 401),
+  });
+  await assert.rejects(
+    () => broke.synthesize({ text: "Hi.", voiceId: "v1", locale: "en-US", workspaceId: WORKSPACE }),
+    (error: unknown) =>
+      error instanceof ProviderError && !error.retryable && error.detail.code === "quota_exceeded" && /no characters left/.test(error.message),
+  );
+  setStorage(null);
+});
+
 test("elevenlabs falls back to the format every plan has when a higher one is refused", async () => {
   const { adapter } = recordingStorage();
   setStorage(adapter);

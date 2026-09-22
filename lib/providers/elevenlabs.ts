@@ -74,6 +74,8 @@ export interface ElevenLabsConfig {
   timeoutMs?: number;
   /** How long a synthesized clip's read URL stays valid. */
   signedUrlTtlSec?: number;
+  /** Pause before the one retry of a momentary refusal. */
+  retryDelayMs?: number;
   fetchImpl?: typeof fetch;
 }
 
@@ -95,11 +97,44 @@ const DEFAULT_FORMAT = "pcm_24000" as const;
 
 /** The vendor's "that output format is not on your plan" answer. */
 function isFormatRefusal(error: unknown): boolean {
-  return (
-    error instanceof ProviderError &&
-    error.detail.status === 403 &&
-    /output_format_not_allowed|only available on the/i.test(error.message)
-  );
+  return error instanceof ProviderError && error.detail.code === "output_format_not_allowed";
+}
+
+/**
+ * Turns the vendor's refusal into one of ours, with its code kept.
+ *
+ * ElevenLabs puts the useful part in `detail.status`, and the HTTP status
+ * is a poor guide to what to do: a 401 can mean a bad key (permanent) or
+ * a burst its abuse detector disliked (try again in a moment); a 429 is
+ * always momentary; a quota that has run out is permanent until next
+ * month and worth saying in words the person can act on.
+ */
+const MOMENTARY = new Set(["too_many_concurrent_requests", "system_busy", "detected_unusual_activity", "rate_limit_exceeded"]);
+
+export function describeRefusal(provider: string, path: string, status: number, body: string): ProviderError {
+  let code: string | undefined;
+  let vendorMessage = "";
+  try {
+    const parsed = JSON.parse(body) as { detail?: { status?: string; message?: string } | string };
+    if (typeof parsed.detail === "object" && parsed.detail) {
+      code = parsed.detail.status;
+      vendorMessage = parsed.detail.message ?? "";
+    } else if (typeof parsed.detail === "string") {
+      vendorMessage = parsed.detail;
+    }
+  } catch {
+    vendorMessage = body.slice(0, 200);
+  }
+  const momentary = (code !== undefined && MOMENTARY.has(code)) || isRetryableStatus(status);
+  const said =
+    code === "quota_exceeded"
+      ? "ElevenLabs has no characters left on this plan for the month. Add credits or wait for the reset, then try again."
+      : code === "detected_unusual_activity"
+        ? "ElevenLabs paused this key for a moment (its abuse detector fired on a burst of requests). Try again shortly."
+        : code === "too_many_concurrent_requests" || code === "system_busy"
+          ? "ElevenLabs is busy; the request will be retried."
+          : `ElevenLabs ${path.split("?")[0]} returned ${status}${code ? ` (${code})` : ""}: ${vendorMessage.slice(0, 300)}`;
+  return new ProviderError(said, { provider, retryable: momentary, status, ...(code ? { code } : {}) });
 }
 
 /** Wraps 16-bit mono PCM in a canonical 44-byte WAV header. */
@@ -199,14 +234,7 @@ export class ElevenLabsSynthesis implements SynthesisProvider {
       });
       if (!response.ok) {
         const body = await response.text().catch(() => "");
-        throw new ProviderError(
-          `ElevenLabs ${path} returned ${response.status}: ${body.slice(0, 400)}`,
-          {
-            provider: this.name,
-            retryable: isRetryableStatus(response.status),
-            status: response.status,
-          },
-        );
+        throw describeRefusal(this.name, path, response.status, body);
       }
       return response;
     } catch (error) {
@@ -238,6 +266,14 @@ export class ElevenLabsSynthesis implements SynthesisProvider {
       // more than the sample rate, so take the one every plan has.
       if (format !== DEFAULT_FORMAT && isFormatRefusal(error)) {
         return this.synthesizeAs(req, DEFAULT_FORMAT);
+      }
+      // A momentary refusal — a burst the vendor disliked, a busy signal —
+      // is retried once after a pause. A chapter is a small request and the
+      // person is waiting on a plan of forty of them; failing the whole
+      // plan for one hiccup is the wrong trade.
+      if (error instanceof ProviderError && error.retryable) {
+        await new Promise((resolve) => setTimeout(resolve, this.config.retryDelayMs ?? 1500));
+        return this.synthesizeAs(req, format);
       }
       throw error;
     }
