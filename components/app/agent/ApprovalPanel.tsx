@@ -96,7 +96,7 @@ export function ApprovalPanel({
       </p>
       <p className="mt-1.5 text-[0.8125rem] leading-relaxed text-fg-subtle">
         {confirming
-          ? "The agent will open a browser, sign in with the stored credential for each allowed origin, and follow every step above. It cannot reach anything else, and it cannot change the plan once you approve it."
+          ? "The agent will open a browser, sign in with the stored credential for each allowed origin, follow every step above and record the screen. It cannot reach anything else, and it cannot change the plan once you approve it. The recording becomes a project in Projects, with each step's narration as its script, ready for an AI voice."
           : `${requestedBy} asked for this. Read the steps and the allowed origins before you agree — this is what the agent will do, and it is the only thing it can do.`}
       </p>
 

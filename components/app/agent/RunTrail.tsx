@@ -78,6 +78,12 @@ export function RunTrail({ actions }: { actions: FixtureAction[] }) {
                 <p className="mt-1 text-2xs leading-relaxed text-rose-400/90">{action.refusedReason}</p>
               ) : null}
 
+              {action.detail?.value !== undefined && !action.detail?.credential ? (
+                <p className="mt-1 text-2xs text-fg-faint">
+                  Typed <span className="font-mono text-fg-subtle">“{String(action.detail.value)}”</span>
+                </p>
+              ) : null}
+
               {action.detail?.credential ? (
                 <p className="mt-1 text-2xs text-fg-faint">
                   Credential <span className="text-fg-subtle">{String(action.detail.credential)}</span>

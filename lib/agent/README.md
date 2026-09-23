@@ -150,3 +150,27 @@ incomplete.
 - **No publishing.** A recorded run produces a recording. Turning that into
   something a customer sees goes through the same `project.publish`
   permission as everything else.
+
+## From a run to a project
+
+A step carries, besides its intent and URL, one optional **action** — click
+a control by its visible text, or fill a field by its label — and a
+**narration** line. The approver reads all three, and the driver does
+exactly that and nothing else: a control it cannot find is written to the
+trail as "not found" and the run goes on, because a stale plan is not a
+breach and the footage still shows the page the step was about.
+
+The session records video. When the browser closes, `finalizeRun` stores
+the file as a recording of source `agent`, makes a project, and writes one
+chapter per step over the footage that step was on screen for, with the
+narration's words laid evenly across the span. There is nothing to
+transcribe — the video has no voice — so the plan *is* the script. With a
+studio voice chosen (the first the workspace has synced), the export reads
+that script fitted to the footage, the same path a recorded take with a
+replaced voice takes.
+
+Runs execute in the worker process, from a job of kind `agent` enqueued on
+approval, one attempt: a run that failed has already written its trail, and
+repeating it unattended would record the flow twice and approve nothing
+new. The run page polls while the worker is on it and offers "Open in
+Studio" when the project exists.

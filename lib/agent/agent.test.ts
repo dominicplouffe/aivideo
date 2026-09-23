@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { after, before, beforeEach, describe, it } from "node:test";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { closeDb, getDb, isDatabaseConfigured } from "@/lib/db/client";
 import * as s from "@/lib/db/schema";
 import { eraseWorkspace } from "@/lib/db/erase";
@@ -269,10 +269,12 @@ describe("a run, end to end", { skip: !RUN }, () => {
     const run = await upToApproval();
     await approve(run, approver);
 
+    // This workspace's entries only: the audit table is shared with every
+    // other run on the database, including real ones.
     const entries = await getDb()
       .select()
       .from(s.auditEvents)
-      .where(eq(s.auditEvents.action, "agent.run_approved"));
+      .where(and(eq(s.auditEvents.action, "agent.run_approved"), eq(s.auditEvents.workspaceId, WS)));
 
     assert.equal(entries.length, 1);
     assert.equal(entries[0].actorEmail, "lead@acme.com");

@@ -29,6 +29,8 @@ import {
 export interface SessionOptions {
   allowedOrigins: string[];
   viewport?: { width: number; height: number };
+  /** Record the session to a video file in this directory. Absent in a dry run. */
+  recordVideo?: { dir: string };
   /** Called for every refused request, so the run audit can hold it. */
   onRefusal?: (event: { url: string; reason: AllowRefusal; resourceType: string }) => void;
   /** Injectable so allowlist tests need no DNS. */
@@ -40,15 +42,21 @@ export interface AgentSession {
   page: Page;
   /** Navigates, with the address check that a string match cannot do. */
   goto(url: string): Promise<{ ok: true } | { ok: false; reason: AllowRefusal; message: string }>;
-  close(): Promise<void>;
+  /** Closes the session and returns the video's path, once it is fully written. */
+  close(): Promise<{ videoPath: string | null }>;
 }
 
 /** Schemes the browser serves itself. Nothing leaves the machine for these. */
 const INTERNAL = /^(about|data|blob|chrome-extension):/;
 
 export async function openSession(browser: Browser, options: SessionOptions): Promise<AgentSession> {
+  const viewport = options.viewport ?? { width: 1440, height: 900 };
   const context = await browser.newContext({
-    viewport: options.viewport ?? { width: 1440, height: 900 },
+    viewport,
+    // The recording itself, at the viewport's size, so the footage is the
+    // page and nothing else. Playwright writes it as the session runs and
+    // finishes the file when the context closes.
+    ...(options.recordVideo ? { recordVideo: { dir: options.recordVideo.dir, size: viewport } } : {}),
     // No storage state is loaded and none is saved. A run starts signed out
     // of everything and leaves nothing behind.
     storageState: undefined,
@@ -126,7 +134,11 @@ export async function openSession(browser: Browser, options: SessionOptions): Pr
     },
 
     async close() {
-      await context.close();
+      // The video object has to be taken before the page is gone.
+      const video = page.video();
+      await context.close().catch(() => {});
+      const videoPath = video ? await video.path().catch(() => null) : null;
+      return { videoPath };
     },
   };
 }

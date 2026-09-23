@@ -75,7 +75,22 @@ export type Run = typeof s.agentRuns.$inferSelect;
  * null would make the guard dead code that reads like a control.
  */
 export type ActingParty = { memberId: string | null; email: string | null };
-export type OutlineStep = { ordinal: number; intent: string; url?: string };
+/** One thing the agent may do on a page, named the way a person reads it. */
+export type StepAction =
+  | { kind: "click"; target: string }
+  | { kind: "fill"; target: string; value: string };
+
+export type OutlineStep = {
+  ordinal: number;
+  /** One visible action, in plain words. What the approver reads. */
+  intent: string;
+  /** The page this step navigates to, if it navigates. */
+  url?: string;
+  /** What the narrator says while this step is on screen. */
+  narration?: string;
+  /** The one action taken on the page, or none: some steps only show a page. */
+  action?: StepAction;
+};
 
 /**
  * A hash of the outline as approved.
@@ -231,8 +246,15 @@ export async function beginRecording(run: Run): Promise<Run> {
   return move(run, "recording", { startedAt: new Date() });
 }
 
-export async function finishRecording(run: Run, recordingId: string | null): Promise<Run> {
-  return move(run, "recorded", { recordingId, finishedAt: new Date() });
+export async function finishRecording(
+  run: Run,
+  produced: { recordingId: string | null; projectId?: string | null } | null,
+): Promise<Run> {
+  return move(run, "recorded", {
+    recordingId: produced?.recordingId ?? null,
+    ...(produced?.projectId ? { projectId: produced.projectId } : {}),
+    finishedAt: new Date(),
+  });
 }
 
 export async function failRun(run: Run, error: string): Promise<Run> {

@@ -40,6 +40,8 @@ export interface FixtureRun {
   error: string | null;
   createdAt: string;
   actions: FixtureAction[];
+  /** The project the recording became, once the run finished. */
+  projectId?: string | null;
 }
 
 export const agentRuns: FixtureRun[] = [

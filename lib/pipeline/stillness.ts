@@ -22,8 +22,15 @@ export interface StillnessOptions {
   binary?: string;
 }
 
-/** Parses the freeze detector's log into spans. Exported for tests. */
-export function parseFreezeLog(stderr: string): StillSpan[] {
+/**
+ * Parses the freeze detector's log into spans. Exported for tests.
+ *
+ * A freeze that runs to the end of the file never gets a `freeze_end`
+ * line, so a still last shot — the commonest shape of a screen recording,
+ * and the whole of an agent's static page — was read as motion. With the
+ * file's length known, the open span closes there.
+ */
+export function parseFreezeLog(stderr: string, endSec?: number): StillSpan[] {
   const spans: StillSpan[] = [];
   let start: number | null = null;
   for (const line of stderr.split(/\r?\n/)) {
@@ -36,6 +43,7 @@ export function parseFreezeLog(stderr: string): StillSpan[] {
       start = null;
     }
   }
+  if (start !== null && endSec !== undefined && endSec > start) spans.push([start, endSec]);
   return spans;
 }
 
@@ -49,7 +57,11 @@ export function detectStillness(filePath: string, options: StillnessOptions = {}
       { maxBuffer: 64 * 1024 * 1024 },
       (error, _stdout, stderr) => {
         if (error) return reject(error);
-        resolve(parseFreezeLog(String(stderr)));
+        // ffmpeg reports the input's duration in its own log; it closes a
+        // freeze that ran to the end of the file.
+        const duration = String(stderr).match(/Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)/);
+        const endSec = duration ? Number(duration[1]) * 3600 + Number(duration[2]) * 60 + Number(duration[3]) : undefined;
+        resolve(parseFreezeLog(String(stderr), endSec));
       },
     );
   });

@@ -5,6 +5,8 @@ import { Icon } from "@/components/ui/Icon";
 import { ApprovalPanel } from "@/components/app/agent/ApprovalPanel";
 import { RunStatusPill } from "@/components/app/agent/RunStatusPill";
 import { RunTrail } from "@/components/app/agent/RunTrail";
+import { RunProgress } from "@/components/app/agent/RunProgress";
+import { Button } from "@/components/ui/Button";
 import { getCurrentActor } from "@/lib/auth/current";
 import { allowed } from "@/lib/auth/authorize";
 import { getAgentRunDetail } from "@/lib/data";
@@ -50,6 +52,28 @@ export default async function AgentRunPage({ params }: { params: Promise<{ id: s
             />
           ) : null}
 
+          {run.status === "approved" || run.status === "recording" ? (
+            <RunProgress runId={run.id} status={run.status} />
+          ) : null}
+
+          {run.status === "recorded" ? (
+            <div className="flex flex-wrap items-center gap-3 rounded-xl border border-mint-500/30 bg-mint-500/[0.07] px-4 py-3.5">
+              <Icon name="check" className="size-4 shrink-0 text-mint-400" strokeWidth={2.4} />
+              <p className="min-w-0 flex-1 text-[0.8125rem] leading-relaxed text-fg">
+                <span className="font-medium text-fg-strong">Recorded. </span>
+                {run.projectId
+                  ? "The footage is a project now, with each step's narration as its script. Open it to hear it narrated, tighten it, and export."
+                  : "The run finished, but no video was produced, so there is no project. The trail below says what happened."}
+              </p>
+              {run.projectId ? (
+                <Button href={`/app/studio/${run.projectId}`} size="sm">
+                  <Icon name="scissors" className="size-4" strokeWidth={2} />
+                  Open in Studio
+                </Button>
+              ) : null}
+            </div>
+          ) : null}
+
           {run.error ? (
             <div className="rounded-xl border border-rose-500/30 bg-rose-500/8 px-4 py-3.5">
               <p className="flex items-start gap-2 text-[0.8125rem] leading-relaxed text-fg">
@@ -69,10 +93,28 @@ export default async function AgentRunPage({ params }: { params: Promise<{ id: s
                   <span className="mt-0.5 inline-flex size-6 shrink-0 items-center justify-center rounded-lg border border-[var(--line)] bg-ink-900 font-mono text-2xs text-fg-subtle">
                     {step.ordinal + 1}
                   </span>
-                  <div className="min-w-0">
+                  <div className="min-w-0 flex-1">
                     <p className="text-[0.875rem] leading-relaxed text-fg">{step.intent}</p>
                     {step.url ? (
                       <p className="mt-0.5 truncate font-mono text-2xs text-fg-faint">{step.url}</p>
+                    ) : null}
+                    {step.action ? (
+                      <p className="mt-1 flex items-center gap-1.5 text-2xs text-fg-subtle">
+                        <Icon name={step.action.kind === "click" ? "cursor" : "caption"} className="size-3 shrink-0 text-fg-faint" strokeWidth={2} />
+                        {step.action.kind === "click" ? (
+                          <>Click <span className="font-medium text-fg">“{step.action.target}”</span></>
+                        ) : (
+                          <>
+                            Type <span className="font-mono text-fg">“{step.action.value}”</span> into{" "}
+                            <span className="font-medium text-fg">{step.action.target}</span>
+                          </>
+                        )}
+                      </p>
+                    ) : null}
+                    {step.narration ? (
+                      <p className="mt-1.5 border-l-2 border-[var(--line-strong)] pl-2.5 text-[0.8125rem] leading-relaxed text-fg-subtle italic">
+                        {step.narration}
+                      </p>
                     ) : null}
                   </div>
                 </li>

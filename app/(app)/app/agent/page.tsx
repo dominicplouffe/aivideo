@@ -27,7 +27,12 @@ export default async function AgentPage() {
           <StatTile label="Waiting for approval" value={String(waiting.length)} icon="shield" />
           <StatTile label="Recorded" value={String(recorded.length)} icon="record" />
           <StatTile label="Stopped at the boundary" value={String(stopped.length)} icon="lock" sub="plan left the allowlist" />
-          <StatTile label="Average run" value="2m 38s" icon="clock" sub="brief to recording" />
+          <StatTile
+            label="Ready to edit"
+            value={String(recorded.filter((run) => run.projectId).length)}
+            icon="scissors"
+            sub="recordings that became projects"
+          />
         </div>
 
         <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,1fr)_380px]">

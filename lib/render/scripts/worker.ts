@@ -13,6 +13,7 @@ for (const file of [".env.local", ".env"]) {
   }
 }
 import { processWebhookOne } from "@/lib/webhooks/worker";
+import { processAgentOne } from "@/lib/agent/worker";
 import { streamAll } from "@/lib/audit/siem";
 import { processOne } from "../worker";
 import { codeVersion } from "@/lib/version";
@@ -99,6 +100,16 @@ async function main() {
           outcome.status === "completed"
             ? `[${workerId}] ${outcome.jobId} rendered — ${outcome.durationSec?.toFixed(2)}s, ${outcome.bytes} bytes`
             : `[${workerId}] ${outcome.jobId} render failed — ${outcome.error}`,
+        );
+        continue;
+      }
+
+      const agent = await processAgentOne({ workerId });
+      if (agent) {
+        console.log(
+          agent.status === "completed"
+            ? `[${workerId}] agent run ${agent.runId} recorded${agent.projectId ? ` — project ${agent.projectId}` : ""}`
+            : `[${workerId}] agent run ${agent.runId} failed — ${agent.error}`,
         );
         continue;
       }

@@ -8,6 +8,7 @@ import { authorize, ForbiddenError } from "@/lib/auth/authorize";
 import { resolveActor, UnauthenticatedError } from "@/lib/auth/session";
 import { normaliseList } from "@/lib/agent/allowlist";
 import { getPlanner } from "@/lib/agent/outline";
+import { enqueue } from "@/lib/jobs/queue";
 import {
   ApprovalError, RunStateError, actionsFor, approve, beginOutline, cancelRun, createRun,
   getRun, proposeOutline,
@@ -213,6 +214,18 @@ export async function PATCH(request: Request) {
       decision === "approve"
         ? await approve(run, actor)
         : await cancelRun(run, actor, typeof body.reason === "string" ? body.reason : "cancelled");
+
+    if (decision === "approve") {
+      // The worker does the recording. One job per run, however many times
+      // approval is retried.
+      await enqueue({
+        workspaceId: actor.workspaceId,
+        kind: "agent",
+        payload: { runId: updated.id },
+        idempotencyKey: `agent:${updated.id}`,
+        maxAttempts: 1,
+      });
+    }
 
     return NextResponse.json({ run: shape(updated) });
   } catch (error) {

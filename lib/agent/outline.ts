@@ -1,6 +1,6 @@
 import { ProviderError } from "@/lib/providers/errors";
 import { normaliseList, withinAllowlist } from "./allowlist";
-import type { OutlineStep } from "./run";
+import type { OutlineStep, StepAction } from "./run";
 
 /**
  * Turning a brief into a plan.
@@ -39,18 +39,30 @@ export interface OutlinePlanner {
 }
 
 const SYSTEM = [
-  "You plan screen recordings of software products.",
+  "You plan screen recordings of software products, and write what the",
+  "narrator says over them.",
   "",
   "Given a brief, produce the sequence of steps a person would take on screen",
   "to demonstrate it. Each step is one visible action with a purpose a viewer",
   "could follow — 'open the shipments list', 'create a shipment for the Berlin",
   "warehouse' — not an implementation detail like 'wait for the table to load'.",
   "",
+  "Each step may carry ONE action the agent performs on the page, and nothing",
+  "else will be done there:",
+  "- click: `target` is the visible text of the button, link or tab, exactly",
+  "  as a person would read it on the page.",
+  "- fill: `target` is the field's label or placeholder text; `value` is what",
+  "  to type. Use obviously fictional values, never real customer data.",
+  "A step that only shows a page has no action.",
+  "",
+  "Each step carries `narration`: one or two sentences the narrator says while",
+  "the step is on screen. Second person, present tense, about what the viewer",
+  "sees and why it matters — not 'now I click the button'.",
+  "",
   "Rules:",
   "- Stay inside the origins you are given. Do not invent a URL on any other host.",
   "- Do not plan destructive actions: no deleting, no cancelling, no sending",
   "  messages to real people, no changing billing or team membership.",
-  "- Do not plan to enter real customer data. Use obviously fictional values.",
   "- Prefer eight to twelve steps. A demo nobody watches to the end is a demo",
   "  that did not work.",
 ].join("\n");
@@ -65,8 +77,20 @@ const OUTLINE_SCHEMA: Record<string, unknown> = {
         properties: {
           intent: { type: "string", description: "One visible action, in plain words." },
           url: { type: "string", description: "The page this step happens on, if it navigates." },
+          narration: { type: "string", description: "What the narrator says while this step is on screen." },
+          action: {
+            type: "object",
+            description: "The one action taken on the page. Omit it when the step only shows a page.",
+            properties: {
+              kind: { type: "string", enum: ["click", "fill"] },
+              target: { type: "string", description: "Visible text of the control, or the field's label." },
+              value: { type: "string", description: "For fill: what to type." },
+            },
+            required: ["kind", "target"],
+            additionalProperties: false,
+          },
         },
-        required: ["intent"],
+        required: ["intent", "narration"],
         additionalProperties: false,
       },
     },
@@ -85,8 +109,27 @@ const OUTLINE_SCHEMA: Record<string, unknown> = {
  * lives only in a prompt is a constraint that holds most of the time, and
  * "most of the time" is not a property you can put in front of an approver.
  */
+/** The longest narration line, target text or typed value a step may carry. */
+const MAX_NARRATION = 400;
+const MAX_TARGET = 120;
+const MAX_VALUE = 200;
+
+/** An action as the model wrote it, checked into the two shapes the driver knows. */
+export function shapeAction(raw: unknown): StepAction | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const a = raw as { kind?: unknown; target?: unknown; value?: unknown };
+  const target = typeof a.target === "string" ? a.target.replace(/\s+/g, " ").trim().slice(0, MAX_TARGET) : "";
+  if (!target) return undefined;
+  if (a.kind === "click") return { kind: "click", target };
+  if (a.kind === "fill") {
+    const value = typeof a.value === "string" ? a.value.slice(0, MAX_VALUE) : "";
+    return { kind: "fill", target, value };
+  }
+  return undefined;
+}
+
 export function shapePlan(
-  steps: { intent?: unknown; url?: unknown }[],
+  steps: { intent?: unknown; url?: unknown; narration?: unknown; action?: unknown }[],
   allowedOrigins: string[],
   maxSteps = 14,
 ): PlanResult {
@@ -98,6 +141,11 @@ export function shapePlan(
     if (!intent) continue;
 
     const url = typeof step.url === "string" && step.url.trim() ? step.url.trim() : undefined;
+    const narration =
+      typeof step.narration === "string" && step.narration.trim()
+        ? step.narration.replace(/\s+/g, " ").trim().slice(0, MAX_NARRATION)
+        : undefined;
+    const action = shapeAction(step.action);
 
     if (url) {
       const verdict = withinAllowlist(url, allowedOrigins);
@@ -115,7 +163,13 @@ export function shapePlan(
       continue;
     }
 
-    outline.push({ ordinal: outline.length, intent, url });
+    outline.push({
+      ordinal: outline.length,
+      intent,
+      ...(url ? { url } : {}),
+      ...(narration ? { narration } : {}),
+      ...(action ? { action } : {}),
+    });
   }
 
   return { outline, removed };
@@ -187,7 +241,7 @@ export class AnthropicPlanner implements OutlinePlanner {
       .map((block) => block.text)
       .join("");
 
-    let parsed: { steps?: { intent?: unknown; url?: unknown }[] };
+    let parsed: { steps?: { intent?: unknown; url?: unknown; narration?: unknown; action?: unknown }[] };
     try {
       parsed = JSON.parse(text) as typeof parsed;
     } catch {
@@ -230,14 +284,23 @@ export class MockPlanner implements OutlinePlanner {
     const steps = sentences.map((sentence, index) => ({
       intent: sentence,
       url: index === 0 ? entry : undefined,
+      // The brief's own sentence, said back: enough to hear the pipeline
+      // work end to end without a model.
+      narration: sentence.endsWith(".") ? sentence : `${sentence}.`,
     }));
 
     return shapePlan(steps, allowed, request.maxSteps);
   }
 }
 
+/**
+ * The planner for a key: Claude when there is one, the deterministic mock
+ * when there is not. It used to demand DEMORIFF_PROVIDERS=live as well,
+ * which left every deployment planning from the brief's own sentences while
+ * holding a perfectly good key.
+ */
 export function getPlanner(apiKey: string | null = process.env.ANTHROPIC_API_KEY ?? null): OutlinePlanner {
-  if (apiKey && process.env.DEMORIFF_PROVIDERS === "live") {
+  if (apiKey && process.env.DEMORIFF_PROVIDERS !== "mock") {
     return new AnthropicPlanner({ apiKey });
   }
   return new MockPlanner();
