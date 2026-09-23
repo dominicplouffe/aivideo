@@ -5,7 +5,7 @@ import path from "node:path";
 import { claim, complete, fail, heartbeat } from "@/lib/jobs/queue";
 import { driveRun } from "./driver";
 import { finalizeRun } from "./finalize";
-import { getRun, failRun } from "./run";
+import { actionsFor, failRun, getRun, recordAction, resumeInterrupted } from "./run";
 
 /**
  * Running approved agent runs from the queue.
@@ -55,20 +55,28 @@ export async function processAgentOne(options: AgentWorkerOptions): Promise<Agen
   try {
     const run = await getRun(job.workspaceId, runId);
     if (!run) throw new Error(`Agent job names unknown run ${runId}.`);
-    if (run.status === "recording") {
-      // Reclaimed after the worker holding it stopped mid-recording. The
-      // footage from that attempt is gone, and recording the flow again
-      // unattended would put a second, half-finished attempt in the trail
-      // under the same approval. Said on the run, in words a person can use.
-      const message =
-        "The recording was interrupted part way (the recorder restarted) and nothing was saved. Choose Revise and run again to record it.";
-      await failRun(run, message);
-      await fail(job.id, options.workerId, message, { permanent: true });
-      return { jobId: job.id, runId, status: "failed", error: message };
+    let current = run;
+    if (current.status === "recording") {
+      // Reclaimed after the worker holding it stopped mid-recording — a
+      // restart, a crash. The plan was approved and nothing was produced,
+      // so it is recorded again from the start, under the same approval.
+      // Twice is bad luck; a third time is something to look at.
+      const restarts = (await actionsFor(current.id)).filter(
+        (a) => a.attempt === current.attempt && a.kind === "wait" && a.target === "recorder restarted",
+      ).length;
+      if (restarts >= 2) {
+        const message =
+          "The recorder stopped part way through this run three times, so it was not tried again. Choose Edit and retry to record it.";
+        await failRun(current, message);
+        await fail(job.id, options.workerId, message, { permanent: true });
+        return { jobId: job.id, runId, status: "failed", error: message };
+      }
+      await recordAction(current.id, { kind: "wait", target: "recorder restarted", detail: { note: "recording again from the start" } });
+      current = await resumeInterrupted(current);
     }
-    if (run.status !== "approved") {
+    if (current.status !== "approved") {
       // Cancelled after approval, or already recorded by another worker.
-      await complete(job.id, options.workerId, { skipped: true, status: run.status });
+      await complete(job.id, options.workerId, { skipped: true, status: current.status });
       return { jobId: job.id, runId, status: "completed" };
     }
 
@@ -76,7 +84,7 @@ export async function processAgentOne(options: AgentWorkerOptions): Promise<Agen
     dir = await mkdtemp(path.join(tmpdir(), "demoriff-agent-"));
     const browser = await chromium.launch({ headless: true, executablePath: chromiumPath(options.executablePath), args: ["--no-sandbox"] });
     try {
-      const result = await driveRun(run, {
+      const result = await driveRun(current, {
         browser,
         recordVideo: { dir },
         finalize: (produced) => finalizeRun({ run: produced.run, videoPath: produced.videoPath, steps: produced.steps }),

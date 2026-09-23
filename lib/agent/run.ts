@@ -46,7 +46,10 @@ export const TRANSITIONS: Record<RunStatus, RunStatus[]> = {
   // Note what is absent: awaiting_approval cannot reach recording.
   awaiting_approval: ["approved", "cancelled", "failed"],
   approved: ["recording", "cancelled"],
-  recording: ["recorded", "failed", "cancelled"],
+  // Back to approved only when the recorder stopped part way (a restart, a
+  // crash) — see `resumeInterrupted`. The approval still covers the plan,
+  // which is unchanged, and nothing was produced.
+  recording: ["recorded", "failed", "cancelled", "approved"],
   recorded: [],
   // Reopened to be fixed and tried again, but only by `retryRun`, and only
   // while the run has not produced anything. Back to awaiting_approval, so
@@ -390,6 +393,15 @@ export async function beginRecording(run: Run): Promise<Run> {
   }
 
   return move(run, "recording", { startedAt: new Date() });
+}
+
+/**
+ * Puts a recording that was cut off by the recorder stopping back in line,
+ * under the same approval. The plan and its fingerprint are untouched, so
+ * `beginRecording` checks the approval exactly as it did the first time.
+ */
+export async function resumeInterrupted(run: Run): Promise<Run> {
+  return move(run, "approved", { startedAt: null });
 }
 
 export async function finishRecording(

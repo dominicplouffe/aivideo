@@ -11,7 +11,7 @@ import { MockPlanner, shapePlan } from "./outline";
 import {
   ApprovalError, TRANSITIONS, actionsFor, approve, beginOutline,
   beginRecording, canTransition, createRun, failRun, outlineHash, proposeOutline, recordAction,
-  retryRun, updateRequest,
+  resumeInterrupted, retryRun, updateRequest,
 } from "./run";
 
 /**
@@ -277,6 +277,16 @@ describe("a run, end to end", { skip: !RUN }, () => {
     assert.equal(again.created, false, "approving the same attempt twice queues it once");
     assert.equal(second.created, true, "the retry gets a job of its own");
     assert.notEqual(second.job.id, first.job.id);
+  });
+
+  it("records an interrupted run again under the same approval, and only an unchanged plan", async () => {
+    const run = await upToApproval();
+    const recording = await beginRecording(await approve(run, approver));
+    const resumed = await resumeInterrupted(recording);
+    assert.equal(resumed.status, "approved");
+    assert.equal(resumed.approvedBy, recording.approvedBy, "the approval stands");
+    const again = await beginRecording(resumed);
+    assert.equal(again.status, "recording");
   });
 
   it("will not reopen a run that made a project", async () => {
