@@ -193,6 +193,21 @@ describe("a run, end to end", { skip: !RUN }, () => {
     ]);
   });
 
+  it("numbers a burst of trail lines without clashing", async () => {
+    const run = await upToApproval();
+    const recording = await beginRecording(await approve(run, approver));
+    // A page load fires its refused requests all at once.
+    await Promise.all(
+      Array.from({ length: 12 }, (_, i) =>
+        recordAction(recording.id, { kind: "refused", url: `https://tracker.example/${i}`, refusedReason: "script: not-allowed" }),
+      ),
+    );
+    const trail = await actionsFor(recording.id);
+    assert.equal(trail.length, 12);
+    assert.deepEqual(trail.map((a) => a.ordinal), Array.from({ length: 12 }, (_, i) => i));
+    assert.deepEqual(trail.map((a) => a.url), Array.from({ length: 12 }, (_, i) => `https://tracker.example/${i}`), "in the order they were asked for");
+  });
+
   it("lets a requester approve their own run only when nobody else could", async () => {
     const { hasOtherApprover } = await import("./run");
     // Sam asked; Lead, an admin, could approve: the two-person rule holds.

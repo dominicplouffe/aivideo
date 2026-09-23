@@ -94,13 +94,17 @@ export async function driveRun(run: Run, options: DriveOptions): Promise<DriveRe
     resolve: options.resolve,
     onRefusal: (event) => {
       refusals += 1;
-      // Fire and forget: a refused subresource must not be able to stall the
-      // run, and the write is ordered by the ordinal rather than by arrival.
-      void recordAction(current.id, {
+      // Not awaited: a refused subresource must not be able to stall the
+      // run. recordAction queues the writes per run, so they keep their order.
+      recordAction(current.id, {
         kind: "refused",
         url: event.url,
         refusedReason: `${event.resourceType}: ${event.reason}`,
         atMs: Date.now() - startedAt,
+      }).catch((error) => {
+        // A trail line that could not be written must not take the whole
+        // worker down with it; the refusal itself already happened.
+        console.error(`[agent] could not record a refusal for ${current.id}:`, error);
       });
     },
   });

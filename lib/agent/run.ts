@@ -320,25 +320,51 @@ export interface RecordedAction {
  * navigation is indistinguishable from one that never attempted it.
  */
 export async function recordAction(runId: string, action: RecordedAction): Promise<void> {
-  const db = getDb();
-  const [last] = await db
-    .select({ ordinal: s.agentActions.ordinal })
-    .from(s.agentActions)
-    .where(eq(s.agentActions.runId, runId))
-    .orderBy(desc(s.agentActions.ordinal))
-    .limit(1);
+  // One write at a time per run, in the order they were asked for. A page
+  // that loads fires its refused requests all at once, and each write
+  // numbers itself from the last one stored: two in flight together took
+  // the same number and the second broke the unique key.
+  const previous = writing.get(runId) ?? Promise.resolve();
+  const next = previous.catch(() => {}).then(() => appendAction(runId, action));
+  writing.set(runId, next);
+  try {
+    await next;
+  } finally {
+    if (writing.get(runId) === next) writing.delete(runId);
+  }
+}
 
-  await db.insert(s.agentActions).values({
-    runId,
-    ordinal: (last?.ordinal ?? -1) + 1,
-    kind: action.kind,
-    outlineOrdinal: action.outlineOrdinal ?? null,
-    url: action.url ?? null,
-    target: action.target ?? null,
-    detail: action.detail ?? null,
-    refusedReason: action.refusedReason ?? null,
-    atMs: Math.max(0, Math.round(action.atMs ?? 0)),
-  });
+const writing = new Map<string, Promise<void>>();
+
+async function appendAction(runId: string, action: RecordedAction): Promise<void> {
+  const db = getDb();
+  // Retried on a clash anyway: another process writing the same run's trail
+  // is not covered by the in-process queue above.
+  for (let attempt = 0; ; attempt++) {
+    const [last] = await db
+      .select({ ordinal: s.agentActions.ordinal })
+      .from(s.agentActions)
+      .where(eq(s.agentActions.runId, runId))
+      .orderBy(desc(s.agentActions.ordinal))
+      .limit(1);
+    try {
+      await db.insert(s.agentActions).values({
+        runId,
+        ordinal: (last?.ordinal ?? -1) + 1,
+        kind: action.kind,
+        outlineOrdinal: action.outlineOrdinal ?? null,
+        url: action.url ?? null,
+        target: action.target ?? null,
+        detail: action.detail ?? null,
+        refusedReason: action.refusedReason ?? null,
+        atMs: Math.max(0, Math.round(action.atMs ?? 0)),
+      });
+      return;
+    } catch (error) {
+      const code = (error as { cause?: { code?: string }; code?: string }).cause?.code ?? (error as { code?: string }).code;
+      if (code !== "23505" || attempt >= 4) throw error;
+    }
+  }
 }
 
 export async function actionsFor(runId: string) {

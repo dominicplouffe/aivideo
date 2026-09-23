@@ -55,6 +55,17 @@ export async function processAgentOne(options: AgentWorkerOptions): Promise<Agen
   try {
     const run = await getRun(job.workspaceId, runId);
     if (!run) throw new Error(`Agent job names unknown run ${runId}.`);
+    if (run.status === "recording") {
+      // Reclaimed after the worker holding it stopped mid-recording. The
+      // footage from that attempt is gone, and recording the flow again
+      // unattended would put a second, half-finished attempt in the trail
+      // under the same approval. Said on the run, in words a person can use.
+      const message =
+        "The recording was interrupted part way (the recorder restarted) and nothing was saved. Request the run again to record it.";
+      await failRun(run, message);
+      await fail(job.id, options.workerId, message, { permanent: true });
+      return { jobId: job.id, runId, status: "failed", error: message };
+    }
     if (run.status !== "approved") {
       // Cancelled after approval, or already recorded by another worker.
       await complete(job.id, options.workerId, { skipped: true, status: run.status });
