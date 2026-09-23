@@ -74,8 +74,11 @@ export function Button({
         </a>
       );
     }
+    // A link carries the same title and aria-label a button would: an
+    // icon-only link in the folded sidebar has nothing else to say its name.
+    const { title, "aria-label": ariaLabel } = rest as { title?: string; "aria-label"?: string };
     return (
-      <Link href={href} className={classes}>
+      <Link href={href} className={classes} title={title} aria-label={ariaLabel}>
         {children}
       </Link>
     );

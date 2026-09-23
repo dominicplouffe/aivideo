@@ -3,6 +3,9 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
+
+/** Where the sidebar's collapsed state is kept, per device. */
+const SIDEBAR_KEY = "demoriff.sidebar";
 import { cn, relativeTime } from "@/lib/utils";
 import { LogoMark } from "@/components/brand/Logo";
 import { Icon, type IconName } from "@/components/ui/Icon";
@@ -78,6 +81,31 @@ export function AppShell({
   const [mobileOpen, setMobileOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
 
+  /*
+   * Collapsed to an icon rail, on wide screens only. Remembered on the
+   * device rather than the workspace: a laptop wants the room, a monitor
+   * does not, and the same person uses both. The mobile drawer always opens
+   * at full width, since a rail behind a hamburger helps nobody.
+   */
+  const [collapsed, setCollapsed] = useState(false);
+  useEffect(() => {
+    try {
+      setCollapsed(window.localStorage.getItem(SIDEBAR_KEY) === "collapsed");
+    } catch {
+      // Storage may be unavailable; the sidebar simply starts expanded.
+    }
+  }, []);
+  const toggleCollapsed = () =>
+    setCollapsed((c) => {
+      try {
+        window.localStorage.setItem(SIDEBAR_KEY, c ? "expanded" : "collapsed");
+      } catch {
+        // Not remembered, still toggled.
+      }
+      return !c;
+    });
+  const rail = collapsed && !mobileOpen;
+
   useEffect(() => setMobileOpen(false), [pathname]);
 
   // Initials and a hue from the signed-in address, so two people do not get
@@ -103,6 +131,11 @@ export function AppShell({
         e.preventDefault();
         setPaletteOpen((v) => !v);
       }
+      // ⌘B / Ctrl+B, the editor convention, folds the sidebar.
+      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === "b") {
+        e.preventDefault();
+        toggleCollapsed();
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -112,17 +145,21 @@ export function AppShell({
     <div className="flex min-h-dvh bg-ink-1000">
       {/* ---------------- sidebar ---------------- */}
       <aside
+        data-collapsed={rail || undefined}
         className={cn(
-          "fixed inset-y-0 left-0 z-40 flex w-64 shrink-0 flex-col border-r border-[var(--line)] bg-ink-950 transition-transform duration-300 lg:sticky lg:top-0 lg:h-dvh lg:translate-x-0",
+          "fixed inset-y-0 left-0 z-40 flex w-64 shrink-0 flex-col border-r border-[var(--line)] bg-ink-950 transition-[transform,width] duration-300 lg:sticky lg:top-0 lg:h-dvh lg:translate-x-0",
           mobileOpen ? "translate-x-0" : "-translate-x-full",
+          rail && "lg:w-16",
         )}
       >
-        <div className="flex h-14 items-center justify-between gap-2 border-b border-[var(--line)] px-4">
-          <Link href="/app" className="flex items-center gap-2.5">
+        <div className={cn("flex h-14 items-center gap-2 border-b border-[var(--line)]", rail ? "justify-center px-2" : "justify-between px-4")}>
+          <Link href="/app" className="flex items-center gap-2.5" aria-label="Home">
             <LogoMark className="size-7" gradientId="app-logo" />
-            <span className="text-[0.9375rem] font-semibold tracking-[-0.03em] text-fg-strong">
-              Demo<span className="text-fg-muted">Riff</span>
-            </span>
+            {rail ? null : (
+              <span className="text-[0.9375rem] font-semibold tracking-[-0.03em] text-fg-strong">
+                Demo<span className="text-fg-muted">Riff</span>
+              </span>
+            )}
           </Link>
           <button
             type="button"
@@ -142,34 +179,42 @@ export function AppShell({
           belongs to exactly one workspace in this build. An affordance for
           something that cannot happen is a worse lie than a plain label.
         */}
-        <div className="border-b border-[var(--line)] p-3">
-          <div className="flex w-full items-center gap-2.5 rounded-xl border border-[var(--line)] bg-ink-900 px-3 py-2.5 text-left">
+        <div className={cn("border-b border-[var(--line)]", rail ? "p-2" : "p-3")}>
+          <div
+            title={rail && viewer ? `${viewer.workspaceName} · ${viewer.plan} · ${viewer.region.toUpperCase()}` : undefined}
+            className={cn(
+              "flex w-full items-center gap-2.5 rounded-xl border border-[var(--line)] bg-ink-900 text-left",
+              rail ? "justify-center px-0 py-2" : "px-3 py-2.5",
+            )}
+          >
             <span className="inline-flex size-7 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-cyan-400 to-iris-500 text-[0.6875rem] font-bold text-white">
               {(viewer?.workspaceName ?? "·").charAt(0).toUpperCase()}
             </span>
-            <span className="min-w-0 flex-1">
-              <span className="block truncate text-[0.8125rem] font-medium text-fg-strong">
-                {viewer?.workspaceName ?? "Your workspace"}
+            {rail ? null : (
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-[0.8125rem] font-medium text-fg-strong">
+                  {viewer?.workspaceName ?? "Your workspace"}
+                </span>
+                <span className="block text-2xs text-fg-faint">
+                  {viewer ? `${viewer.plan} · ${viewer.region.toUpperCase()}` : ""}
+                </span>
               </span>
-              <span className="block text-2xs text-fg-faint">
-                {viewer ? `${viewer.plan} · ${viewer.region.toUpperCase()}` : ""}
-              </span>
-            </span>
+            )}
           </div>
         </div>
 
         {/* new project */}
-        <div className="p-3">
-          <Button href="/app/new" size="sm" className="w-full">
+        <div className={rail ? "p-2" : "p-3"}>
+          <Button href="/app/new" size="sm" className="w-full" title={rail ? "New recording" : undefined} aria-label="New recording">
             <Icon name="plus" className="size-4" strokeWidth={2.2} />
-            New recording
+            {rail ? null : "New recording"}
           </Button>
         </div>
 
-        <nav className="flex-1 overflow-y-auto px-3 pb-3" aria-label="Application">
-          <NavGroup entries={primary} pathname={pathname} />
-          <NavGroup label="Studio" entries={studio} pathname={pathname} />
-          <NavGroup label="Workspace" entries={admin} pathname={pathname} />
+        <nav className={cn("flex-1 overflow-y-auto pb-3", rail ? "px-2" : "px-3")} aria-label="Application">
+          <NavGroup entries={primary} pathname={pathname} rail={rail} />
+          <NavGroup label="Studio" entries={studio} pathname={pathname} rail={rail} />
+          <NavGroup label="Workspace" entries={admin} pathname={pathname} rail={rail} />
         </nav>
 
         {/*
@@ -180,7 +225,28 @@ export function AppShell({
           from Postgres. Now it renders the real figures, or, when there is
           nothing measured to show, only the link.
         */}
-        <div className="border-t border-[var(--line)] p-3">
+        <div className={cn("border-t border-[var(--line)]", rail ? "p-2" : "p-3")}>
+          {rail ? (
+            usage ? (
+              // The meter, folded: the bar alone, with the numbers on hover
+              // and the link behind it.
+              <Link
+                href="/app/billing"
+                title={`Video minutes ${Math.round(usage.usedSeconds / 60)}/${Math.round(usage.allowanceSeconds / 60)}${
+                  usage.projectsLimit !== null ? ` · Projects ${usage.projectsUsed}/${usage.projectsLimit}` : ""
+                } · ${usage.planName}`}
+                aria-label="Usage and plan"
+                className="block rounded-lg p-1.5 hover:bg-ink-850"
+              >
+                <span className="block h-1.5 overflow-hidden rounded-full bg-ink-750">
+                  <span
+                    className="block h-full rounded-full bg-[linear-gradient(90deg,var(--color-iris-500),var(--color-cyan-400))]"
+                    style={{ width: `${Math.min(100, usage.fractionUsed * 100)}%` }}
+                  />
+                </span>
+              </Link>
+            ) : null
+          ) : (
           <div className="rounded-xl border border-[var(--line)] bg-ink-900 p-3">
             {usage ? (
               <>
@@ -221,6 +287,23 @@ export function AppShell({
               <Icon name="chevronRight" className="size-3" strokeWidth={2.4} />
             </Link>
           </div>
+          )}
+
+          {/* fold / unfold, wide screens only */}
+          <button
+            type="button"
+            onClick={toggleCollapsed}
+            aria-pressed={collapsed}
+            aria-label={collapsed ? "Expand the sidebar" : "Collapse the sidebar"}
+            title={`${collapsed ? "Expand" : "Collapse"} sidebar (⌘B)`}
+            className={cn(
+              "mt-2 hidden items-center gap-2 rounded-lg py-1.5 text-2xs text-fg-faint transition-colors hover:bg-ink-850 hover:text-fg lg:flex",
+              rail ? "w-full justify-center" : "w-full px-2",
+            )}
+          >
+            <Icon name={collapsed ? "chevronRight" : "chevronLeft"} className="size-3.5" strokeWidth={2.2} />
+            {rail ? null : "Collapse"}
+          </button>
         </div>
       </aside>
 
@@ -299,17 +382,24 @@ function NavGroup({
   label,
   entries,
   pathname,
+  rail = false,
 }: {
   label?: string;
   entries: NavEntry[];
   pathname: string;
+  /** Icons only: the label moves to a tooltip and a group heading becomes a rule. */
+  rail?: boolean;
 }) {
   return (
-    <div className="mb-5">
+    <div className={rail ? "mb-3" : "mb-5"}>
       {label ? (
-        <p className="mb-1.5 px-3 font-mono text-2xs tracking-[0.14em] text-fg-faint uppercase">
-          {label}
-        </p>
+        rail ? (
+          <hr className="mx-2 mb-2 border-[var(--line)]" aria-hidden />
+        ) : (
+          <p className="mb-1.5 px-3 font-mono text-2xs tracking-[0.14em] text-fg-faint uppercase">
+            {label}
+          </p>
+        )
       ) : null}
       <ul className="flex flex-col gap-0.5">
         {entries.map((e) => {
@@ -319,8 +409,11 @@ function NavGroup({
               <Link
                 href={e.href}
                 aria-current={active ? "page" : undefined}
+                aria-label={rail ? e.label : undefined}
+                title={rail ? (e.badge ? `${e.label} · ${e.badge}` : e.label) : undefined}
                 className={cn(
-                  "flex items-center gap-2.5 rounded-lg px-3 py-2 text-[0.8125rem] font-medium transition-colors",
+                  "relative flex items-center rounded-lg text-[0.8125rem] font-medium transition-colors",
+                  rail ? "justify-center px-0 py-2.5" : "gap-2.5 px-3 py-2",
                   active
                     ? "bg-[color-mix(in_oklab,var(--color-iris-500)_16%,transparent)] text-fg-strong"
                     : "text-fg-subtle hover:bg-ink-850 hover:text-fg",
@@ -331,11 +424,15 @@ function NavGroup({
                   className={cn("size-4", active ? "text-iris-300" : "text-fg-faint")}
                   strokeWidth={1.8}
                 />
-                {e.label}
+                {rail ? null : e.label}
                 {e.badge ? (
-                  <span className="ml-auto rounded bg-iris-500/18 px-1.5 py-0.5 text-2xs text-iris-300">
-                    {e.badge}
-                  </span>
+                  rail ? (
+                    <span className="absolute top-1.5 right-1.5 size-1.5 rounded-full bg-iris-400" aria-hidden />
+                  ) : (
+                    <span className="ml-auto rounded bg-iris-500/18 px-1.5 py-0.5 text-2xs text-iris-300">
+                      {e.badge}
+                    </span>
+                  )
                 ) : null}
               </Link>
             </li>
