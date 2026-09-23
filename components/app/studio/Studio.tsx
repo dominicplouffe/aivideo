@@ -40,6 +40,7 @@ import { kitLogoUrl } from "@/components/app/brand/BrandPreview";
 import type { KitRecord } from "@/components/app/brand/BrandKitsEditor";
 import { Inspector, type StudioVoice } from "./Inspector";
 import { ExportDialog } from "./ExportDialog";
+import { ProjectTitle } from "./ProjectTitle";
 import {
   buildTimeline,
   hydrateEditState,
@@ -774,7 +775,7 @@ export function Studio({
 
         <div className="min-w-0">
           <div className="flex items-center gap-2">
-            <h1 className="truncate text-[0.9375rem] font-medium text-fg-strong">{project.title}</h1>
+            <ProjectTitle projectId={project.id} title={project.title} onRenamed={(title) => setProject((p) => ({ ...p, title }))} />
             <StatusPill status={project.status} />
             {narrator ? (
               // Said in the header, not only in a tab: a render of this

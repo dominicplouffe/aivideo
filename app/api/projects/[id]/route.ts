@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { sanitizeEditState } from "@/lib/api/edit-state";
 import { isDatabaseConfigured } from "@/lib/db/client";
 import { needsDatabase, requireActor } from "@/lib/api/guard";
-import { getProjectById, saveBrandKit, saveEditState, saveVoice } from "@/lib/db/repositories/projects";
+import { getProjectById, renameProject, saveBrandKit, saveEditState, saveVoice } from "@/lib/db/repositories/projects";
 import { recordQuietly } from "@/lib/audit/log";
 
 /**
@@ -42,7 +42,7 @@ export async function PATCH(request: Request, context: Context) {
   const guard = await requireActor(request, "project.edit");
   if ("response" in guard) return guard.response;
 
-  let body: { edit_state?: unknown; voice_id?: unknown; brand_kit_id?: unknown };
+  let body: { edit_state?: unknown; voice_id?: unknown; brand_kit_id?: unknown; title?: unknown };
   try {
     body = (await request.json()) as typeof body;
   } catch {
@@ -52,9 +52,13 @@ export async function PATCH(request: Request, context: Context) {
   const hasEdit = body.edit_state !== undefined;
   const hasVoice = body.voice_id !== undefined;
   const hasKit = body.brand_kit_id !== undefined;
-  if (!hasEdit && !hasVoice && !hasKit) {
-    return NextResponse.json({ error: "Send edit_state, voice_id, brand_kit_id, or several." }, { status: 422 });
+  const hasTitle = body.title !== undefined;
+  if (!hasEdit && !hasVoice && !hasKit && !hasTitle) {
+    return NextResponse.json({ error: "Send title, edit_state, voice_id, brand_kit_id, or several." }, { status: 422 });
   }
+  const title = typeof body.title === "string" ? body.title.replace(/\s+/g, " ").trim() : "";
+  if (hasTitle && !title) return NextResponse.json({ error: "Give the project a name." }, { status: 422 });
+  if (hasTitle && title.length > 140) return NextResponse.json({ error: "That name is too long." }, { status: 422 });
   if (hasKit && body.brand_kit_id !== null && !(typeof body.brand_kit_id === "string" && UUID.test(body.brand_kit_id))) {
     return NextResponse.json({ error: "brand_kit_id must be a kit id or null." }, { status: 422 });
   }
@@ -118,6 +122,20 @@ export async function PATCH(request: Request, context: Context) {
       metadata: { voiceId, voiceName: voice?.name ?? null },
     });
     response.voice = voice;
+  }
+
+  if (hasTitle) {
+    const saved = await renameProject(guard.actor.workspaceId, id, title);
+    if (!saved) return NextResponse.json({ error: "No such project." }, { status: 404 });
+    await recordQuietly({
+      workspaceId: guard.actor.workspaceId,
+      actor: guard.actor,
+      action: "project.renamed",
+      resourceType: "project",
+      resourceId: id,
+      metadata: { title },
+    });
+    response.title = title;
   }
 
   if (hasKit) {

@@ -436,6 +436,19 @@ export async function saveEditState(
   return Boolean(updated);
 }
 
+/**
+ * Renames a project. The slug is left alone on purpose: it is in every
+ * share link and embed already sent, and a rename should not break them.
+ */
+export async function renameProject(workspaceId: string, projectId: string, title: string): Promise<boolean> {
+  const [updated] = await getDb()
+    .update(s.projects)
+    .set({ title, updatedAt: new Date() })
+    .where(and(eq(s.projects.id, projectId), eq(s.projects.workspaceId, workspaceId), isNull(s.projects.deletedAt)))
+    .returning({ id: s.projects.id });
+  return Boolean(updated);
+}
+
 /** Sets, or clears, the brand kit a project's renders and share page wear. */
 export async function saveBrandKit(
   workspaceId: string,
