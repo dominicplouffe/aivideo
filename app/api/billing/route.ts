@@ -3,8 +3,8 @@ import { isDatabaseConfigured } from "@/lib/db/client";
 import { authorize, ForbiddenError } from "@/lib/auth/authorize";
 import { resolveActor, UnauthenticatedError } from "@/lib/auth/session";
 import { record } from "@/lib/audit/log";
-import { overageCents, usage } from "@/lib/billing/metering";
-import { planFor } from "@/lib/billing/plans";
+import { aiAllowance, overageCents, projectCapacity, usage } from "@/lib/billing/metering";
+import { formatPrice, planFor, projectLimit } from "@/lib/billing/plans";
 
 /**
  * Usage and the hard stop.
@@ -39,9 +39,29 @@ export async function GET(request: Request) {
 
     const snapshot = await usage(actor.workspaceId);
     const plan = planFor(snapshot.plan);
+    const [projects, suggestions, riff] = await Promise.all([
+      projectCapacity(actor.workspaceId),
+      aiAllowance(actor.workspaceId, "suggestion"),
+      aiAllowance(actor.workspaceId, "riff"),
+    ]);
 
     return NextResponse.json({
-      plan: { id: plan.id, name: plan.name, price_cents: plan.priceCents },
+      plan: {
+        id: plan.id,
+        name: plan.name,
+        price_cents: plan.priceCents,
+        price: formatPrice(snapshot.plan, snapshot.projectPacks),
+        term: plan.term,
+        packs: snapshot.projectPacks,
+        pack: plan.projectPack,
+        term_ends_at: snapshot.planTermEndsAt?.toISOString() ?? null,
+        own_keys: plan.ai.ownKeys,
+      },
+      projects: { used: projects.used, limit: projectLimit(snapshot.plan, snapshot.projectPacks) },
+      ai: {
+        suggestions: { used: suggestions.used, limit: suggestions.limit },
+        riff: { used: riff.used, limit: riff.limit },
+      },
       period_starts_at: snapshot.periodStartsAt.toISOString(),
       // Seconds, with minutes alongside for display. The API states the
       // unit it meters in; rounding is the caller's problem, once.

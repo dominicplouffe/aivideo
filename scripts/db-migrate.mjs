@@ -73,6 +73,25 @@ try {
     die("That database does not exist.", "Create it with `createdb demoriff`.");
   }
   die(`${code ? code + ": " : ""}${error?.message ?? error}`);
+}
+
+// Enum values first, outside any transaction. drizzle-kit applies pending
+// migrations in one transaction, and Postgres refuses to *use* an enum value
+// in the transaction that added it — so a migration that adds a plan and a
+// later one that assigns it fail together, silently, with the spinner
+// stopping and no message. Every `ADD VALUE IF NOT EXISTS` in the migration
+// files is run here on its own, idempotently, before drizzle-kit starts.
+try {
+  const { readdirSync, readFileSync } = await import("node:fs");
+  const dir = new URL("../lib/db/migrations/", import.meta.url);
+  for (const file of readdirSync(dir).filter((f) => f.endsWith(".sql")).sort()) {
+    const text = readFileSync(new URL(file, dir), "utf8");
+    for (const match of text.matchAll(/ALTER TYPE\s+[^;]*?ADD VALUE IF NOT EXISTS\s+'[^']+'/g)) {
+      await sql.unsafe(match[0]);
+    }
+  }
+} catch (error) {
+  die(`Could not add enum values ahead of the migration: ${error?.message ?? error}`);
 } finally {
   await sql.end({ timeout: 5 });
 }

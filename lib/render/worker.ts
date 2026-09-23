@@ -449,7 +449,9 @@ export async function processOne(options: RenderWorkerOptions): Promise<RenderOu
       resourceType: "render",
       resourceId: job.id,
       idempotencyKey: `render:${job.id}`,
-      metadata: { projectId: edl.projectId, locale: edl.locale },
+      // Charged once per project a period, for its longest render.
+      projectId: edl.projectId,
+      metadata: { locale: edl.locale },
     }).catch((error) => {
       // The video exists. Failing the job now would leave the customer with
       // a file they were told they did not get.
@@ -582,13 +584,13 @@ async function defaultNarrate(job: Job, edl: Edl) {
   const { listGlossary } = await import("@/lib/db/repositories/glossary");
   const { getRecording } = await import("@/lib/db/repositories/recordings");
   const { pronunciationsFor } = await import("@/lib/pipeline/glossary");
-  const { getProviders } = await import("@/lib/providers");
+  const { providersFor } = await import("@/lib/providers/for-workspace");
   const recording = project.recordingId ? await getRecording(job.workspaceId, project.recordingId) : null;
   return narrate({
     edl,
     project,
     workspaceId: job.workspaceId,
-    synthesis: getProviders().synthesis,
+    synthesis: (await providersFor(job.workspaceId)).providers.synthesis,
     pronunciations: pronunciationsFor(await listGlossary(job.workspaceId)),
     stillness: recording?.stillness ?? null,
     lookupVoice: getVoice,

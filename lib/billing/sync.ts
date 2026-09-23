@@ -2,7 +2,7 @@ import { eq, lt, sql } from "drizzle-orm";
 import { getDb } from "@/lib/db/client";
 import * as s from "@/lib/db/schema";
 import { recordQuietly } from "@/lib/audit/log";
-import { planFor } from "./plans";
+import { includedSeconds, planFor } from "./plans";
 import { grantsAccess, type Subscription } from "./stripe";
 
 /**
@@ -104,9 +104,11 @@ export async function applySubscription(
     ? "free"
     : subscription.plan;
   const definition = planFor(plan);
+  const packs = plan === "studio" ? subscription.packs : 0;
 
   const changed =
     workspace.plan !== plan ||
+    workspace.projectPacks !== packs ||
     workspace.subscriptionStatus !== subscription.status ||
     workspace.stripeSubscriptionId !== subscription.id;
 
@@ -114,8 +116,16 @@ export async function applySubscription(
     .update(s.workspaces)
     .set({
       plan,
+      projectPacks: packs,
       seatsTotal: definition.seats ?? workspace.seatsTotal,
-      videoSecondsLimit: definition.videoSecondsPerPeriod,
+      videoSecondsLimit: includedSeconds(plan, packs),
+      // A plan with a minimum term may first be cancelled when its first
+      // paid period ends: for the annual plan, a year from purchase.
+      planTermEndsAt: options.cancelled
+        ? null
+        : definition.minimumMonths > 0
+          ? (workspace.planTermEndsAt ?? subscription.currentPeriodEnd)
+          : null,
       stripeSubscriptionId: options.cancelled ? null : subscription.id,
       subscriptionStatus: options.cancelled ? "canceled" : subscription.status,
       subscriptionEndsAt: options.cancelled ? null : subscription.currentPeriodEnd,
@@ -135,6 +145,7 @@ export async function applySubscription(
       metadata: {
         from: workspace.plan,
         to: plan,
+        packs,
         status: subscription.status,
         via: "stripe-webhook",
       },

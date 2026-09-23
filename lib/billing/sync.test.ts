@@ -23,7 +23,8 @@ const CUSTOMER = "cus_meridian";
 const subscription = (over: Partial<Subscription> = {}): Subscription => ({
   id: "sub_1",
   customerId: CUSTOMER,
-  plan: "team",
+  plan: "studio",
+  packs: 0,
   status: "active",
   currentPeriodStart: new Date("2026-09-01T00:00:00Z"),
   currentPeriodEnd: new Date("2026-10-01T00:00:00Z"),
@@ -64,10 +65,10 @@ describe("applying what Stripe said", { skip: !RUN }, () => {
     assert.equal(outcome.ok, true);
 
     const after = await reload();
-    assert.equal(after.plan, "team");
+    assert.equal(after.plan, "studio");
     assert.equal(after.subscriptionStatus, "active");
     assert.equal(after.stripeSubscriptionId, "sub_1");
-    assert.equal(after.videoSecondsLimit, planFor("team").videoSecondsPerPeriod);
+    assert.equal(after.videoSecondsLimit, planFor("studio").videoSecondsPerPeriod);
   });
 
   it("does not reset usage already incurred, or take back a top-up", async () => {
@@ -101,7 +102,7 @@ describe("applying what Stripe said", { skip: !RUN }, () => {
     const after = await reload();
     // Locking somebody out of their own demos over an expired card costs
     // more goodwill than the invoice is worth.
-    assert.equal(after.plan, "team");
+    assert.equal(after.plan, "studio");
     assert.equal(after.subscriptionStatus, "past_due");
   });
 
@@ -129,7 +130,7 @@ describe("applying what Stripe said", { skip: !RUN }, () => {
     // The second call changed nothing, so it wrote nothing. An audit log
     // full of no-ops is an audit log nobody reads.
     assert.equal(entries.length, 1);
-    assert.equal(entries[0].metadata?.to, "team");
+    assert.equal(entries[0].metadata?.to, "studio");
   });
 
   /* ----------------------------------------------------------- retries */

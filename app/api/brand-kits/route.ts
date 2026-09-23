@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { assertBrandKitRoom } from "@/lib/api/plan-gate";
 import { isDatabaseConfigured } from "@/lib/db/client";
 import { needsDatabase, requireActor } from "@/lib/api/guard";
 import { recordQuietly } from "@/lib/audit/log";
@@ -42,6 +43,8 @@ export async function POST(request: Request) {
   if (existing.some((kit) => kit.name.toLowerCase() === name.toLowerCase())) {
     return NextResponse.json({ error: `There is already a kit called ${name}.` }, { status: 409 });
   }
+  const full = await assertBrandKitRoom(guard.actor.workspaceId, existing.length);
+  if (full) return full;
 
   const kit = await createBrandKit({
     workspaceId: guard.actor.workspaceId,

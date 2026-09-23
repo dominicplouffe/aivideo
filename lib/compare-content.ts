@@ -101,7 +101,7 @@ export const comparePages: ComparePage[] = [
     faqs: [
       {
         q: "Is DemoRiff more expensive?",
-        a: "At the entry tier, comparably. Trupeer's first paid plan and our Starter plan are within a few dollars of each other. The difference appears at team scale: our Team plan includes interactive demos, analytics and collaboration that would otherwise require separate tools. If you genuinely only need video plus docs for one person, the honest answer is that either tool will serve you and you should pick on the output quality you prefer.",
+        a: "Differently. Our Bring-your-own-keys plan is $20 a month for unlimited projects if you hold your own vendor accounts, which no tool in this category offers; Studio is $99 a month for ten projects with everything included. If you genuinely only need video plus docs for one person, the honest answer is that either tool will serve you and you should pick on the output quality you prefer.",
       },
       {
         q: "Can I try both on the same recording?",

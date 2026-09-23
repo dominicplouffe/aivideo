@@ -259,15 +259,17 @@ describe("render worker", { skip: RUN ? false : "DATABASE_URL and ffmpeg are bot
     assert.equal(await claim("w-webhook", ["webhook"]), null);
   });
 
-  it("meters a finished render in seconds, once", async () => {
+  it("meters a finished render in seconds, once per project", async () => {
     const sourcePath = await sourceVideo();
     const { usage } = await import("@/lib/billing/metering");
     // Measured as a delta: earlier tests in this file render too, and the
-    // workspace's usage is cumulative by design.
+    // workspace's usage is cumulative by design. A project of its own,
+    // because a project is charged once a period for its longest render,
+    // and the fixture project has been rendered above already.
     const before = (await usage(WS)).usedSeconds;
 
     const { job } = await enqueue({
-      workspaceId: WS, kind: "render", payload: { edl: edlFor(sourcePath) },
+      workspaceId: WS, kind: "render", payload: { edl: { ...edlFor(sourcePath), projectId: "prj_metered" } },
     });
 
     await processOne({ workerId: "w1", scratchRoot: dir });
@@ -281,10 +283,15 @@ describe("render worker", { skip: RUN ? false : "DATABASE_URL and ffmpeg are bot
     const { meter } = await import("@/lib/billing/metering");
     const repeat = await meter({
       workspaceId: WS, seconds: 6, resourceType: "render",
-      resourceId: job.id, idempotencyKey: `render:${job.id}`,
+      resourceId: job.id, idempotencyKey: `render:${job.id}`, projectId: "prj_metered",
     });
     assert.equal(repeat.ok && repeat.duplicate, true);
     assert.equal((await usage(WS)).usedSeconds, first.usedSeconds);
+
+    // The same project rendered again, no longer: a line of zero seconds.
+    await enqueue({ workspaceId: WS, kind: "render", payload: { edl: { ...edlFor(sourcePath), projectId: "prj_metered" } } });
+    await processOne({ workerId: "w1", scratchRoot: dir });
+    assert.equal((await usage(WS)).usedSeconds, first.usedSeconds, "a re-render of the same project is free");
   });
 
   it("refuses to start a render when the workspace asked to be stopped", async () => {

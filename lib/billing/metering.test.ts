@@ -38,7 +38,7 @@ beforeEach(async () => {
     id: WS,
     slug: "metering-test",
     name: "Metering Test",
-    plan: "team",
+    plan: "studio",
     videoSecondsLimit: 10 * HOUR,
     videoSecondsUsed: 0,
   });
@@ -66,7 +66,7 @@ describe("the plan catalogue", () => {
     // Enterprise moves are handled on the contract, not by this function
     // guessing at a price that does not exist.
     const result = prorate({
-      from: "team", to: "enterprise",
+      from: "studio", to: "enterprise",
       periodStartsAt: new Date("2026-01-01T00:00:00Z"),
       at: new Date("2026-01-15T00:00:00Z"),
     });
@@ -75,28 +75,37 @@ describe("the plan catalogue", () => {
 
   it("prorates an upgrade on whole days remaining", () => {
     const result = prorate({
-      from: "starter", to: "team",
+      from: "free", to: "studio",
       periodStartsAt: new Date("2026-01-01T00:00:00Z"),
       at: new Date("2026-01-16T12:00:00Z"),
     });
     // 15 days elapsed, so 14 remain after today. The difference is
-    // 11,000 cents over 30 days.
+    // 9,900 cents over 30 days.
     assert.equal(result.daysRemaining, 14);
-    assert.equal(result.chargeCents, Math.trunc((11_000 / 30) * 14));
+    assert.equal(result.chargeCents, Math.trunc((9_900 / 30) * 14));
   });
 
   it("returns a credit for a downgrade rather than a charge", () => {
     const result = prorate({
-      from: "team", to: "starter",
+      from: "studio", to: "free",
       periodStartsAt: new Date("2026-01-01T00:00:00Z"),
       at: new Date("2026-01-16T00:00:00Z"),
     });
     assert.equal(result.chargeCents < 0, true);
   });
 
+  it("leaves an annual plan to Stripe's own proration", () => {
+    const result = prorate({
+      from: "studio", to: "byok",
+      periodStartsAt: new Date("2026-01-01T00:00:00Z"),
+      at: new Date("2026-01-16T00:00:00Z"),
+    });
+    assert.equal(result.chargeCents, 0);
+  });
+
   it("charges nothing for a change on the last day of a period", () => {
     const result = prorate({
-      from: "starter", to: "team",
+      from: "free", to: "studio",
       periodStartsAt: new Date("2026-01-01T00:00:00Z"),
       at: new Date("2026-01-31T00:00:00Z"),
     });
@@ -303,5 +312,51 @@ describe("metering", { skip: RUN ? false : "DATABASE_URL not set" }, () => {
     // A billing screen rendering "NaN% used" is how a customer loses
     // confidence in every other number on the page.
     assert.equal((await usage(WS)).fractionUsed, 1);
+  });
+});
+
+describe("a project is charged once a period", { skip: RUN ? false : "DATABASE_URL not set" }, () => {
+  it("charges the longest render, not every render", async () => {
+    const { meter, usage, aiAllowance, recordAiAction, projectCapacity } = await import("./metering");
+    const project = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const first = await meter({ workspaceId: WS, seconds: 100, resourceType: "render", resourceId: "job-1", idempotencyKey: "render:job-1", projectId: project });
+    assert.ok(first.ok && first.charged === 100);
+    // A re-render after fixing a word, a little shorter: nothing more.
+    const second = await meter({ workspaceId: WS, seconds: 95, resourceType: "render", resourceId: "job-2", idempotencyKey: "render:job-2", projectId: project });
+    assert.ok(second.ok && second.charged === 0);
+    // A longer cut: only the growth.
+    const third = await meter({ workspaceId: WS, seconds: 130, resourceType: "render", resourceId: "job-3", idempotencyKey: "render:job-3", projectId: project });
+    assert.ok(third.ok && third.charged === 30);
+    assert.equal((await usage(WS)).usedSeconds, 130);
+    // A different project is its own line.
+    const other = await meter({ workspaceId: WS, seconds: 40, resourceType: "render", resourceId: "job-4", idempotencyKey: "render:job-4", projectId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb" });
+    assert.ok(other.ok && other.charged === 40);
+    assert.equal((await usage(WS)).usedSeconds, 170);
+
+    // AI actions count against the plan's cap, from the ledger.
+    const before = await aiAllowance(WS, "suggestion");
+    assert.equal(before.used, 0);
+    await recordAiAction({ workspaceId: WS, action: "suggestion", resourceId: project, idempotencyKey: "ai:suggestion:1" });
+    await recordAiAction({ workspaceId: WS, action: "suggestion", resourceId: project, idempotencyKey: "ai:suggestion:1" });
+    await recordAiAction({ workspaceId: WS, action: "riff", resourceId: project, idempotencyKey: "ai:riff:1" });
+    const after = await aiAllowance(WS, "suggestion");
+    assert.equal(after.used, 1, "the same key twice is one action");
+    assert.equal(after.limit, 100, "Studio's cap");
+    assert.equal((await aiAllowance(WS, "riff")).used, 1);
+
+    // Ten projects on Studio, no packs.
+    const capacity = await projectCapacity(WS);
+    assert.equal(capacity.limit, 10);
+    assert.equal(capacity.ok, true);
+  });
+
+  it("stops a Free workspace at its allowance without a hard-stop setting", async () => {
+    const { meter, usage } = await import("./metering");
+    await getDb().update(s.workspaces).set({ plan: "free", videoSecondsLimit: 600 }).where(eq(s.workspaces.id, WS));
+    assert.equal((await usage(WS)).blocked, false);
+    await meter({ workspaceId: WS, seconds: 600, resourceType: "render", resourceId: "job-f", idempotencyKey: "render:job-f", projectId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc" });
+    assert.equal((await usage(WS)).blocked, true, "Free has no overage, so it stops");
+    await getDb().update(s.workspaces).set({ plan: "studio" }).where(eq(s.workspaces.id, WS));
+    assert.equal((await usage(WS)).blocked, false, "Studio bills overage unless asked to stop");
   });
 });

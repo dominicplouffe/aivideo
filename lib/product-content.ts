@@ -615,7 +615,7 @@ export const productPages: ProductPage[] = [
       },
     ],
     specs: [
-      { label: "Kits per workspace", value: "1 on Starter, 5 on Team, unlimited on Scale and Enterprise" },
+      { label: "Kits per workspace", value: "1 on Free, unlimited on every paid plan" },
       { label: "Import sources", value: "Figma file, website URL, brand guidelines PDF, manual" },
       { label: "Fonts", value: "Upload your licensed font files, or choose from 900 web fonts" },
       { label: "Music", value: "Royalty-free library included, or upload your own licensed beds" },

@@ -35,6 +35,8 @@ export interface Subscription {
   id: string;
   customerId: string;
   plan: Plan;
+  /** Packs of extra projects on the subscription: the quantity of the pack price's item. */
+  packs: number;
   status: "trialing" | "active" | "past_due" | "canceled" | "unpaid" | "incomplete";
   currentPeriodStart: Date;
   currentPeriodEnd: Date;
@@ -47,6 +49,10 @@ export interface Subscription {
  * Driven by environment rather than hardcoded ids, because the same code
  * runs against test-mode and live-mode prices with different identifiers,
  * and an id baked into a build is an id that is wrong in one of them.
+ *
+ *   STRIPE_PRICE_BYOK         the yearly price for Bring your own keys
+ *   STRIPE_PRICE_STUDIO       the monthly price for Studio
+ *   STRIPE_PRICE_STUDIO_PACK  the monthly price for one pack of ten projects
  */
 export function planForPrice(priceId: string): Plan | null {
   for (const plan of Object.keys(PLAN_CATALOGUE) as Plan[]) {
@@ -54,6 +60,37 @@ export function planForPrice(priceId: string): Plan | null {
     if (configured && configured === priceId) return plan;
   }
   return null;
+}
+
+/** The price id for a plan, from the environment. Null when not configured. */
+export function priceForPlan(plan: Plan): string | null {
+  return process.env[`STRIPE_PRICE_${plan.toUpperCase()}`]?.trim() || null;
+}
+
+export function packPriceId(): string | null {
+  return process.env.STRIPE_PRICE_STUDIO_PACK?.trim() || null;
+}
+
+/** Reads plan and packs out of a subscription's items, however they are ordered. */
+export function readItems(items: { price?: { id?: string }; quantity?: number; id?: string }[]): {
+  plan: Plan | null;
+  packs: number;
+  packItemId: string | null;
+} {
+  let plan: Plan | null = null;
+  let packs = 0;
+  let packItemId: string | null = null;
+  const pack = packPriceId();
+  for (const item of items) {
+    const priceId = item.price?.id ?? "";
+    if (pack && priceId === pack) {
+      packs += Number(item.quantity ?? 1);
+      packItemId = item.id ?? null;
+      continue;
+    }
+    plan ??= planForPrice(priceId);
+  }
+  return { plan, packs, packItemId };
 }
 
 // --- webhook signatures ----------------------------------------------------
@@ -210,6 +247,109 @@ export class Stripe {
   }
 
   /**
+   * A Checkout session for a plan, and for Studio the packs to start with.
+   *
+   * The workspace rides along as `client_reference_id`; the webhook reads
+   * it back from `checkout.session.completed`, which is the one moment a
+   * workspace learns its Stripe customer. An existing customer is reused so
+   * a workspace never ends up with two.
+   */
+  async createCheckoutSession(input: {
+    workspaceId: string;
+    customerId: string | null;
+    customerEmail: string | null;
+    plan: Plan;
+    packs: number;
+    successUrl: string;
+    cancelUrl: string;
+  }): Promise<string> {
+    const price = priceForPlan(input.plan);
+    if (!price) {
+      throw new ProviderError(`No Stripe price is configured for the ${input.plan} plan (STRIPE_PRICE_${input.plan.toUpperCase()}).`, {
+        provider: this.name,
+        retryable: false,
+      });
+    }
+    const form: Record<string, string> = {
+      mode: "subscription",
+      client_reference_id: input.workspaceId,
+      success_url: input.successUrl,
+      cancel_url: input.cancelUrl,
+      "line_items[0][price]": price,
+      "line_items[0][quantity]": "1",
+      // Stripe collects the tax id and address; we never see a card number.
+      "tax_id_collection[enabled]": "true",
+      allow_promotion_codes: "true",
+    };
+    const pack = packPriceId();
+    if (input.plan === "studio" && input.packs > 0 && pack) {
+      form["line_items[1][price]"] = pack;
+      form["line_items[1][quantity]"] = String(input.packs);
+    }
+    if (input.customerId) form.customer = input.customerId;
+    else if (input.customerEmail) form.customer_email = input.customerEmail;
+    const payload = await this.call("POST", "/v1/checkout/sessions", {
+      form,
+      idempotencyKey: `checkout:${input.workspaceId}:${input.plan}:${input.packs}:${Date.now().toString(36).slice(0, 6)}`,
+    });
+    const url = payload.url;
+    if (typeof url !== "string") {
+      throw new ProviderError("Stripe did not return a checkout URL.", { provider: this.name, retryable: false });
+    }
+    return url;
+  }
+
+  /**
+   * Sets how many packs a Studio subscription carries. Adds the pack item
+   * when there is none yet, removes it at zero, otherwise changes its
+   * quantity; Stripe prorates. The webhook then writes the new count.
+   */
+  async setPacks(subscriptionId: string, packs: number): Promise<void> {
+    const pack = packPriceId();
+    if (!pack) {
+      throw new ProviderError("No Stripe price is configured for project packs (STRIPE_PRICE_STUDIO_PACK).", {
+        provider: this.name,
+        retryable: false,
+      });
+    }
+    const payload = await this.call("GET", `/v1/subscriptions/${encodeURIComponent(subscriptionId)}`);
+    const items = ((payload.items ?? {}) as { data?: { id?: string; price?: { id?: string }; quantity?: number }[] }).data ?? [];
+    const { packItemId } = readItems(items);
+    const key = `packs:${subscriptionId}:${packs}`;
+    if (packItemId) {
+      if (packs === 0) {
+        await this.call("POST", `/v1/subscription_items/${encodeURIComponent(packItemId)}`, {
+          form: { quantity: "0", proration_behavior: "create_prorations" },
+          idempotencyKey: key,
+        });
+        // Stripe deletes an item at quantity zero only through DELETE.
+        await this.call("POST", `/v1/subscriptions/${encodeURIComponent(subscriptionId)}`, {
+          form: { [`items[0][id]`]: packItemId, [`items[0][deleted]`]: "true", proration_behavior: "create_prorations" },
+          idempotencyKey: `${key}:remove`,
+        });
+      } else {
+        await this.call("POST", `/v1/subscription_items/${encodeURIComponent(packItemId)}`, {
+          form: { quantity: String(packs), proration_behavior: "create_prorations" },
+          idempotencyKey: key,
+        });
+      }
+    } else if (packs > 0) {
+      await this.call("POST", "/v1/subscription_items", {
+        form: { subscription: subscriptionId, price: pack, quantity: String(packs), proration_behavior: "create_prorations" },
+        idempotencyKey: key,
+      });
+    }
+  }
+
+  /** Asks Stripe to end a subscription when its current period does. */
+  async cancelAtPeriodEnd(subscriptionId: string): Promise<void> {
+    await this.call("POST", `/v1/subscriptions/${encodeURIComponent(subscriptionId)}`, {
+      form: { cancel_at_period_end: "true" },
+      idempotencyKey: `cancel:${subscriptionId}`,
+    });
+  }
+
+  /**
    * Reports metered usage for a period.
    *
    * Seconds, matching the ledger exactly. Converting to minutes here would
@@ -260,9 +400,9 @@ export class Stripe {
   }
 }
 
-function toSubscription(payload: Record<string, unknown>): Subscription {
-  const items = (payload.items ?? {}) as { data?: { price?: { id?: string } }[] };
-  const priceId = items.data?.[0]?.price?.id ?? "";
+export function toSubscription(payload: Record<string, unknown>): Subscription {
+  const items = (payload.items ?? {}) as { data?: { id?: string; price?: { id?: string }; quantity?: number }[] };
+  const { plan, packs } = readItems(items.data ?? []);
 
   return {
     id: String(payload.id ?? ""),
@@ -271,7 +411,8 @@ function toSubscription(payload: Record<string, unknown>): Subscription {
     // at. Guessing high charges somebody for something they did not buy;
     // guessing low gives away a plan. Free is the one that fails safe and is
     // visible immediately.
-    plan: planForPrice(priceId) ?? "free",
+    plan: plan ?? "free",
+    packs,
     status: (payload.status as Subscription["status"]) ?? "incomplete",
     currentPeriodStart: new Date(Number(payload.current_period_start ?? 0) * 1000),
     currentPeriodEnd: new Date(Number(payload.current_period_end ?? 0) * 1000),

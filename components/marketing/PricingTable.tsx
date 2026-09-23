@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
 import { plans, compareGroups, type Plan } from "@/lib/pricing";
@@ -9,64 +9,23 @@ import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Primitives";
 
 export function PricingPlans() {
-  const [annual, setAnnual] = useState(true);
-
   return (
     <div>
-      <BillingToggle annual={annual} onChange={setAnnual} />
-
-      <div className="mt-12 grid gap-4 lg:grid-cols-3 xl:grid-cols-5">
+      <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-4">
         {plans.map((p) => (
-          <PlanCard key={p.id} plan={p} annual={annual} />
+          <PlanCard key={p.id} plan={p} />
         ))}
       </div>
 
       <p className="mt-8 text-center text-[0.8125rem] text-fg-faint">
-        All prices in USD. Annual billing is charged once a year and saves roughly 18%.
-        Written guides are unlimited on every plan, including Free.
+        All prices in USD. Studio is billed monthly; Bring your own keys is billed yearly. Written
+        guides are unlimited on every plan, including Free.
       </p>
     </div>
   );
 }
 
-export function BillingToggle({
-  annual,
-  onChange,
-}: {
-  annual: boolean;
-  onChange: (v: boolean) => void;
-}) {
-  return (
-    <div className="flex items-center justify-center gap-4">
-      <div className="inline-flex items-center gap-1 rounded-full border border-[var(--line)] bg-ink-900 p-1">
-        <button
-          type="button"
-          onClick={() => onChange(false)}
-          className={cn(
-            "rounded-full px-4 py-1.5 text-[0.8125rem] font-medium transition-colors",
-            !annual ? "bg-ink-700 text-fg-strong" : "text-fg-subtle hover:text-fg",
-          )}
-        >
-          Monthly
-        </button>
-        <button
-          type="button"
-          onClick={() => onChange(true)}
-          className={cn(
-            "inline-flex items-center gap-2 rounded-full px-4 py-1.5 text-[0.8125rem] font-medium transition-colors",
-            annual ? "bg-ink-700 text-fg-strong" : "text-fg-subtle hover:text-fg",
-          )}
-        >
-          Annual
-          <span className="rounded-full bg-mint-500/18 px-1.5 py-0.5 text-2xs text-mint-400">−18%</span>
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function PlanCard({ plan, annual }: { plan: Plan; annual: boolean }) {
-  const price = annual ? plan.annual : plan.monthly;
+function PlanCard({ plan }: { plan: Plan }) {
 
   return (
     <div
@@ -89,26 +48,17 @@ function PlanCard({ plan, annual }: { plan: Plan; annual: boolean }) {
       </p>
 
       <div className="mt-5 flex items-baseline gap-1.5">
-        {price === null ? (
-          <span className="text-[1.75rem] leading-none font-semibold tracking-tight text-fg-strong">
-            Custom
-          </span>
-        ) : (
-          <>
-            <span className="text-[2.25rem] leading-none font-semibold tracking-[-0.03em] text-fg-strong tabular-nums">
-              ${price}
-            </span>
-            <span className="text-[0.8125rem] text-fg-subtle">/mo</span>
-          </>
-        )}
+        <span
+          className={cn(
+            "leading-none font-semibold tracking-[-0.03em] text-fg-strong tabular-nums",
+            plan.price.startsWith("$") ? "text-[2.25rem]" : "text-[1.75rem]",
+          )}
+        >
+          {plan.price}
+        </span>
+        {plan.price.startsWith("$") ? <span className="text-[0.8125rem] text-fg-subtle">/mo</span> : null}
       </div>
-      <p className="mt-1.5 text-2xs text-fg-faint">
-        {price === null
-          ? "Annual agreement · volume based"
-          : annual
-            ? `Billed annually · ${plan.seatNote}`
-            : `Billed monthly · ${plan.seatNote}`}
-      </p>
+      <p className="mt-1.5 text-2xs text-fg-faint">{plan.priceNote}</p>
 
       <Button
         href={plan.cta.href}
@@ -164,7 +114,7 @@ export function ComparisonTable() {
                 <div className="flex flex-col gap-1">
                   <span className="text-[0.875rem] font-semibold text-fg-strong">{p.name}</span>
                   <span className="text-2xs text-fg-faint">
-                    {p.monthly === null ? "Custom" : p.monthly === 0 ? "Free" : `from $${p.annual}/mo`}
+                    {p.price.startsWith("$") ? `${p.price}/mo` : p.price}
                   </span>
                   <Link
                     href={p.cta.href}
@@ -175,7 +125,7 @@ export function ComparisonTable() {
                         : "border border-[var(--line-strong)] text-fg hover:bg-[color-mix(in_oklab,var(--color-fg)_6%,transparent)]",
                     )}
                   >
-                    {p.monthly === null ? "Contact" : "Choose"}
+                    {p.id === "enterprise" ? "Contact" : "Choose"}
                   </Link>
                 </div>
               </th>
@@ -187,9 +137,9 @@ export function ComparisonTable() {
           {compareGroups.map((group) => {
             const open = openGroups.includes(group.group);
             return (
-              <>
-                <tr key={group.group}>
-                  <td colSpan={6} className="px-0 pt-8 pb-2">
+              <Fragment key={group.group}>
+                <tr>
+                  <td colSpan={5} className="px-0 pt-8 pb-2">
                     <button
                       type="button"
                       onClick={() => toggle(group.group)}
@@ -238,7 +188,7 @@ export function ComparisonTable() {
                       </tr>
                     ))
                   : null}
-              </>
+              </Fragment>
             );
           })}
         </tbody>
@@ -257,7 +207,7 @@ export function MinuteExplainer() {
     { label: "Build the interactive tour", cost: "0 minutes", note: "Same source, no extra charge" },
     { label: "Localize into 34 languages", cost: "0 minutes", note: "Translations are never re-billed" },
     { label: "Cut 6 vertical social clips", cost: "0 minutes", note: "Derived from a video you paid for" },
-    { label: "Re-edit and re-render this month", cost: "0 minutes", note: "Free within the billing period" },
+    { label: "Re-edit and re-render this month", cost: "0 minutes", note: "A project counts once a period, at its longest render" },
   ];
   return (
     <div className="overflow-hidden rounded-2xl border border-[var(--line)]">

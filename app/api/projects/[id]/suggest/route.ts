@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+import { providersFor } from "@/lib/providers/for-workspace";
+import { assertAiRoom, noteAiAction } from "@/lib/api/plan-gate";
 import { isDatabaseConfigured } from "@/lib/db/client";
 import { needsDatabase, requireActor } from "@/lib/api/guard";
 import { getProjectById } from "@/lib/db/repositories/projects";
@@ -34,13 +36,14 @@ export async function POST(request: Request, context: Context) {
     return NextResponse.json({ error: 'goal must be "tighten", or "target" with target_sec.' }, { status: 422 });
   }
 
-  const key = process.env.ANTHROPIC_API_KEY?.trim();
-  if (!key) {
-    return NextResponse.json(
-      { error: "Suggestions need a model. Set ANTHROPIC_API_KEY for this deployment." },
-      { status: 503 },
-    );
+  const capped = await assertAiRoom(guard.actor.workspaceId, "suggestion");
+  if (capped) return capped;
+
+  const { anthropic } = await providersFor(guard.actor.workspaceId);
+  if (anthropic.key === null) {
+    return NextResponse.json({ error: anthropic.reason }, { status: anthropic.reason.includes("Settings") ? 409 : 503 });
   }
+  const key = anthropic.key;
 
   const { id } = await context.params;
   const project = await getProjectById(guard.actor.workspaceId, id);
@@ -85,6 +88,7 @@ export async function POST(request: Request, context: Context) {
     const options = proposal.options
       .map((raw, i) => optionFromProposal(project, state, raw, goal, `${goal.kind}-${i}`))
       .filter((o): o is NonNullable<typeof o> => o !== null);
+    await noteAiAction({ workspaceId: guard.actor.workspaceId, action: "suggestion", resourceId: id, key: `${id}:${Date.now()}` });
     return NextResponse.json({ options, note: proposal.note, before_sec: durationSec });
   } catch (error) {
     return NextResponse.json(

@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+import { providersFor } from "@/lib/providers/for-workspace";
+import { assertAiRoom, noteAiAction } from "@/lib/api/plan-gate";
 import { isDatabaseConfigured } from "@/lib/db/client";
 import { needsDatabase, requireActor } from "@/lib/api/guard";
 import { getProjectById } from "@/lib/db/repositories/projects";
@@ -53,6 +55,8 @@ export async function POST(request: Request, context: Context) {
   const { id } = await context.params;
   const project = await getProjectById(guard.actor.workspaceId, id);
   if (!project) return NextResponse.json({ error: "No such project." }, { status: 404 });
+  const capped = await assertAiRoom(guard.actor.workspaceId, "riff");
+  if (capped) return capped;
 
   const state = hydrateEditState(project.editState);
 
@@ -80,8 +84,11 @@ export async function POST(request: Request, context: Context) {
         .slice(-8)
     : [];
 
-  const key = process.env.ANTHROPIC_API_KEY?.trim();
-  const assistant = key ? createAnthropicAssistant({ apiKey: key }) : offlineAssistant;
+  const { anthropic } = await providersFor(guard.actor.workspaceId);
+  if (anthropic.key === null && anthropic.reason.includes("Settings")) {
+    return NextResponse.json({ error: anthropic.reason }, { status: 409 });
+  }
+  const assistant = anthropic.key ? createAnthropicAssistant({ apiKey: anthropic.key }) : offlineAssistant;
 
   try {
     const reply = await assistant.respond({
@@ -94,6 +101,7 @@ export async function POST(request: Request, context: Context) {
       message,
     });
 
+    await noteAiAction({ workspaceId: guard.actor.workspaceId, action: "riff", resourceId: id, key: `${id}:${Date.now()}` });
     return NextResponse.json({
       reply: reply.text,
       proposal: reply.proposal ?? null,

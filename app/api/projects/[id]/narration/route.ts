@@ -3,7 +3,8 @@ import { isDatabaseConfigured } from "@/lib/db/client";
 import { needsDatabase, requireActor } from "@/lib/api/guard";
 import { getProjectById } from "@/lib/db/repositories/projects";
 import { getVoice } from "@/lib/db/repositories/voices";
-import { getProviders, providerReport } from "@/lib/providers";
+import { providerReport } from "@/lib/providers";
+import { capabilityLive, providersFor } from "@/lib/providers/for-workspace";
 import { ProviderError } from "@/lib/providers/errors";
 import { hydrateEditState } from "@/lib/edit-state";
 import { buildEdl, segmentOutputSeconds } from "@/lib/render/edl";
@@ -43,10 +44,11 @@ export async function POST(request: Request, context: Context) {
     return NextResponse.json({ error: "segment_index must be a chapter index." }, { status: 422 });
   }
 
-  const synthesis = providerReport().find((entry) => entry.capability === "synthesis");
-  if (!synthesis?.live) {
+  const resolved = await providersFor(guard.actor.workspaceId);
+  const synthesis = capabilityLive(resolved, "synthesis", providerReport());
+  if (!synthesis.live) {
     return NextResponse.json(
-      { error: "Synthesis is not configured, so there is no voice to preview." },
+      { error: synthesis.hint || "Synthesis is not configured, so there is no voice to preview." },
       { status: 409 },
     );
   }
@@ -100,7 +102,7 @@ export async function POST(request: Request, context: Context) {
 
   try {
     const pronunciations = pronunciationsFor(await listGlossary(guard.actor.workspaceId));
-    const clip = await getProviders().synthesis.synthesize({
+    const clip = await resolved.providers.synthesis.synthesize({
       text,
       voiceId: voice.providerVoiceId,
       locale: edl.locale,

@@ -3,7 +3,8 @@ import { isDatabaseConfigured } from "@/lib/db/client";
 import { record } from "@/lib/audit/log";
 import { authorize, ForbiddenError } from "@/lib/auth/authorize";
 import { resolveActor, UnauthenticatedError } from "@/lib/auth/session";
-import { getProviders, providerReport } from "@/lib/providers";
+import { providerReport } from "@/lib/providers";
+import { capabilityLive, providersFor } from "@/lib/providers/for-workspace";
 
 /**
  * Voices, and the consent action that matters most.
@@ -90,19 +91,20 @@ async function sync(request: Request): Promise<NextResponse> {
     throw error;
   }
 
-  const synthesis = providerReport().find((entry) => entry.capability === "synthesis");
-  if (!synthesis?.live) {
+  const resolved = await providersFor(actor.workspaceId);
+  const synthesis = capabilityLive(resolved, "synthesis", providerReport());
+  if (!synthesis.live) {
     return NextResponse.json(
       {
-        error: `Synthesis is not configured, so there is no catalogue to import. Set ${
-          synthesis?.missing.join(" and ") || "a synthesis provider"
-        } first.`,
+        error: resolved.source === "workspace"
+          ? synthesis.hint
+          : `Synthesis is not configured, so there is no catalogue to import. Set ${synthesis.hint || "a synthesis provider"} first.`,
       },
       { status: 409 },
     );
   }
 
-  const catalogue = await getProviders().synthesis.listVoices();
+  const catalogue = await resolved.providers.synthesis.listVoices();
   const { syncStudioVoices } = await import("@/lib/db/repositories/voices");
   const result = await syncStudioVoices(catalogue);
 
@@ -113,10 +115,10 @@ async function sync(request: Request): Promise<NextResponse> {
     resourceType: "voice",
     resourceId: null,
     ip: request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? null,
-    metadata: { provider: getProviders().synthesis.name, ...result },
+    metadata: { provider: resolved.providers.synthesis.name, ...result },
   });
 
-  return NextResponse.json({ ...result, provider: getProviders().synthesis.name });
+  return NextResponse.json({ ...result, provider: resolved.providers.synthesis.name });
 }
 
 export async function POST(request: Request) {

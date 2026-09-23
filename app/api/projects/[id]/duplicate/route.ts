@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { assertProjectRoom } from "@/lib/api/plan-gate";
 import { isDatabaseConfigured } from "@/lib/db/client";
 import { needsDatabase, requireActor } from "@/lib/api/guard";
 import { duplicateProject } from "@/lib/db/repositories/projects";
@@ -16,6 +17,9 @@ export async function POST(request: Request, context: Context) {
   if (!isDatabaseConfigured()) return needsDatabase();
   const guard = await requireActor(request, "project.create");
   if ("response" in guard) return guard.response;
+
+  const full = await assertProjectRoom(guard.actor.workspaceId);
+  if (full) return full;
 
   const { id } = await context.params;
   const outcome = await duplicateProject(guard.actor.workspaceId, id, guard.actor.memberId);

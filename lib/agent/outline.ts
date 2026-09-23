@@ -236,8 +236,7 @@ export class MockPlanner implements OutlinePlanner {
   }
 }
 
-export function getPlanner(): OutlinePlanner {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
+export function getPlanner(apiKey: string | null = process.env.ANTHROPIC_API_KEY ?? null): OutlinePlanner {
   if (apiKey && process.env.DEMORIFF_PROVIDERS === "live") {
     return new AnthropicPlanner({ apiKey });
   }

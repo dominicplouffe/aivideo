@@ -1,8 +1,8 @@
-import { and, eq, sql, sum } from "drizzle-orm";
+import { and, count, eq, isNull, sql, sum } from "drizzle-orm";
 import { getDb } from "@/lib/db/client";
 import * as s from "@/lib/db/schema";
 import { recordQuietly } from "@/lib/audit/log";
-import { planFor, type Plan } from "./plans";
+import { includedSeconds, normalizePlan, planFor, projectLimit, type Plan } from "./plans";
 
 /**
  * Metering.
@@ -30,6 +30,10 @@ import { planFor, type Plan } from "./plans";
 export interface UsageSnapshot {
   workspaceId: string;
   plan: Plan;
+  /** Packs of extra projects bought on Studio. */
+  projectPacks: number;
+  /** When a plan with a minimum term may first be cancelled. */
+  planTermEndsAt: Date | null;
   periodStartsAt: Date;
   /** Included allowance for the period. */
   limitSeconds: number;
@@ -56,12 +60,15 @@ export async function usage(workspaceId: string): Promise<UsageSnapshot> {
 }
 
 function snapshotOf(row: typeof s.workspaces.$inferSelect): UsageSnapshot {
+  const plan = normalizePlan(row.plan);
   const allowance = row.videoSecondsLimit + row.topupSeconds;
   const remaining = allowance - row.videoSecondsUsed;
 
   return {
     workspaceId: row.id,
-    plan: row.plan as Plan,
+    plan,
+    projectPacks: row.projectPacks,
+    planTermEndsAt: row.planTermEndsAt,
     periodStartsAt: row.periodStartsAt,
     limitSeconds: row.videoSecondsLimit,
     topupSeconds: row.topupSeconds,
@@ -71,7 +78,9 @@ function snapshotOf(row: typeof s.workspaces.$inferSelect): UsageSnapshot {
     // progress bar is how a billing screen renders "NaN% used".
     fractionUsed: allowance > 0 ? row.videoSecondsUsed / allowance : 1,
     hardStopAtLimit: row.hardStopAtLimit,
-    blocked: row.hardStopAtLimit && remaining <= 0,
+    // Stopped when the person asked for a stop, or when the plan has no
+    // overage to bill: a plan with no card on file cannot run up a bill.
+    blocked: remaining <= 0 && (row.hardStopAtLimit || planFor(plan).overageCentsPerSecond === null),
   };
 }
 
@@ -91,6 +100,13 @@ export interface MeterInput {
    * first.
    */
   idempotencyKey: string;
+  /**
+   * The project the render belongs to. With it, a project is charged once
+   * a period, for its longest render: a re-render after fixing one word
+   * costs nothing, as the pricing page has always promised. Without it,
+   * every render is charged in full.
+   */
+  projectId?: string;
   metadata?: Record<string, unknown>;
 }
 
@@ -130,17 +146,38 @@ export async function meter(input: MeterInput): Promise<MeterOutcome> {
 
     if (!row) throw new Error(`Unknown workspace ${input.workspaceId}`);
 
+    // What this project has already been charged this period. Each of its
+    // renders is a ledger line for the *increase* over the longest so far,
+    // so the lines still sum to what the counter says and a re-render of
+    // the same length is a line that reads "0 seconds".
+    let charge = seconds;
+    if (input.projectId) {
+      const [prior] = await tx
+        .select({ total: sum(s.usageEvents.seconds) })
+        .from(s.usageEvents)
+        .where(
+          and(
+            eq(s.usageEvents.workspaceId, input.workspaceId),
+            eq(s.usageEvents.periodStartsAt, row.periodStartsAt),
+            eq(s.usageEvents.kind, "render"),
+            eq(s.usageEvents.resourceType, "project"),
+            eq(s.usageEvents.resourceId, input.projectId),
+          ),
+        );
+      charge = Math.max(0, seconds - Number(prior?.total ?? 0));
+    }
+
     const inserted = await tx
       .insert(s.usageEvents)
       .values({
         workspaceId: input.workspaceId,
         kind: "render",
-        seconds,
-        resourceType: input.resourceType,
-        resourceId: input.resourceId,
+        seconds: charge,
+        resourceType: input.projectId ? "project" : input.resourceType,
+        resourceId: input.projectId ?? input.resourceId,
         periodStartsAt: row.periodStartsAt,
         idempotencyKey: input.idempotencyKey,
-        metadata: input.metadata ?? null,
+        metadata: { ...(input.metadata ?? {}), renderSeconds: seconds, [input.resourceType]: input.resourceId },
       })
       .onConflictDoNothing({ target: [s.usageEvents.workspaceId, s.usageEvents.idempotencyKey] })
       .returning({ id: s.usageEvents.id });
@@ -163,7 +200,7 @@ export async function meter(input: MeterInput): Promise<MeterOutcome> {
 
     const [updated] = await tx
       .update(s.workspaces)
-      .set({ videoSecondsUsed: sql`${s.workspaces.videoSecondsUsed} + ${seconds}` })
+      .set({ videoSecondsUsed: sql`${s.workspaces.videoSecondsUsed} + ${charge}` })
       .where(eq(s.workspaces.id, input.workspaceId))
       .returning();
 
@@ -175,7 +212,7 @@ export async function meter(input: MeterInput): Promise<MeterOutcome> {
       snapshot.fractionUsed >= NOTICE_THRESHOLD &&
       updated.usageNoticeSentAt === null;
 
-    return { ok: true as const, charged: seconds, duplicate: false, snapshot, noticeDue };
+    return { ok: true as const, charged: charge, duplicate: false, snapshot, noticeDue };
   });
 }
 
@@ -327,3 +364,89 @@ export function overageCents(snapshot: UsageSnapshot): number {
   const over = Math.max(0, -snapshot.remainingSeconds);
   return over * rate;
 }
+
+/* ------------------------------------------------------------ AI actions */
+
+export type AiAction = "suggestion" | "riff";
+
+export interface AiAllowance {
+  action: AiAction;
+  used: number;
+  /** Null is unlimited. */
+  limit: number | null;
+  ok: boolean;
+}
+
+/**
+ * How many of an AI action the period has seen, against the plan's cap.
+ *
+ * Counted from the ledger, like everything else billed: a row per action,
+ * zero seconds, so "why am I out of suggestions?" is answerable with a list.
+ */
+export async function aiAllowance(workspaceId: string, action: AiAction): Promise<AiAllowance> {
+  const snapshot = await usage(workspaceId);
+  const definition = planFor(snapshot.plan);
+  const limit = action === "suggestion" ? definition.ai.suggestionsPerPeriod : definition.ai.riffMessagesPerPeriod;
+  const [row] = await getDb()
+    .select({ n: count() })
+    .from(s.usageEvents)
+    .where(
+      and(
+        eq(s.usageEvents.workspaceId, workspaceId),
+        eq(s.usageEvents.periodStartsAt, snapshot.periodStartsAt),
+        eq(s.usageEvents.kind, "ai"),
+        eq(s.usageEvents.resourceType, action),
+      ),
+    );
+  const used = Number(row?.n ?? 0);
+  return { action, used, limit, ok: limit === null || used < limit };
+}
+
+/** Records one AI action against the period. Called after the work succeeded. */
+export async function recordAiAction(input: {
+  workspaceId: string;
+  action: AiAction;
+  resourceId: string;
+  idempotencyKey: string;
+}): Promise<void> {
+  const snapshot = await usage(input.workspaceId);
+  await getDb()
+    .insert(s.usageEvents)
+    .values({
+      workspaceId: input.workspaceId,
+      kind: "ai",
+      seconds: 0,
+      resourceType: input.action,
+      resourceId: input.resourceId,
+      periodStartsAt: snapshot.periodStartsAt,
+      idempotencyKey: input.idempotencyKey,
+      metadata: null,
+    })
+    .onConflictDoNothing({ target: [s.usageEvents.workspaceId, s.usageEvents.idempotencyKey] });
+}
+
+/* -------------------------------------------------------------- projects */
+
+export interface ProjectCapacity {
+  used: number;
+  /** Null is unlimited. */
+  limit: number | null;
+  ok: boolean;
+  plan: Plan;
+  packs: number;
+}
+
+/** Whether the workspace may hold one more project. */
+export async function projectCapacity(workspaceId: string): Promise<ProjectCapacity> {
+  const snapshot = await usage(workspaceId);
+  const limit = projectLimit(snapshot.plan, snapshot.projectPacks);
+  const [row] = await getDb()
+    .select({ n: count() })
+    .from(s.projects)
+    .where(and(eq(s.projects.workspaceId, workspaceId), isNull(s.projects.deletedAt)));
+  const used = Number(row?.n ?? 0);
+  return { used, limit, ok: limit === null || used < limit, plan: snapshot.plan, packs: snapshot.projectPacks };
+}
+
+/** The allowance a plan and its packs include, for anything that has to set the column. */
+export { includedSeconds };

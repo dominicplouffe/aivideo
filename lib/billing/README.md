@@ -142,3 +142,60 @@ somebody attaching their own Stripe account to a tenant they do not own.
 three days, so a row past a month is being kept for no reason — but the floor
 is days rather than hours, because the one thing pruning must never do is
 forget a delivery inside the window Stripe is still retrying it.
+
+## The catalogue, since September 2026
+
+Three plans and a quote, in `plans.ts`: Free (3 projects, 10 minutes,
+capped AI), Bring your own keys ($240 a year, unlimited projects, the
+workspace's own Deepgram, ElevenLabs and Anthropic keys), Studio ($99 a
+month, 10 projects and 150 minutes, more in packs of ten for $49), and
+Enterprise. The marketing page reads its numbers from the same file.
+
+Rows still carrying "starter", "team" or "scale" read as Studio; Postgres
+cannot drop an enum value, so the values stay in the type and
+`normalizePlan` does the reading.
+
+## A project is charged once a period
+
+With `projectId` on the meter call, each render is a ledger line for the
+*increase* over the project's longest render this period. A re-render after
+fixing a word is a line reading zero seconds; the lines still sum to the
+counter. This is what the pricing FAQ promised before the code did it.
+
+## AI actions are counted, not metered
+
+Tighten, Cut to length and Riff messages are ledger rows of kind `ai` with
+zero seconds, counted per period against the plan's cap by
+`aiAllowance`. The routes refuse with a 402 and a sentence before doing the
+work, and record the row after it succeeded.
+
+## Where the plan is felt
+
+`lib/api/plan-gate.ts`. Every refusal is a 402 with words a person can act
+on and a link to billing: one more project, one more AI action, a feature
+the plan lacks, a render past a stopped allowance. Nothing is refused after
+work was done.
+
+## Bring your own keys
+
+`vendor-keys.ts` seals a workspace's keys with the connectors' AES-256-GCM
+and checks each with its vendor before keeping it. `providersFor` in
+`lib/providers/for-workspace.ts` builds that workspace's providers from
+them; a vendor with no key refuses out loud, naming the setting, rather
+than falling back to ours or to a mock.
+
+## Enum values and the migrator
+
+drizzle-kit applies pending migrations in one transaction, and Postgres will
+not use an enum value in the transaction that added it. `scripts/db-migrate.mjs`
+runs every `ADD VALUE IF NOT EXISTS` it finds in the migration files first,
+on its own connection, so a migration that adds a plan and one that assigns
+it can ship together.
+
+## Stripe prices
+
+Three price ids from the environment: `STRIPE_PRICE_BYOK` (yearly),
+`STRIPE_PRICE_STUDIO` (monthly) and `STRIPE_PRICE_STUDIO_PACK` (monthly, by
+quantity). Checkout sets `client_reference_id` to the workspace; the
+subscription's items carry the plan and the pack count, whatever their
+order, and the webhook writes both.

@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { isDatabaseConfigured } from "@/lib/db/client";
-import { verifyStripeSignature, type Subscription } from "@/lib/billing/stripe";
-import { planForPrice } from "@/lib/billing/stripe";
+import { toSubscription, verifyStripeSignature } from "@/lib/billing/stripe";
 import {
   applySubscription, claimEvent, linkCustomer, rollPeriod, workspaceForCustomer,
 } from "@/lib/billing/sync";
@@ -84,7 +83,11 @@ export async function POST(request: Request) {
     case "customer.subscription.created":
     case "customer.subscription.updated":
     case "customer.subscription.deleted": {
-      const subscription = fromEvent(object);
+      // Not re-fetched from the API first. The event carries the object as
+      // it was at the moment of the change; a fetch would return whatever it
+      // looks like *now*, so two events arriving out of order would both
+      // apply the later state.
+      const subscription = toSubscription(object);
       const outcome = await applySubscription(subscription, {
         cancelled: type === "customer.subscription.deleted",
       });
@@ -116,30 +119,4 @@ export async function POST(request: Request) {
       // acted on", which is exactly true.
       return NextResponse.json({ ok: true, handled: false, type }, { status: 202 });
   }
-}
-
-/**
- * Reads a subscription out of an event payload.
- *
- * Not re-fetched from the API first. The event carries the object as it was
- * at the moment of the change, and a fetch would return whatever it looks
- * like *now* — so two events arriving out of order would both apply the
- * later state, and a downgrade followed by an upgrade would lose the
- * upgrade.
- */
-function fromEvent(object: Record<string, unknown>): Subscription {
-  const items = (object.items ?? {}) as { data?: { price?: { id?: string } }[] };
-  const priceId = items.data?.[0]?.price?.id ?? "";
-
-  return {
-    id: String(object.id ?? ""),
-    customerId: String(object.customer ?? ""),
-    // An unrecognised price falls back to free rather than being guessed at.
-    // Guessing high charges somebody for something they did not buy.
-    plan: planForPrice(priceId) ?? "free",
-    status: (object.status as Subscription["status"]) ?? "incomplete",
-    currentPeriodStart: new Date(Number(object.current_period_start ?? 0) * 1000),
-    currentPeriodEnd: new Date(Number(object.current_period_end ?? 0) * 1000),
-    cancelAtPeriodEnd: Boolean(object.cancel_at_period_end),
-  };
 }

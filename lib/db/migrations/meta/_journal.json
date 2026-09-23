@@ -155,6 +155,20 @@
       "when": 1790126061671,
       "tag": "0021_project_checkpoints",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1790128654862,
+      "tag": "0022_plan_values",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1790128654863,
+      "tag": "0023_plans_packs_and_keys",
+      "breakpoints": true
     }
   ]
 }

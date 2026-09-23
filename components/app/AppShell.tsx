@@ -44,6 +44,10 @@ export interface ShellUsage {
   fractionUsed: number;
   periodStartsAt: string;
   plan: string;
+  planName: string;
+  projectsUsed: number;
+  /** Null is unlimited. */
+  projectsLimit: number | null;
 }
 
 export interface ShellViewer {
@@ -192,8 +196,16 @@ export function AppShell({
                     style={{ width: `${Math.min(100, usage.fractionUsed * 100)}%` }}
                   />
                 </div>
+                {usage.projectsLimit !== null ? (
+                  <div className="mt-2 flex items-center justify-between">
+                    <span className="text-2xs text-fg-subtle">Projects</span>
+                    <span className="font-mono text-2xs text-fg">
+                      {usage.projectsUsed}/{usage.projectsLimit}
+                    </span>
+                  </div>
+                ) : null}
                 <p className="mt-2 text-2xs text-fg-faint">
-                  {usage.plan} plan · period began {relativeTime(usage.periodStartsAt)}
+                  {usage.planName} · period began {relativeTime(usage.periodStartsAt)}
                 </p>
               </>
             ) : (

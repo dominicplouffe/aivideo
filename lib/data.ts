@@ -292,19 +292,31 @@ export async function getUsage(): Promise<{
   fractionUsed: number;
   periodStartsAt: string;
   plan: string;
+  planName: string;
+  /** Whether the workspace runs on its own vendor keys. */
+  ownKeys: boolean;
+  projectsUsed: number;
+  /** Null is unlimited. */
+  projectsLimit: number | null;
 } | null> {
   const { allowed: may, actor } = await guard("billing.view");
   if (!may || !actor || !isDatabaseConfigured()) return null;
 
   try {
-    const { usage } = await import("@/lib/billing/metering");
-    const snapshot = await usage(actor.workspaceId);
+    const { usage, projectCapacity } = await import("@/lib/billing/metering");
+    const { planFor } = await import("@/lib/billing/plans");
+    const [snapshot, projects] = await Promise.all([usage(actor.workspaceId), projectCapacity(actor.workspaceId)]);
+    const plan = planFor(snapshot.plan);
     return {
       usedSeconds: snapshot.usedSeconds,
       allowanceSeconds: snapshot.limitSeconds + snapshot.topupSeconds,
       fractionUsed: snapshot.fractionUsed,
       periodStartsAt: snapshot.periodStartsAt.toISOString(),
       plan: snapshot.plan,
+      planName: plan.name,
+      ownKeys: plan.ai.ownKeys,
+      projectsUsed: projects.used,
+      projectsLimit: projects.limit,
     };
   } catch (error) {
     console.error("[data] usage read failed:", error);

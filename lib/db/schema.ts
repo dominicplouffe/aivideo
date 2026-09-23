@@ -8,7 +8,9 @@ import { relations, sql } from "drizzle-orm";
    Enums
    ============================================================ */
 
-export const planEnum = pgEnum("plan", ["free", "starter", "team", "scale", "enterprise"]);
+// "starter", "team" and "scale" remain in the type because Postgres cannot
+// drop an enum value; rows carrying them read as "studio" (see normalizePlan).
+export const planEnum = pgEnum("plan", ["free", "starter", "team", "scale", "enterprise", "byok", "studio"]);
 export const regionEnum = pgEnum("region", ["us", "eu", "au"]);
 export const roleEnum = pgEnum("member_role", ["owner", "admin", "creator", "reviewer", "viewer"]);
 export const projectStatusEnum = pgEnum("project_status", ["draft", "processing", "ready", "published", "stale", "failed"]);
@@ -21,7 +23,7 @@ export const voiceKindEnum = pgEnum("voice_kind", ["studio", "clone"]);
 export const maskRuleTypeEnum = pgEnum("mask_rule_type", ["detector", "selector", "region", "pattern"]);
 export const assetAccessEnum = pgEnum("asset_access", ["public", "email_gate", "password", "domain", "personalized"]);
 export const jobStatusEnum = pgEnum("job_status", ["queued", "running", "completed", "failed", "dead"]);
-export const usageKindEnum = pgEnum("usage_kind", ["render", "topup", "credit", "adjustment"]);
+export const usageKindEnum = pgEnum("usage_kind", ["render", "topup", "credit", "adjustment", "ai"]);
 export const siemFormatEnum = pgEnum("siem_format", ["json", "cef", "ecs"]);
 export const connectorVendorEnum = pgEnum("connector_vendor", [
   "zendesk", "intercom", "helpscout", "notion", "confluence",
@@ -66,6 +68,10 @@ export const workspaces = pgTable(
     // nobody chose cut the workspace off is worse than an overage line on
     // an invoice — so the stop exists, and the customer turns it on.
     hardStopAtLimit: boolean("hard_stop_at_limit").notNull().default(false),
+    /** Packs of extra projects bought on Studio. Raises the project count and the allowance. */
+    projectPacks: integer("project_packs").notNull().default(0),
+    /** When a plan with a minimum term may first be cancelled. Null when there is no term. */
+    planTermEndsAt: timestamp("plan_term_ends_at", { withTimezone: true }),
     // Set when the 80% notice goes out, cleared when the period rolls, so
     // the warning arrives once rather than on every render afterwards.
     usageNoticeSentAt: timestamp("usage_notice_sent_at", { withTimezone: true }),
@@ -686,6 +692,31 @@ export const voices = pgTable(
  * whatever still comes back wrong is corrected before segmentation, and the
  * spoken form is given to synthesis as a respelling.
  */
+/**
+ * A workspace's own vendor keys, for the Bring-your-own-keys plan.
+ *
+ * Sealed, never hashed: the key has to be presented to the vendor. Only the
+ * last four characters are kept in the clear, so a person can tell which
+ * key they saved without anyone being able to read it back.
+ */
+export const workspaceVendorKeys = pgTable(
+  "workspace_vendor_keys",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workspaceId: uuid("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+    /** "deepgram" | "elevenlabs" | "anthropic" */
+    vendor: text("vendor").notNull(),
+    keySealed: text("key_sealed").notNull(),
+    last4: text("last4").notNull(),
+    /** When the vendor last accepted the key. Null means saved but never checked. */
+    verifiedAt: timestamp("verified_at", { withTimezone: true }),
+    createdBy: uuid("created_by").references(() => members.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("workspace_vendor_keys_workspace_vendor_key").on(t.workspaceId, t.vendor)],
+);
+
 export const projectCheckpoints = pgTable(
   "project_checkpoints",
   {

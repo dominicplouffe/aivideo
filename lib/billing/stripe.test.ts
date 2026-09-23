@@ -3,7 +3,7 @@ import { createHmac } from "node:crypto";
 import test from "node:test";
 import { ProviderError } from "@/lib/providers/errors";
 import {
-  STRIPE_TOLERANCE_SEC, Stripe, grantsAccess, planForPrice, verifyStripeSignature,
+  STRIPE_TOLERANCE_SEC, Stripe, grantsAccess, planForPrice, verifyStripeSignature, readItems, toSubscription,
 } from "./stripe";
 
 /**
@@ -87,10 +87,10 @@ test("a malformed or short header is refused, not crashed on", () => {
 test("a price maps to a plan by configuration, never by a baked-in id", () => {
   // The same code runs against test-mode and live-mode prices with
   // different identifiers; an id in a build is wrong in one of them.
-  process.env.STRIPE_PRICE_TEAM = "price_live_team";
-  assert.equal(planForPrice("price_live_team"), "team");
+  process.env.STRIPE_PRICE_STUDIO = "price_live_studio";
+  assert.equal(planForPrice("price_live_studio"), "studio");
   assert.equal(planForPrice("price_unknown"), null);
-  delete process.env.STRIPE_PRICE_TEAM;
+  delete process.env.STRIPE_PRICE_STUDIO;
 });
 
 test("a failed renewal does not lock somebody out of their own demos", () => {
@@ -206,4 +206,48 @@ test("negative usage is refused rather than credited", async () => {
       }),
     /negative usage/,
   );
+});
+
+test("plan and packs are read from the items, whatever their order", () => {
+  process.env.STRIPE_PRICE_STUDIO = "price_studio";
+  process.env.STRIPE_PRICE_STUDIO_PACK = "price_pack";
+  const subscription = toSubscription({
+    id: "sub_9",
+    customer: "cus_9",
+    status: "active",
+    current_period_start: 1_700_000_000,
+    current_period_end: 1_702_600_000,
+    items: { data: [{ id: "si_pack", price: { id: "price_pack" }, quantity: 3 }, { id: "si_plan", price: { id: "price_studio" }, quantity: 1 }] },
+  });
+  assert.equal(subscription.plan, "studio");
+  assert.equal(subscription.packs, 3);
+  assert.deepEqual(readItems([{ id: "si_1", price: { id: "price_studio" } }]), { plan: "studio", packs: 0, packItemId: null });
+  delete process.env.STRIPE_PRICE_STUDIO;
+  delete process.env.STRIPE_PRICE_STUDIO_PACK;
+});
+
+test("checkout carries the workspace, the plan's price and the packs", async () => {
+  process.env.STRIPE_PRICE_STUDIO = "price_studio";
+  process.env.STRIPE_PRICE_STUDIO_PACK = "price_pack";
+  let sent: URLSearchParams | null = null;
+  const stripe = new Stripe({
+    apiKey: "sk_test",
+    fetchImpl: (async (_url: string, init?: RequestInit) => {
+      sent = new URLSearchParams(String(init?.body ?? ""));
+      return new Response(JSON.stringify({ url: "https://checkout.stripe.com/c/pay/x" }), { status: 200 });
+    }) as typeof fetch,
+  });
+  const url = await stripe.createCheckoutSession({
+    workspaceId: "ws_1", customerId: null, customerEmail: "o@example.com", plan: "studio", packs: 2,
+    successUrl: "https://app/billing?purchased=studio", cancelUrl: "https://app/billing",
+  });
+  assert.equal(url, "https://checkout.stripe.com/c/pay/x");
+  assert.equal(sent!.get("mode"), "subscription");
+  assert.equal(sent!.get("client_reference_id"), "ws_1");
+  assert.equal(sent!.get("line_items[0][price]"), "price_studio");
+  assert.equal(sent!.get("line_items[1][price]"), "price_pack");
+  assert.equal(sent!.get("line_items[1][quantity]"), "2");
+  assert.equal(sent!.get("customer_email"), "o@example.com");
+  delete process.env.STRIPE_PRICE_STUDIO;
+  delete process.env.STRIPE_PRICE_STUDIO_PACK;
 });

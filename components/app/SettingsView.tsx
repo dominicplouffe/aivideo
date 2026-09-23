@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/Button";
 import { Panel } from "./Shared";
 import { ThemePicker } from "./ThemePicker";
 import { GlossaryEditor } from "./GlossaryEditor";
+import { VendorKeysEditor } from "./VendorKeysEditor";
 
 /**
  * Workspace settings.
@@ -24,16 +25,17 @@ import { GlossaryEditor } from "./GlossaryEditor";
  * product, so what is real is wired up and what is not says so.
  */
 
-type Tab = "general" | "glossary" | "security" | "integrations";
+type Tab = "general" | "glossary" | "keys" | "security" | "integrations";
 
 const tabs: { id: Tab; label: string; icon: IconName }[] = [
   { id: "general", label: "General", icon: "settings" },
   { id: "glossary", label: "Glossary", icon: "book" },
+  { id: "keys", label: "Your keys", icon: "key" },
   { id: "security", label: "Security", icon: "shield" },
   { id: "integrations", label: "Integrations", icon: "puzzle" },
 ];
 
-export function SettingsView() {
+export function SettingsView({ ownKeysPlan = false }: { ownKeysPlan?: boolean }) {
   const [tab, setTab] = useState<Tab>("general");
 
   return (
@@ -70,6 +72,7 @@ export function SettingsView() {
           </>
         ) : null}
         {tab === "glossary" ? <GlossaryEditor /> : null}
+        {tab === "keys" ? <VendorKeysEditor ownKeysPlan={ownKeysPlan} /> : null}
         {tab === "security" ? <Security /> : null}
         {tab === "integrations" ? <Integrations /> : null}
       </div>

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { assertProjectRoom } from "@/lib/api/plan-gate";
 import { isDatabaseConfigured } from "@/lib/db/client";
 import { authorize, ForbiddenError } from "@/lib/auth/authorize";
 import { resolveActor, UnauthenticatedError } from "@/lib/auth/session";
@@ -82,6 +83,8 @@ export async function POST(request: Request) {
 
   const guard = await requireActor(request, "project.create");
   if ("response" in guard) return guard.response;
+  const full = await assertProjectRoom(guard.actor.workspaceId);
+  if (full) return full;
 
   let body: { recording_id?: unknown; title?: unknown; description?: unknown; collection?: unknown };
   try {

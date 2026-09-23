@@ -1,13 +1,23 @@
 import type { IconName } from "@/components/ui/Icon";
+import { PLAN_CATALOGUE, formatOverage, type Plan as PlanId } from "@/lib/billing/plans";
+
+/**
+ * The pricing page's copy, on top of the plan catalogue.
+ *
+ * Every number here is read from `lib/billing/plans.ts`, which is also what
+ * the product enforces. The page and the product cannot disagree about a
+ * limit because they have one source for it; the words are the only thing
+ * this file adds.
+ */
 
 export interface Plan {
-  id: "free" | "starter" | "team" | "scale" | "enterprise";
+  id: PlanId;
   name: string;
   tagline: string;
-  monthly: number | null;
-  annual: number | null;
-  unit: string;
-  seatNote: string;
+  /** "$99", "$20", "Free", "Custom". */
+  price: string;
+  /** "per month", "per month, billed $240 a year", "forever", "quoted". */
+  priceNote: string;
   cta: { label: string; href: string };
   highlight?: boolean;
   badge?: string;
@@ -15,125 +25,97 @@ export interface Plan {
   limits: { label: string; value: string }[];
 }
 
+const c = PLAN_CATALOGUE;
+const minutes = (seconds: number) => `${seconds / 60}`;
+const pack = c.studio.projectPack!;
+
 export const plans: Plan[] = [
   {
     id: "free",
-    name: "Free",
+    name: c.free.name,
     tagline: "Judge the quality honestly, without a sales call.",
-    monthly: 0,
-    annual: 0,
-    unit: "forever",
-    seatNote: "1 seat",
+    price: "Free",
+    priceNote: "forever, no card",
     cta: { label: "Start free", href: "/signup" },
     headline: [
-      "10 AI video minutes / month",
-      "Unlimited step-by-step guides",
-      "Every AI feature unlocked",
-      "1080p exports with a small DemoRiff mark",
-      "3 share pages",
+      `${minutes(c.free.videoSecondsPerPeriod)} finished video minutes a month`,
+      `${c.free.projects} projects`,
+      "AI voices, captions and the Studio editor",
+      `${c.free.ai.suggestionsPerPeriod} suggested cuts and ${c.free.ai.riffMessagesPerPeriod} Riff messages a month`,
+      "Unlimited written guides",
     ],
     limits: [
-      { label: "AI video minutes", value: "10 / mo" },
-      { label: "Written guides", value: "Unlimited" },
-      { label: "Seats", value: "1" },
-      { label: "Max export", value: "1080p" },
+      { label: "Finished minutes", value: `${minutes(c.free.videoSecondsPerPeriod)} / mo` },
+      { label: "Projects", value: `${c.free.projects}` },
+      { label: "Brand kits", value: `${c.free.features.brandKits}` },
+      { label: "Riff Agent", value: "No" },
     ],
   },
   {
-    id: "starter",
-    name: "Starter",
-    tagline: "For the founder or solo marketer shipping every week.",
-    monthly: 39,
-    annual: 32,
-    unit: "per month",
-    seatNote: "1 seat · add seats at $19",
-    cta: { label: "Start 14-day trial", href: "/signup?plan=starter" },
+    id: "byok",
+    name: c.byok.name,
+    tagline: "Your vendor accounts do the work; you pay us for the editor.",
+    price: "$20",
+    priceNote: `per month, billed $${c.byok.priceCents! / 100} for the year`,
+    cta: { label: "Start on your own keys", href: "/signup?plan=byok" },
     headline: [
-      "60 AI video minutes / month",
-      "No watermark, 4K exports",
-      "260 studio voices + 1 voice clone",
-      "Brand kit and custom share pages",
-      "34-language localization",
+      "Unlimited projects",
+      `${minutes(c.byok.videoSecondsPerPeriod).replace(/\B(?=(\d{3})+(?!\d))/g, ",")} finished minutes a month`,
+      "Unlimited Tighten, Cut to length and Riff",
+      "Riff Agent, brand kits, voice cloning",
+      "Your Deepgram, ElevenLabs and Anthropic keys, billed by them to you",
+      "Twelve-month term",
     ],
     limits: [
-      { label: "AI video minutes", value: "60 / mo" },
-      { label: "Written guides", value: "Unlimited" },
-      { label: "Seats", value: "1 (+$19 each)" },
-      { label: "Max export", value: "4K" },
+      { label: "Finished minutes", value: `${minutes(c.byok.videoSecondsPerPeriod)} / mo` },
+      { label: "Projects", value: "Unlimited" },
+      { label: "Brand kits", value: "Unlimited" },
+      { label: "Riff Agent", value: "Yes" },
     ],
   },
   {
-    id: "team",
-    name: "Team",
-    tagline: "The plan most product teams land on and stay on.",
-    monthly: 129,
-    annual: 105,
-    unit: "per month",
-    seatNote: "3 seats included · add seats at $29",
-    cta: { label: "Start 14-day trial", href: "/signup?plan=team" },
+    id: "studio",
+    name: c.studio.name,
+    tagline: "Everything included, nothing to set up. Cancel any time.",
+    price: `$${c.studio.priceCents! / 100}`,
+    priceNote: `per month · +$${pack.priceCents / 100} per ${pack.size} more projects`,
+    cta: { label: "Start Studio", href: "/signup?plan=studio" },
     highlight: true,
     badge: "Most popular",
     headline: [
-      "240 AI video minutes / month",
-      "Interactive demos with branching",
-      "AI presenters + 3 voice clones",
-      "Shared brand kits, approvals, comments",
-      "Engagement analytics and CTAs",
-      "CRM + help-center integrations",
+      `${c.studio.projects} projects, more in packs of ${pack.size}`,
+      `${minutes(c.studio.videoSecondsPerPeriod)} finished minutes a month, +${pack.extraSeconds / 60} per pack`,
+      `${c.studio.ai.suggestionsPerPeriod} suggested cuts and ${c.studio.ai.riffMessagesPerPeriod} Riff messages a month`,
+      "Riff Agent, brand kits, voice cloning",
+      "Our vendor accounts do the work",
+      `Overage at ${formatOverage("studio")}, or a hard stop you control`,
     ],
     limits: [
-      { label: "AI video minutes", value: "240 / mo" },
-      { label: "Written guides", value: "Unlimited" },
-      { label: "Seats", value: "3 (+$29 each)" },
-      { label: "Max export", value: "4K60" },
-    ],
-  },
-  {
-    id: "scale",
-    name: "Scale",
-    tagline: "For GTM orgs running a real video operation.",
-    monthly: 449,
-    annual: 369,
-    unit: "per month",
-    seatNote: "10 seats included · add seats at $25",
-    cta: { label: "Start 14-day trial", href: "/signup?plan=scale" },
-    headline: [
-      "900 AI video minutes / month",
-      "Riff Agent — autonomous demo generation",
-      "Unlimited voice clones + custom avatar",
-      "Workspaces, roles and content governance",
-      "API access and webhooks",
-      "Regional processing (US / EU / AU)",
-    ],
-    limits: [
-      { label: "AI video minutes", value: "900 / mo" },
-      { label: "Written guides", value: "Unlimited" },
-      { label: "Seats", value: "10 (+$25 each)" },
-      { label: "Max export", value: "4K60 + ProRes" },
+      { label: "Finished minutes", value: `${minutes(c.studio.videoSecondsPerPeriod)} / mo` },
+      { label: "Projects", value: `${c.studio.projects} (+${pack.size} per pack)` },
+      { label: "Brand kits", value: "Unlimited" },
+      { label: "Riff Agent", value: "Yes" },
     ],
   },
   {
     id: "enterprise",
-    name: "Enterprise",
+    name: c.enterprise.name,
     tagline: "Procurement-ready, with your security team's signature.",
-    monthly: null,
-    annual: null,
-    unit: "custom",
-    seatNote: "Unlimited seats",
+    price: "Custom",
+    priceNote: "annual agreement, volume based",
     cta: { label: "Talk to sales", href: "/contact" },
     headline: [
-      "Unlimited video minutes",
+      "Everything in Studio, at your volume",
       "SAML SSO, SCIM, audit log streaming",
       "Private rendering in your own cloud",
       "Custom DPA, security review, MSA",
-      "Dedicated CSM and onboarding program",
-      "99.9% uptime SLA",
+      "Dedicated onboarding",
     ],
     limits: [
-      { label: "AI video minutes", value: "Unlimited" },
-      { label: "Written guides", value: "Unlimited" },
-      { label: "Seats", value: "Unlimited" },
-      { label: "Max export", value: "ProRes / lossless" },
+      { label: "Finished minutes", value: "By agreement" },
+      { label: "Projects", value: "Unlimited" },
+      { label: "Brand kits", value: "Unlimited" },
+      { label: "Riff Agent", value: "Yes" },
     ],
   },
 ];
@@ -141,7 +123,7 @@ export const plans: Plan[] = [
 export interface CompareRow {
   label: string;
   hint?: string;
-  values: Record<Plan["id"], string | boolean>;
+  values: Record<PlanId, string | boolean>;
 }
 
 export interface CompareGroup {
@@ -152,121 +134,96 @@ export interface CompareGroup {
 
 const T = true;
 const F = false;
+const all = (v: string | boolean): Record<PlanId, string | boolean> => ({ free: v, byok: v, studio: v, enterprise: v });
 
 export const compareGroups: CompareGroup[] = [
   {
-    group: "Capture",
+    group: "Capture and edit",
     icon: "record",
     rows: [
-      { label: "Browser + desktop screen recorder", values: { free: T, starter: T, team: T, scale: T, enterprise: T } },
-      { label: "Max capture resolution", values: { free: "1080p", starter: "4K", team: "4K60", scale: "4K60", enterprise: "4K60" } },
-      { label: "Camera, mic and system audio tracks", values: { free: T, starter: T, team: T, scale: T, enterprise: T } },
-      { label: "Import existing video (Loom, Zoom, MP4)", values: { free: "3 / mo", starter: T, team: T, scale: T, enterprise: T } },
-      { label: "DOM capture for interactive demos", hint: "Required for click-through tours", values: { free: F, starter: F, team: T, scale: T, enterprise: T } },
-      { label: "Riff Agent autonomous capture", values: { free: F, starter: F, team: F, scale: T, enterprise: T } },
+      { label: "Browser screen recorder, pause and resume", values: all(T) },
+      { label: "Import an existing recording", values: all(T) },
+      { label: "Transcript editing: cut words, split scenes, correct spellings", values: all(T) },
+      { label: "Filler-word removal and glossary", values: all(T) },
+      { label: "Copy a project, undo, history", values: all(T) },
     ],
   },
   {
     group: "AI production",
     icon: "wand",
     rows: [
-      { label: "Transcript-based editing", values: { free: T, starter: T, team: T, scale: T, enterprise: T } },
-      { label: "Auto zoom, pan and cursor smoothing", values: { free: T, starter: T, team: T, scale: T, enterprise: T } },
-      { label: "Filler-word and silence removal", values: { free: T, starter: T, team: T, scale: T, enterprise: T } },
-      { label: "Studio Sound audio restoration", values: { free: T, starter: T, team: T, scale: T, enterprise: T } },
-      { label: "Script rewrite and tone control", values: { free: T, starter: T, team: T, scale: T, enterprise: T } },
-      { label: "Studio voice library", values: { free: "260", starter: "260", team: "260", scale: "260", enterprise: "260" } },
-      { label: "Voice cloning", values: { free: F, starter: "1", team: "3", scale: "Unlimited", enterprise: "Unlimited" } },
-      { label: "AI presenters", values: { free: "Preview", starter: "180 stock", team: "180 stock", scale: "+ 1 custom", enterprise: "+ unlimited custom" } },
-      { label: "AI b-roll generation", values: { free: F, starter: F, team: T, scale: T, enterprise: T } },
-      { label: "Riff co-editor (chat to edit)", values: { free: "20 msgs", starter: T, team: T, scale: T, enterprise: T } },
+      { label: "Finished video minutes per month", values: { free: minutes(c.free.videoSecondsPerPeriod), byok: minutes(c.byok.videoSecondsPerPeriod), studio: `${minutes(c.studio.videoSecondsPerPeriod)} +${pack.extraSeconds / 60}/pack`, enterprise: "By agreement" } },
+      { label: "AI voice narration, fitted to your footage", values: all(T) },
+      { label: "Tighten and Cut to length", hint: "Suggested cuts you preview, apply and undo", values: { free: `${c.free.ai.suggestionsPerPeriod} / mo`, byok: "Unlimited", studio: `${c.studio.ai.suggestionsPerPeriod} / mo`, enterprise: "Unlimited" } },
+      { label: "Riff co-editor", values: { free: `${c.free.ai.riffMessagesPerPeriod} msgs / mo`, byok: "Unlimited", studio: `${c.studio.ai.riffMessagesPerPeriod} / mo`, enterprise: "Unlimited" } },
+      { label: "Riff Agent, autonomous capture", values: { free: F, byok: T, studio: T, enterprise: T } },
+      { label: "Voice cloning", values: { free: F, byok: T, studio: T, enterprise: T } },
+      { label: "Whose vendor accounts do the work", values: { free: "Ours", byok: "Yours", studio: "Ours", enterprise: "Ours or yours" } },
     ],
   },
   {
-    group: "Output",
-    icon: "layers",
-    rows: [
-      { label: "AI video minutes per month", values: { free: "10", starter: "60", team: "240", scale: "900", enterprise: "Unlimited" } },
-      { label: "Step-by-step written guides", values: { free: "Unlimited", starter: "Unlimited", team: "Unlimited", scale: "Unlimited", enterprise: "Unlimited" } },
-      { label: "Interactive click-through demos", values: { free: F, starter: F, team: T, scale: T, enterprise: T } },
-      { label: "Branching and multi-path tours", values: { free: F, starter: F, team: F, scale: T, enterprise: T } },
-      { label: "Auto-generated social clips", values: { free: F, starter: T, team: T, scale: T, enterprise: T } },
-      { label: "Export watermark", values: { free: "Yes", starter: "None", team: "None", scale: "None", enterprise: "None" } },
-      { label: "Localization languages", values: { free: "3", starter: "34", team: "34", scale: "34", enterprise: "34" } },
-      { label: "Lip-sync on translated video", values: { free: F, starter: T, team: T, scale: T, enterprise: T } },
-    ],
-  },
-  {
-    group: "Brand & collaboration",
+    group: "Output and brand",
     icon: "palette",
     rows: [
-      { label: "Brand kits", values: { free: F, starter: "1", team: "5", scale: "Unlimited", enterprise: "Unlimited" } },
-      { label: "Custom intro, outro and lower thirds", values: { free: F, starter: T, team: T, scale: T, enterprise: T } },
-      { label: "Timestamped comments and review", values: { free: F, starter: F, team: T, scale: T, enterprise: T } },
-      { label: "Approval workflows", values: { free: F, starter: F, team: F, scale: T, enterprise: T } },
-      { label: "Shared asset library", values: { free: F, starter: F, team: T, scale: T, enterprise: T } },
-      { label: "Workspaces and content governance", values: { free: F, starter: F, team: F, scale: T, enterprise: T } },
+      { label: "Projects", values: { free: `${c.free.projects}`, byok: "Unlimited", studio: `${c.studio.projects} +${pack.size}/pack`, enterprise: "Unlimited" } },
+      { label: "Brand kits: logo, colours, typeface, intro and outro cards", values: { free: `${c.free.features.brandKits}`, byok: "Unlimited", studio: "Unlimited", enterprise: "Unlimited" } },
+      { label: "Step-by-step written guides", values: all("Unlimited") },
+      { label: "Hosted share pages", values: all(T) },
+      { label: "Custom domain for share pages", values: { free: F, byok: T, studio: T, enterprise: T } },
     ],
   },
   {
-    group: "Distribution & data",
-    icon: "chart",
+    group: "Billing",
+    icon: "creditCard",
     rows: [
-      { label: "Hosted share pages", values: { free: "3", starter: "Unlimited", team: "Unlimited", scale: "Unlimited", enterprise: "Unlimited" } },
-      { label: "Custom domain for share pages", values: { free: F, starter: F, team: T, scale: T, enterprise: T } },
-      { label: "CTAs and lead capture", values: { free: F, starter: T, team: T, scale: T, enterprise: T } },
-      { label: "Per-second engagement analytics", values: { free: "Basic", starter: "Basic", team: T, scale: T, enterprise: T } },
-      { label: "Account-level viewer identification", values: { free: F, starter: F, team: T, scale: T, enterprise: T } },
-      { label: "CRM sync (HubSpot, Salesforce)", values: { free: F, starter: F, team: T, scale: T, enterprise: T } },
-      { label: "Public API and webhooks", values: { free: F, starter: F, team: F, scale: T, enterprise: T } },
+      { label: "Term", values: { free: "None", byok: "12 months, billed yearly", studio: "Monthly, cancel any time", enterprise: "Annual" } },
+      { label: "Past the minutes", values: { free: "Rendering pauses", byok: formatOverage("byok")!, studio: `${formatOverage("studio")} or hard stop`, enterprise: "By agreement" } },
+      { label: "Re-render a project you already rendered this month", values: all("Free") },
     ],
   },
   {
-    group: "Security & support",
+    group: "Security and support",
     icon: "shield",
     rows: [
-      { label: "Automatic sensitive-data masking", values: { free: T, starter: T, team: T, scale: T, enterprise: T } },
-      { label: "Custom masking rules", values: { free: F, starter: F, team: T, scale: T, enterprise: T } },
-      { label: "SAML SSO and SCIM provisioning", values: { free: F, starter: F, team: F, scale: "SSO only", enterprise: T } },
-      { label: "Regional data processing", values: { free: F, starter: F, team: F, scale: "US / EU / AU", enterprise: "Any + BYOC" } },
-      { label: "Audit log export and SIEM streaming", values: { free: F, starter: F, team: F, scale: "Export", enterprise: T } },
-      { label: "Support", values: { free: "Community", starter: "Email", team: "Priority email", scale: "Slack channel", enterprise: "Dedicated CSM" } },
-      { label: "Uptime SLA", values: { free: F, starter: F, team: F, scale: "99.5%", enterprise: "99.9%" } },
+      { label: "Automatic sensitive-data masking", values: all(T) },
+      { label: "SAML SSO and SCIM provisioning", values: { free: F, byok: F, studio: F, enterprise: T } },
+      { label: "Audit log export", values: { free: F, byok: F, studio: T, enterprise: T } },
+      { label: "Support", values: { free: "Community", byok: "Email", studio: "Priority email", enterprise: "Dedicated" } },
     ],
   },
 ];
 
 export const pricingFaqs = [
   {
-    q: "What counts as an AI video minute?",
-    a: "One minute of finished, rendered output — not source footage. If you record twelve minutes and publish a three-minute cut, that is three minutes. Re-rendering the same video after an edit does not charge you again within the same billing period, and generating the written guide, interactive demo or social clips from that video costs nothing extra.",
+    q: "What counts as a finished video minute?",
+    a: "One minute of rendered output, not source footage. Record twelve minutes and export a three-minute cut, and that is three minutes. A project counts once a month, for its longest render, so re-rendering after fixing a word costs nothing. Written guides, previews in the Studio and narration previews are never minutes.",
   },
   {
-    q: "Are translations billed separately?",
-    a: "No. This is where most tools in this category get expensive. A localized version of a video you already produced does not consume new video minutes, on any paid plan. Translate a three-minute demo into all thirty-four languages and your usage is still three minutes.",
+    q: "What does Bring your own keys mean?",
+    a: "You add your own API keys for Deepgram (transcription), ElevenLabs (voices) and Anthropic (Riff, suggested cuts, the agent) in Settings, and those vendors bill you directly for what you use. We charge $20 a month for the editor, the rendering and the hosting, billed as $240 for a twelve-month term. At today's vendor prices a narrated minute costs about ten cents of ElevenLabs and well under a cent of Deepgram; a suggested cut is a few cents of Claude.",
+  },
+  {
+    q: "Why the twelve-month term on Bring your own keys?",
+    a: "Because it is priced as a year: $240 is what makes unlimited projects and unlimited AI actions workable at that price. It renews yearly and can be cancelled from the billing page once the first year is up. Studio has no term at all.",
+  },
+  {
+    q: "How do Studio packs work?",
+    a: `Studio includes ${c.studio.projects} projects and ${minutes(c.studio.videoSecondsPerPeriod)} minutes. Each pack adds ${pack.size} projects and ${pack.extraSeconds / 60} minutes for $${pack.priceCents / 100} a month. Add or remove packs on the billing page at any time; Stripe prorates the difference. You cannot drop below the number of projects you have without deleting some first.`,
   },
   {
     q: "What happens if I run out of minutes mid-month?",
-    a: "Nothing breaks. Your existing videos keep serving and your guides keep publishing. You can either top up at $1.20 per minute or move to the next plan, and we prorate the difference against the days remaining. We will never silently overage-bill you — you get a notice at 80% and a hard stop you control.",
+    a: `Nothing you already made is affected. On Studio, rendering keeps going and the extra is billed at ${formatOverage("studio")}, unless you turn on the hard stop, in which case rendering pauses until the period resets. On Free, rendering pauses; re-rendering a project you already rendered this month still works. You are told at 80%.`,
   },
   {
-    q: "Can I change plans or add seats mid-cycle?",
-    a: "Yes, in the billing screen, without talking to anyone. Upgrades take effect immediately with a prorated charge; downgrades take effect at the end of the current period so you do not lose minutes you already paid for. Seats can be added and removed at any time.",
+    q: "What do the AI caps on Studio mean?",
+    a: `Fair use, not a meter. ${c.studio.ai.suggestionsPerPeriod} Tighten or Cut-to-length runs and ${c.studio.ai.riffMessagesPerPeriod} Riff messages a month is far more than editing ten projects takes. If you hit them, tell us; that is a conversation, not a lockout.`,
   },
   {
-    q: "Do unused minutes roll over?",
-    a: "On annual plans, unused minutes roll over for up to three months, which covers the normal rhythm of a launch-heavy quarter followed by a quiet one. Monthly plans reset each period.",
-  },
-  {
-    q: "Is there a discount for startups or non-profits?",
-    a: "Yes. Companies under ten people with less than $2M raised get Team at Starter pricing for their first year. Registered non-profits and accredited educational institutions get 50% off any plan. Both are a single email to sales with proof — no deck, no call.",
-  },
-  {
-    q: "What does the 14-day trial include?",
-    a: "The full Team plan: every AI feature, 4K exports without a watermark, interactive demos, analytics, and 60 video minutes to spend however you like. No credit card. If you do nothing at the end, you drop to Free rather than being charged.",
+    q: "Can I change plans?",
+    a: "Yes, from the billing page. Free to Studio or Bring your own keys takes effect at once. Cancelling Studio ends it when the paid month does, and the workspace drops to Free with all of its recordings and history intact.",
   },
   {
     q: "How does Enterprise pricing work?",
-    a: "It is based on seats and annual video volume, not per-feature gating — everything in Scale is included by definition. Most Enterprise agreements land between $30k and $120k annually. We can work with your procurement process, sign your MSA, complete security questionnaires, and invoice against a PO.",
+    a: "By seats and annual volume rather than feature gating; everything in Studio is included. We can run rendering inside your own cloud, sign your MSA, complete security questionnaires and invoice against a PO.",
   },
 ];

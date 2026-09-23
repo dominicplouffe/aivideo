@@ -6,7 +6,8 @@ import { getRecording } from "@/lib/db/repositories/recordings";
 import { getVoice } from "@/lib/db/repositories/voices";
 import { listGlossary } from "@/lib/db/repositories/glossary";
 import { pronunciationsFor } from "@/lib/pipeline/glossary";
-import { getProviders, providerReport } from "@/lib/providers";
+import { providerReport } from "@/lib/providers";
+import { capabilityLive, providersFor } from "@/lib/providers/for-workspace";
 import { ProviderError } from "@/lib/providers/errors";
 import { hydrateEditState } from "@/lib/edit-state";
 import { buildEdl } from "@/lib/render/edl";
@@ -33,9 +34,10 @@ export async function POST(request: Request, context: Context) {
   const guard = await requireActor(request, "project.edit");
   if ("response" in guard) return guard.response;
 
-  const synthesis = providerReport().find((entry) => entry.capability === "synthesis");
-  if (!synthesis?.live) {
-    return NextResponse.json({ error: "Synthesis is not configured, so there is no voice to preview." }, { status: 409 });
+  const resolved = await providersFor(guard.actor.workspaceId);
+  const synthesis = capabilityLive(resolved, "synthesis", providerReport());
+  if (!synthesis.live) {
+    return NextResponse.json({ error: synthesis.hint || "Synthesis is not configured, so there is no voice to preview." }, { status: 409 });
   }
 
   const { id } = await context.params;
@@ -63,7 +65,7 @@ export async function POST(request: Request, context: Context) {
       edl,
       project,
       workspaceId: guard.actor.workspaceId,
-      synthesis: getProviders().synthesis,
+      synthesis: resolved.providers.synthesis,
       pronunciations: pronunciationsFor(await listGlossary(guard.actor.workspaceId)),
       stillness: recording?.stillness ?? null,
       lookupVoice: getVoice,

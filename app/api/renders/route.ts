@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { assertRenderRoom } from "@/lib/api/plan-gate";
 import { getProviders, type RenderOutput } from "@/lib/providers";
 import { getProject } from "@/lib/data";
 import { isDatabaseConfigured } from "@/lib/db/client";
@@ -48,6 +49,13 @@ export async function POST(request: Request) {
       }
       throw error;
     }
+  }
+
+  // Refused before any work when the allowance is spent and the plan stops
+  // there, so the person hears it now rather than from a dead-lettered job.
+  if (actor) {
+    const stopped = await assertRenderRoom(actor.workspaceId);
+    if (stopped) return stopped;
   }
 
   // Through the data access layer. This read used to go to the fixtures,

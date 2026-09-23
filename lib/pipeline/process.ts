@@ -8,7 +8,7 @@ import { getRecording, setStatus, attachStillness, attachTranscript } from "@/li
 import { detectStillness } from "./stillness";
 import { replaceSegments, setProjectStatus } from "@/lib/db/repositories/projects";
 import { getStorage } from "@/lib/storage";
-import { getProviders } from "@/lib/providers";
+import { providersFor } from "@/lib/providers/for-workspace";
 import { editedDuration, segmentTranscript } from "./segment";
 import { applyGlossary, keytermsFor } from "./glossary";
 import { listGlossary } from "@/lib/db/repositories/glossary";
@@ -69,7 +69,7 @@ export async function processProject(
     return { ok: false, reason: "That recording's media never finished uploading." };
   }
 
-  const providers = getProviders();
+  const { providers } = await providersFor(workspaceId);
 
   try {
     await setStatus(recording.id, "transcribing");

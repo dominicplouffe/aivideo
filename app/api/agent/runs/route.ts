@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+import { providersFor } from "@/lib/providers/for-workspace";
+import { assertFeature } from "@/lib/api/plan-gate";
 import { and, desc, eq } from "drizzle-orm";
 import { getDb, isDatabaseConfigured } from "@/lib/db/client";
 import * as s from "@/lib/db/schema";
@@ -123,6 +125,8 @@ export async function POST(request: Request) {
   try {
     const actor = await resolveActor(request);
     authorize(actor, "agent.run", { workspaceId: actor.workspaceId });
+    const outside = await assertFeature(actor.workspaceId, "agent", "The Riff Agent");
+    if (outside) return outside;
 
     const brief = typeof body.brief === "string" ? body.brief.trim() : "";
     if (brief.length < 10) {
@@ -153,7 +157,7 @@ export async function POST(request: Request) {
 
     run = await beginOutline(run);
 
-    const plan = await getPlanner().plan({
+    const plan = await getPlanner((await providersFor(actor.workspaceId)).anthropic.key).plan({
       brief,
       allowedOrigins: origins,
       entryUrl: typeof body.entry_url === "string" ? body.entry_url : undefined,
