@@ -61,7 +61,9 @@ export default async function AgentRunPage({
         description={`Requested by ${run.requestedByEmail} ${relativeTime(run.createdAt)}.`}
         actions={
           <span className="flex items-center gap-3">
-            {finished && canEditPlan ? <ReviseButton runId={run.id} hasProject={Boolean(run.projectId)} /> : null}
+            {(finished || run.status === "awaiting_approval") && canEditPlan ? (
+              <ReviseButton runId={run.id} hasProject={Boolean(run.projectId)} waiting={run.status === "awaiting_approval"} />
+            ) : null}
             <RunStatusPill status={run.status} />
           </span>
         }

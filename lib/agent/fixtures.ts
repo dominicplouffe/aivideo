@@ -42,6 +42,8 @@ export interface FixtureRun {
   actions: FixtureAction[];
   /** The project the recording became, once the run finished. */
   projectId?: string | null;
+  /** Where the run starts, as typed when it was requested. */
+  entryUrl?: string | null;
 }
 
 export const agentRuns: FixtureRun[] = [

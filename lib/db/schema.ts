@@ -471,6 +471,8 @@ export const agentRuns = pgTable(
     projectId: uuid("project_id").references(() => projects.id, { onDelete: "set null" }),
     /** What somebody asked for, verbatim. */
     brief: text("brief").notNull(),
+    /** Where the run starts, as typed. Null when none was given. */
+    entryUrl: text("entry_url"),
     status: agentRunStatusEnum("status").notNull().default("drafted"),
     /** The plan, as steps. Nothing records until this is approved. */
     outline: jsonb("outline").$type<{ ordinal: number; intent: string; url?: string }[]>(),

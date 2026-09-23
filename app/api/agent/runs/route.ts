@@ -11,7 +11,7 @@ import { getPlanner, shapePlan } from "@/lib/agent/outline";
 import { enqueue } from "@/lib/jobs/queue";
 import {
   ApprovalError, RunStateError, actionsFor, approve, beginOutline, cancelRun, createRun,
-  getRun, hasOtherApprover, proposeOutline, reviseOutline, type OutlineStep,
+  getRun, hasOtherApprover, proposeOutline, reviseOutline,
 } from "@/lib/agent/run";
 
 /**
@@ -117,7 +117,14 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "The agent requires a database." }, { status: 503 });
   }
 
-  let body: { brief?: unknown; allowed_origins?: unknown; entry_url?: unknown; project_id?: unknown; revise_of?: unknown };
+  let body: {
+    brief?: unknown;
+    allowed_origins?: unknown;
+    entry_url?: unknown;
+    project_id?: unknown;
+    revise_of?: unknown;
+    keep_steps?: unknown;
+  };
   try {
     body = (await request.json()) as typeof body;
   } catch {
@@ -130,21 +137,19 @@ export async function POST(request: Request) {
     const outside = await assertFeature(actor.workspaceId, "agent", "The Riff Agent");
     if (outside) return outside;
 
-    // Revise and run again: a copy of a finished run — its brief, sites and
-    // plan — waiting for approval, to be edited first. The original stays
-    // as the record of what happened; a project it made is left alone, and
-    // the revised run, once recorded, makes a new one.
-    if (typeof body.revise_of === "string") {
-      if (!UUID.test(body.revise_of)) return NextResponse.json({ error: "No such run." }, { status: 404 });
-      const source = await getRun(actor.workspaceId, body.revise_of);
-      if (!source) return NextResponse.json({ error: "No such run." }, { status: 404 });
-      if (!["failed", "cancelled", "recorded"].includes(source.status)) {
-        return NextResponse.json({ error: "Only a finished run can be revised. Edit this one's plan instead." }, { status: 409 });
+    // A revision names the run it replaces. It carries every field of the
+    // form, edited or not; the steps are planned again from the brief unless
+    // the person chose to keep the ones they had.
+    let source: Awaited<ReturnType<typeof getRun>> = null;
+    if (body.revise_of !== undefined) {
+      if (typeof body.revise_of !== "string" || !UUID.test(body.revise_of)) {
+        return NextResponse.json({ error: "No such run." }, { status: 404 });
       }
-      let copy = await createRun({ workspaceId: actor.workspaceId, brief: source.brief, actor });
-      copy = await beginOutline(copy);
-      copy = await proposeOutline(copy, (source.outline ?? []) as OutlineStep[], source.allowedOrigins);
-      return NextResponse.json({ run: shape(copy), removed: [] }, { status: 201 });
+      source = await getRun(actor.workspaceId, body.revise_of);
+      if (!source) return NextResponse.json({ error: "No such run." }, { status: 404 });
+      if (source.status === "approved" || source.status === "recording") {
+        return NextResponse.json({ error: "That run is recording or about to; wait for it to finish, then revise it." }, { status: 409 });
+      }
     }
 
     const brief = typeof body.brief === "string" ? body.brief.trim() : "";
@@ -167,22 +172,37 @@ export async function POST(request: Request) {
       );
     }
 
+    const entryUrl = typeof body.entry_url === "string" && body.entry_url.trim() ? body.entry_url.trim() : null;
+
     let run = await createRun({
       workspaceId: actor.workspaceId,
       brief,
       actor,
+      entryUrl,
       projectId: typeof body.project_id === "string" && UUID.test(body.project_id) ? body.project_id : null,
     });
 
     run = await beginOutline(run);
 
-    const plan = await getPlanner((await providersFor(actor.workspaceId)).anthropic.key).plan({
-      brief,
-      allowedOrigins: origins,
-      entryUrl: typeof body.entry_url === "string" ? body.entry_url : undefined,
-    });
+    // Kept steps are checked against the sites as they are now, exactly as
+    // planned ones are: a step on a site that was taken off the list is
+    // removed and reported.
+    const plan =
+      source && body.keep_steps === true && (source.outline ?? []).length > 0
+        ? shapePlan((source.outline ?? []) as Record<string, unknown>[], origins)
+        : await getPlanner((await providersFor(actor.workspaceId)).anthropic.key).plan({
+            brief,
+            allowedOrigins: origins,
+            entryUrl: entryUrl ?? undefined,
+          });
 
     run = await proposeOutline(run, plan.outline, origins);
+
+    // A run still waiting for approval is replaced, not left beside its
+    // revision for somebody to approve by mistake.
+    if (source && source.status === "awaiting_approval") {
+      await cancelRun(source, actor, "Replaced by a revised run.").catch(() => {});
+    }
 
     return NextResponse.json(
       {

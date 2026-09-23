@@ -15,11 +15,25 @@ import { Icon } from "@/components/ui/Icon";
  * do there. A form that asks for the brief first and the boundary last
  * teaches people that the boundary is an afterthought.
  */
-export function RunRequestForm({ onDone }: { onDone?: () => void }) {
+/** A run being revised: every field it was requested with, to start the form from. */
+export interface RevisionSource {
+  id: string;
+  brief: string;
+  allowedOrigins: string[];
+  entryUrl: string | null;
+  status: string;
+  steps: number;
+  hasProject: boolean;
+}
+
+export function RunRequestForm({ onDone, revise }: { onDone?: () => void; revise?: RevisionSource }) {
   const router = useRouter();
-  const [brief, setBrief] = useState("");
-  const [origins, setOrigins] = useState("");
-  const [entryUrl, setEntryUrl] = useState("");
+  const [brief, setBrief] = useState(revise?.brief ?? "");
+  const [origins, setOrigins] = useState(revise?.allowedOrigins.join("\n") ?? "");
+  const [entryUrl, setEntryUrl] = useState(revise?.entryUrl ?? "");
+  // Planned again by default: a changed brief deserves new steps. Keeping
+  // them is for fixing the sites or the start page of a plan that was right.
+  const [keepSteps, setKeepSteps] = useState(false);
   const [pending, setPending] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
@@ -39,6 +53,7 @@ export function RunRequestForm({ onDone }: { onDone?: () => void }) {
             .map((entry) => entry.trim())
             .filter(Boolean),
           entry_url: entryUrl.trim() || undefined,
+          ...(revise ? { revise_of: revise.id, keep_steps: keepSteps } : {}),
         }),
       });
 
@@ -49,7 +64,8 @@ export function RunRequestForm({ onDone }: { onDone?: () => void }) {
 
       if (response.ok && body.run) {
         onDone?.();
-        router.push(`/app/agent/${body.run.id}`);
+        // Kept steps open in the editor: that is usually why they were kept.
+        router.push(`/app/agent/${body.run.id}${revise && keepSteps ? "?edit=1" : ""}`);
         router.refresh();
         return;
       }
@@ -103,6 +119,20 @@ export function RunRequestForm({ onDone }: { onDone?: () => void }) {
         />
       </Field>
 
+      {revise && revise.steps > 0 ? (
+        <label className="flex items-start gap-2.5 rounded-lg border border-[var(--line)] px-3 py-2.5 text-[0.8125rem] text-fg">
+          <input type="checkbox" checked={keepSteps} onChange={(e) => setKeepSteps(e.target.checked)} className="mt-0.5 size-4 accent-[var(--color-iris-500)]" />
+          <span>
+            Keep the current {revise.steps} steps
+            <span className="block text-2xs text-fg-faint">
+              {keepSteps
+                ? "The steps are copied as they are, checked against the sites above, and opened for editing."
+                : "Off: the steps are planned again from the brief above."}
+            </span>
+          </span>
+        </label>
+      ) : null}
+
       {message ? (
         <p role="alert" className="text-[0.8125rem] leading-relaxed text-rose-400">
           {message}
@@ -111,10 +141,18 @@ export function RunRequestForm({ onDone }: { onDone?: () => void }) {
 
       <div className="flex items-center gap-3">
         <Button type="submit" size="sm" disabled={pending}>
-          {pending ? "Planning…" : "Plan the run"}
+          {pending ? (keepSteps ? "Saving…" : "Planning…") : revise ? (keepSteps ? "Make the revised run" : "Plan the revised run") : "Plan the run"}
           {pending ? null : <Icon name="arrowRight" className="size-4" strokeWidth={2.2} />}
         </Button>
-        <p className="text-2xs text-fg-faint">Planning records nothing.</p>
+        <p className="text-2xs text-fg-faint">
+          {revise
+            ? revise.status === "awaiting_approval"
+              ? "Nothing records yet. The run you are revising is replaced."
+              : revise.hasProject
+                ? "Nothing records yet. The original run and its project stay as they are."
+                : "Nothing records yet. The original run stays as the record."
+            : "Planning records nothing."}
+        </p>
       </div>
     </form>
   );

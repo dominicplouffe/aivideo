@@ -260,11 +260,13 @@ function toViewRun(row: {
   error: string | null;
   createdAt: Date;
   projectId?: string | null;
+  entryUrl?: string | null;
 }): agentFixtures.FixtureRun {
   return {
     id: row.id,
     brief: row.brief,
     projectId: row.projectId ?? null,
+    entryUrl: row.entryUrl ?? null,
     status: row.status as agentFixtures.FixtureStatus,
     outline: (row.outline ?? []) as agentFixtures.FixtureRun["outline"],
     removed: [],

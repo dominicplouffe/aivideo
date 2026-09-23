@@ -133,12 +133,14 @@ export async function createRun(input: {
   brief: string;
   actor: ActingParty;
   projectId?: string | null;
+  entryUrl?: string | null;
 }): Promise<Run> {
   const [run] = await getDb()
     .insert(s.agentRuns)
     .values({
       workspaceId: input.workspaceId,
       brief: input.brief,
+      entryUrl: input.entryUrl ?? null,
       projectId: input.projectId ?? null,
       requestedBy: input.actor.memberId,
       requestedByEmail: input.actor.email,
