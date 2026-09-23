@@ -484,6 +484,12 @@ export const agentRuns = pgTable(
     outline: jsonb("outline").$type<{ ordinal: number; intent: string; url?: string }[]>(),
     /** Frozen at approval. The agent may reach these origins and no others. */
     allowedOrigins: jsonb("allowed_origins").$type<string[]>().notNull().default(sql`'[]'::jsonb`),
+    /**
+     * Services the run's pages may call — the app's own API, its payment or
+     * font host — which the agent never navigates to or types a password
+     * into. Frozen at approval like the sites.
+     */
+    requestOrigins: jsonb("request_origins").$type<string[]>().notNull().default(sql`'[]'::jsonb`),
     requestedBy: uuid("requested_by").references(() => members.id, { onDelete: "set null" }),
     requestedByEmail: text("requested_by_email"),
     /** Null until a person approves. Nothing records while it is null. */

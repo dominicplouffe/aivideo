@@ -28,6 +28,12 @@ import {
 
 export interface SessionOptions {
   allowedOrigins: string[];
+  /**
+   * Services the pages may call — an API, a payment or font host — without
+   * the agent ever opening them. A request to one is let through; a
+   * navigation of the page to one is refused like any other off-list page.
+   */
+  requestOrigins?: string[];
   viewport?: { width: number; height: number };
   /** Record the session to a video file in this directory. Absent in a dry run. */
   recordVideo?: { dir: string };
@@ -82,8 +88,16 @@ export async function openSession(browser: Browser, options: SessionOptions): Pr
       return;
     }
 
+    const request = route.request();
     const verdict = withinAllowlist(url, options.allowedOrigins);
     if (verdict.ok) {
+      await route.continue();
+      return;
+    }
+    // A service the pages may call. Only as a request from a page: the tab
+    // itself going there is a navigation off the list, and refused.
+    const navigating = request.isNavigationRequest() && request.frame() === request.frame().page().mainFrame();
+    if (!navigating && options.requestOrigins?.length && withinAllowlist(url, options.requestOrigins).ok) {
       await route.continue();
       return;
     }

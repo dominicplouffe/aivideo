@@ -227,6 +227,7 @@ describe("a run, end to end", { skip: !RUN }, () => {
       {
         brief: "Demo the shipments flow, briefly.",
         allowedOrigins: ["https://app.acme.com"],
+        requestOrigins: [],
         entryUrl: "https://app.acme.com/shipments",
         outline: [{ ordinal: 0, intent: "Open shipments", url: "https://app.acme.com/shipments" }],
         signIns: {},
@@ -238,7 +239,7 @@ describe("a run, end to end", { skip: !RUN }, () => {
     assert.equal(edited.entryUrl, "https://app.acme.com/shipments");
     assert.equal((edited.outline ?? []).length, 1);
     const approved = await approve(edited, approver);
-    await assert.rejects(() => updateRequest(approved, { brief: "x", allowedOrigins: [], entryUrl: null, outline: [], signIns: {} }, requester));
+    await assert.rejects(() => updateRequest(approved, { brief: "x", allowedOrigins: [], requestOrigins: [], entryUrl: null, outline: [], signIns: {} }, requester));
   });
 
   it("retries a stopped run as itself, one attempt later, back to approval", async () => {
@@ -250,7 +251,7 @@ describe("a run, end to end", { skip: !RUN }, () => {
 
     const retried = await retryRun(
       failed,
-      { brief: failed.brief, allowedOrigins: ["https://app.acme.com"], entryUrl: null, outline, signIns: {} },
+      { brief: failed.brief, allowedOrigins: ["https://app.acme.com"], requestOrigins: [], entryUrl: null, outline, signIns: {} },
       requester,
     );
     assert.equal(retried.id, run.id, "the same run");
@@ -286,7 +287,7 @@ describe("a run, end to end", { skip: !RUN }, () => {
     await getDb().update(s.agentRuns).set({ projectId: project.id }).where(eq(s.agentRuns.id, recording.id));
     const failed = await failRun({ ...recording, projectId: project.id }, "later failure");
     await assert.rejects(
-      () => retryRun(failed, { brief: failed.brief, allowedOrigins: ["https://app.acme.com"], entryUrl: null, outline, signIns: {} }, requester),
+      () => retryRun(failed, { brief: failed.brief, allowedOrigins: ["https://app.acme.com"], requestOrigins: [], entryUrl: null, outline, signIns: {} }, requester),
       ApprovalError,
     );
   });

@@ -183,6 +183,13 @@
       "when": 1790193584761,
       "tag": "0025_agent_run_attempts_and_sign_ins",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1790196090602,
+      "tag": "0026_agent_run_request_origins",
+      "breakpoints": true
     }
   ]
 }

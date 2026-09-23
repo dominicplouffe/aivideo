@@ -3,6 +3,7 @@ import { notFound, redirect } from "next/navigation";
 import { PageHeader } from "@/components/app/Shared";
 import { RunEditor } from "@/components/app/agent/RunEditor";
 import { editModeFor, type EditorMode } from "@/lib/agent/edit-mode";
+import { blockedHosts } from "@/lib/agent/blocked";
 import { getAgentRunDetail, viewerMay } from "@/lib/data";
 
 export const metadata: Metadata = { title: "Edit agent run" };
@@ -39,6 +40,12 @@ export default async function EditAgentRunPage({ params }: { params: Promise<{ i
             runId: run.id,
             brief: run.brief,
             allowedOrigins: run.allowedOrigins,
+            requestOrigins: run.requestOrigins ?? [],
+            // From the most recent attempt that ran: what it could not reach.
+            blocked: blockedHosts(
+              detail.actions.filter((a) => (a.attempt ?? 1) === Math.max(1, ...detail.actions.map((x) => x.attempt ?? 1))),
+              [...run.allowedOrigins, ...(run.requestOrigins ?? [])],
+            ),
             entryUrl: run.entryUrl ?? run.outline.find((step) => step.url)?.url ?? null,
             outline: run.outline,
             signIns: run.signIns ?? {},

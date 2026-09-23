@@ -48,6 +48,8 @@ export interface FixtureRun {
   entryUrl?: string | null;
   /** Which try this is, when it has been fixed and retried. */
   attempt?: number;
+  /** Services the pages may call but the agent never opens. */
+  requestOrigins?: string[];
   /** The saved sign-in chosen for each site, by label. */
   signIns?: Record<string, string>;
   /** The run this one re-records with changes. */

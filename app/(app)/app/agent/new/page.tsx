@@ -18,7 +18,7 @@ export default async function NewAgentRunPage() {
         <RunEditor
           mode="new"
           canManageSignIns={canManageSignIns}
-          initial={{ brief: "", allowedOrigins: [], entryUrl: null, outline: [], signIns: {} }}
+          initial={{ brief: "", allowedOrigins: [], requestOrigins: [], entryUrl: null, outline: [], signIns: {} }}
         />
       </div>
     </>

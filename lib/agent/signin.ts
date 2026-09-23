@@ -115,7 +115,7 @@ async function submitForm(page: Page, fieldSelector: string, words: RegExp): Pro
 export async function signInIfAsked(
   run: Run,
   page: Page,
-  options: { startedAt: number; outlineOrdinal?: number | null },
+  options: { startedAt: number; outlineOrdinal?: number | null; blockedCalls?: () => string[] },
 ): Promise<boolean> {
   if (!(await looksLikeSignIn(page))) return false;
 
@@ -186,6 +186,15 @@ export async function signInIfAsked(
       refusedReason: "the site did not accept the sign-in",
       atMs: at(),
     });
+    // A login that posts to a service this run does not allow never reaches
+    // the site at all. Said first, because it is not the password.
+    const blocked = (options.blockedCalls?.() ?? []).filter((o) => o !== origin);
+    if (blocked.length > 0) {
+      return stop(
+        "sign-in",
+        `The sign-in did not go through because the page's requests to ${blocked.join(", ")} were blocked — this run does not allow them. If that is your app's own service, add it under "Also allow requests to" in Edit and retry.`,
+      );
+    }
     return stop("sign-in", `The site at ${origin} did not accept the stored sign-in "${credential.label}". Check the email and password under Edit and retry. If the account uses two-factor codes, the agent cannot enter them.`);
   }
   await recordAction(run.id, { kind: "click", outlineOrdinal: options.outlineOrdinal ?? null, url: page.url(), target: "sign in", atMs: at() });
