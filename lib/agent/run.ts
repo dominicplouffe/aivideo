@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { and, asc, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
 import { getDb } from "@/lib/db/client";
 import * as s from "@/lib/db/schema";
 import { recordQuietly } from "@/lib/audit/log";
@@ -212,6 +212,7 @@ export async function approve(
     );
   }
 
+  const selfApproved = Boolean(run.requestedBy && run.requestedBy === approver.memberId);
   const updated = await move(run, "approved", {
     approvedBy: approver.memberId,
     approvedByEmail: approver.email,
@@ -222,8 +223,35 @@ export async function approve(
   await note(updated, approver, "agent.run_approved", {
     steps: run.outline.length,
     allowedOrigins: updated.allowedOrigins,
+    // Said in the trail, so a reviewer reading it later knows no second
+    // pair of eyes was available rather than assuming one looked.
+    selfApproved,
   });
   return updated;
+}
+
+/**
+ * Whether anybody other than this member could approve a run.
+ *
+ * The two-person rule needs two people. In a workspace where the requester
+ * is the only active member allowed to approve — a founder on their own —
+ * insisting on a second approver makes the agent unusable rather than
+ * safer, so the requester may approve their own run there, and the audit
+ * entry says so. The moment a second owner, admin or reviewer exists, the
+ * rule is back.
+ */
+export async function hasOtherApprover(workspaceId: string, memberId: string | null): Promise<boolean> {
+  const rows = await getDb()
+    .select({ id: s.members.id })
+    .from(s.members)
+    .where(
+      and(
+        eq(s.members.workspaceId, workspaceId),
+        isNull(s.members.deactivatedAt),
+        inArray(s.members.role, ["owner", "admin", "reviewer"]),
+      ),
+    );
+  return rows.some((row) => row.id !== memberId);
 }
 
 /**

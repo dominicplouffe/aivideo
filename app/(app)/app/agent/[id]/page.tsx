@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/Button";
 import { getCurrentActor } from "@/lib/auth/current";
 import { allowed } from "@/lib/auth/authorize";
 import { getAgentRunDetail } from "@/lib/data";
+import { hasOtherApprover } from "@/lib/agent/run";
 import { relativeTime } from "@/lib/utils";
 
 export const metadata: Metadata = { title: "Agent run" };
@@ -28,6 +29,9 @@ export default async function AgentRunPage({ params }: { params: Promise<{ id: s
     ? allowed(actor, "agent.approve", { workspaceId: actor.workspaceId })
     : true;
   const isRequester = actor ? actor.email === run.requestedByEmail : false;
+  // Alone in the workspace with approval rights: the requester may approve.
+  const soleApprover =
+    isRequester && actor ? !(await hasOtherApprover(actor.workspaceId, actor.memberId)) : false;
 
   return (
     <>
@@ -48,7 +52,8 @@ export default async function AgentRunPage({ params }: { params: Promise<{ id: s
               runId={run.id}
               requestedBy={run.requestedByEmail}
               canApprove={canApprove}
-              isRequester={isRequester}
+              isRequester={isRequester && !soleApprover}
+              soleApprover={soleApprover}
             />
           ) : null}
 

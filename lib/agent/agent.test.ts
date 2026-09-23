@@ -193,6 +193,20 @@ describe("a run, end to end", { skip: !RUN }, () => {
     ]);
   });
 
+  it("lets a requester approve their own run only when nobody else could", async () => {
+    const { hasOtherApprover } = await import("./run");
+    // Sam asked; Lead, an admin, could approve: the two-person rule holds.
+    assert.equal(await hasOtherApprover(WS, REQUESTER), true);
+    // Lead alone, as the only approver in the workspace, has nobody else.
+    assert.equal(await hasOtherApprover(WS, APPROVER), false);
+    // A second admin joins, and the rule is back for Lead too.
+    await getDb().insert(s.members).values({ workspaceId: WS, name: "Kim", email: "kim@acme.com", role: "admin" });
+    assert.equal(await hasOtherApprover(WS, APPROVER), true);
+    // Kim leaves; a deactivated member approves nothing.
+    await getDb().update(s.members).set({ deactivatedAt: new Date() }).where(eq(s.members.email, "kim@acme.com"));
+    assert.equal(await hasOtherApprover(WS, APPROVER), false);
+  });
+
   const outline = [
     { ordinal: 0, intent: "Open shipments", url: "https://app.acme.com/shipments" },
     { ordinal: 1, intent: "Create a shipment" },

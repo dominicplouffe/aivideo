@@ -11,7 +11,7 @@ import { getPlanner } from "@/lib/agent/outline";
 import { enqueue } from "@/lib/jobs/queue";
 import {
   ApprovalError, RunStateError, actionsFor, approve, beginOutline, cancelRun, createRun,
-  getRun, proposeOutline,
+  getRun, hasOtherApprover, proposeOutline,
 } from "@/lib/agent/run";
 
 /**
@@ -212,7 +212,9 @@ export async function PATCH(request: Request) {
 
     const updated =
       decision === "approve"
-        ? await approve(run, actor)
+        ? await approve(run, actor, {
+            allowSelfApproval: !(await hasOtherApprover(actor.workspaceId, actor.memberId)),
+          })
         : await cancelRun(run, actor, typeof body.reason === "string" ? body.reason : "cancelled");
 
     if (decision === "approve") {

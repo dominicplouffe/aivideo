@@ -25,11 +25,14 @@ export function ApprovalPanel({
   requestedBy,
   canApprove,
   isRequester,
+  soleApprover = false,
 }: {
   runId: string;
   requestedBy: string;
   canApprove: boolean;
   isRequester: boolean;
+  /** Nobody else in the workspace can approve, so the requester may. */
+  soleApprover?: boolean;
 }) {
   const router = useRouter();
   const [confirming, setConfirming] = useState(false);
@@ -92,12 +95,14 @@ export function ApprovalPanel({
   return (
     <div className="rounded-xl border border-amber-500/30 bg-amber-500/8 px-4 py-4">
       <p className="text-[0.875rem] font-medium text-fg-strong">
-        {confirming ? "Approve this run?" : "This run needs your approval"}
+        {confirming ? "Approve this run?" : soleApprover ? "Approve your own run" : "This run needs your approval"}
       </p>
       <p className="mt-1.5 text-[0.8125rem] leading-relaxed text-fg-subtle">
         {confirming
           ? "The agent will open a browser, sign in with the stored credential for each allowed origin, follow every step above and record the screen. It cannot reach anything else, and it cannot change the plan once you approve it. The recording becomes a project in Projects, with each step's narration as its script, ready for an AI voice."
-          : `${requestedBy} asked for this. Read the steps and the allowed origins before you agree — this is what the agent will do, and it is the only thing it can do.`}
+          : soleApprover
+            ? "You are the only person in this workspace who can approve runs, so you can approve your own. Read the steps and the allowed origins first; the audit log will record that you approved your own run. Once a second owner, admin or reviewer joins, someone else will have to approve."
+            : `${requestedBy} asked for this. Read the steps and the allowed origins before you agree — this is what the agent will do, and it is the only thing it can do.`}
       </p>
 
       {message ? (
