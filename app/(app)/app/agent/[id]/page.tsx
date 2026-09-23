@@ -6,17 +6,27 @@ import { ApprovalPanel } from "@/components/app/agent/ApprovalPanel";
 import { RunStatusPill } from "@/components/app/agent/RunStatusPill";
 import { RunTrail } from "@/components/app/agent/RunTrail";
 import { RunProgress } from "@/components/app/agent/RunProgress";
+import { EditablePlan, ReviseButton } from "@/components/app/agent/RunActions";
 import { Button } from "@/components/ui/Button";
 import { getCurrentActor } from "@/lib/auth/current";
 import { allowed } from "@/lib/auth/authorize";
 import { getAgentRunDetail } from "@/lib/data";
 import { hasOtherApprover } from "@/lib/agent/run";
+import { listCredentials } from "@/lib/agent/credentials";
+import Link from "next/link";
 import { relativeTime } from "@/lib/utils";
 
 export const metadata: Metadata = { title: "Agent run" };
 
-export default async function AgentRunPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function AgentRunPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<{ edit?: string }>;
+}) {
   const { id } = await params;
+  const { edit } = await searchParams;
   const detail = await getAgentRunDetail(id);
   if (!detail) notFound();
 
@@ -29,6 +39,16 @@ export default async function AgentRunPage({ params }: { params: Promise<{ id: s
     ? allowed(actor, "agent.approve", { workspaceId: actor.workspaceId })
     : true;
   const isRequester = actor ? actor.email === run.requestedByEmail : false;
+  const canEditPlan = actor ? allowed(actor, "agent.run", { workspaceId: actor.workspaceId }) : false;
+  const finished = run.status === "failed" || run.status === "cancelled" || run.status === "recorded";
+  // Which of the run's sites have a sign-in stored, so a missing one is
+  // said before approval rather than discovered when the run stops at a
+  // login screen. Wildcards are left out: a password is never bound to one.
+  const exactOrigins = run.allowedOrigins.filter((origin) => !origin.includes("*"));
+  const storedFor = actor
+    ? new Set((await listCredentials(actor.workspaceId)).filter((c) => !c.revoked).map((c) => c.origin))
+    : new Set<string>();
+  const missingSignIns = exactOrigins.filter((origin) => !storedFor.has(origin));
   // Alone in the workspace with approval rights: the requester may approve.
   const soleApprover =
     isRequester && actor ? !(await hasOtherApprover(actor.workspaceId, actor.memberId)) : false;
@@ -39,7 +59,12 @@ export default async function AgentRunPage({ params }: { params: Promise<{ id: s
         breadcrumb={[{ label: "Riff Agent", href: "/app/agent" }, { label: "Run" }]}
         title={headline(run.brief)}
         description={`Requested by ${run.requestedByEmail} ${relativeTime(run.createdAt)}.`}
-        actions={<RunStatusPill status={run.status} />}
+        actions={
+          <span className="flex items-center gap-3">
+            {finished && canEditPlan ? <ReviseButton runId={run.id} hasProject={Boolean(run.projectId)} /> : null}
+            <RunStatusPill status={run.status} />
+          </span>
+        }
       />
 
       <div className="grid gap-5 px-4 py-6 md:px-8 lg:grid-cols-[minmax(0,1fr)_340px]">
@@ -55,6 +80,20 @@ export default async function AgentRunPage({ params }: { params: Promise<{ id: s
               isRequester={isRequester && !soleApprover}
               soleApprover={soleApprover}
             />
+          ) : null}
+
+          {(run.status === "awaiting_approval" || run.status === "approved") && missingSignIns.length > 0 ? (
+            <div className="flex items-start gap-2.5 rounded-xl border border-[var(--line-strong)] bg-ink-900 px-4 py-3.5 text-[0.8125rem] leading-relaxed text-fg-subtle">
+              <Icon name="key" className="mt-0.5 size-4 shrink-0 text-fg-faint" strokeWidth={1.9} />
+              <span>
+                No sign-in is stored for <span className="font-mono text-fg">{missingSignIns.join(", ")}</span>. If this app
+                asks you to sign in, the run will stop at the login page.{" "}
+                <Link href="/app/agent" className="text-iris-300 underline-offset-2 hover:underline">
+                  Add a sign-in
+                </Link>{" "}
+                first; it is used for this run as soon as it is saved.
+              </span>
+            </div>
           ) : null}
 
           {run.status === "approved" || run.status === "recording" ? (
@@ -92,6 +131,12 @@ export default async function AgentRunPage({ params }: { params: Promise<{ id: s
           ) : null}
 
           <Panel title="The plan" className="overflow-hidden">
+            <EditablePlan
+              runId={run.id}
+              outline={run.outline}
+              canEdit={run.status === "awaiting_approval" && canEditPlan}
+              startEditing={run.status === "awaiting_approval" && edit === "1"}
+            >
             <ol className="divide-y divide-[var(--line)]">
               {run.outline.map((step) => (
                 <li key={step.ordinal} className="flex gap-3.5 px-5 py-3.5">
@@ -149,10 +194,11 @@ export default async function AgentRunPage({ params }: { params: Promise<{ id: s
                 </p>
               </div>
             ) : null}
+            </EditablePlan>
           </Panel>
 
           <Panel title="What it did" className="overflow-hidden">
-            <RunTrail actions={actions} />
+            <RunTrail actions={actions} runId={run.id} />
           </Panel>
         </div>
 

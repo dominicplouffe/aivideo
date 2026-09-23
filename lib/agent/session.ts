@@ -31,6 +31,12 @@ export interface SessionOptions {
   viewport?: { width: number; height: number };
   /** Record the session to a video file in this directory. Absent in a dry run. */
   recordVideo?: { dir: string };
+  /**
+   * Cookies and local storage from a sign-in made just before, in a session
+   * of its own, so the login screen is not in the recording. Held in memory
+   * for this run only; nothing is written to disk or kept afterwards.
+   */
+  storageState?: Awaited<ReturnType<BrowserContext["storageState"]>>;
   /** Called for every refused request, so the run audit can hold it. */
   onRefusal?: (event: { url: string; reason: AllowRefusal; resourceType: string }) => void;
   /** Injectable so allowlist tests need no DNS. */
@@ -57,9 +63,9 @@ export async function openSession(browser: Browser, options: SessionOptions): Pr
     // page and nothing else. Playwright writes it as the session runs and
     // finishes the file when the context closes.
     ...(options.recordVideo ? { recordVideo: { dir: options.recordVideo.dir, size: viewport } } : {}),
-    // No storage state is loaded and none is saved. A run starts signed out
-    // of everything and leaves nothing behind.
-    storageState: undefined,
+    // Nothing is loaded but the sign-in this run just made, and nothing is
+    // saved. A run leaves nothing behind.
+    storageState: options.storageState,
     acceptDownloads: false,
     // A recording of a customer's product is a recording of their
     // customers; a browser that volunteers a location or a camera during one

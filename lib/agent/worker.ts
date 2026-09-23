@@ -61,7 +61,7 @@ export async function processAgentOne(options: AgentWorkerOptions): Promise<Agen
       // unattended would put a second, half-finished attempt in the trail
       // under the same approval. Said on the run, in words a person can use.
       const message =
-        "The recording was interrupted part way (the recorder restarted) and nothing was saved. Request the run again to record it.";
+        "The recording was interrupted part way (the recorder restarted) and nothing was saved. Choose Revise and run again to record it.";
       await failRun(run, message);
       await fail(job.id, options.workerId, message, { permanent: true });
       return { jobId: job.id, runId, status: "failed", error: message };

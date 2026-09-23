@@ -1,5 +1,6 @@
 import type { Browser, Locator } from "playwright";
-import { credentialForOrigin } from "./credentials";
+import { signInIfAsked } from "./signin";
+import { keepEvidence } from "./evidence";
 import { openSession, type SessionOptions } from "./session";
 import {
   ApprovalError, beginRecording, failRun, finishRecording, outlineHash, recordAction,
@@ -87,26 +88,40 @@ export async function driveRun(run: Run, options: DriveOptions): Promise<DriveRe
   let completed = 0;
   const timings: StepTiming[] = [];
 
+  const onRefusal = (event: { url: string; reason: string; resourceType: string }) => {
+    refusals += 1;
+    // Not awaited: a refused subresource must not be able to stall the
+    // run. recordAction queues the writes per run, so they keep their order.
+    recordAction(current.id, {
+      kind: "refused",
+      url: event.url,
+      refusedReason: `${event.resourceType}: ${event.reason}`,
+      atMs: Date.now() - startedAt,
+    }).catch((error) => {
+      // A trail line that could not be written must not take the whole
+      // worker down with it; the refusal itself already happened.
+      console.error(`[agent] could not record a refusal for ${current.id}:`, error);
+    });
+  };
+
+  // Signed in first, off camera: a demo that opens on a login screen, with
+  // the account's email being typed, is not the demo anybody asked for.
+  let storageState: SessionOptions["storageState"];
+  try {
+    storageState = await signInOffCamera(current, options, startedAt, onRefusal);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    current = await failRun(current, message);
+    return { runId: current.id, status: current.status, completedSteps: 0, refusals, steps: [], videoPath: null, error: message };
+  }
+
   const session = await openSession(options.browser, {
     allowedOrigins: current.allowedOrigins,
     viewport: options.viewport,
     recordVideo: options.recordVideo,
+    storageState,
     resolve: options.resolve,
-    onRefusal: (event) => {
-      refusals += 1;
-      // Not awaited: a refused subresource must not be able to stall the
-      // run. recordAction queues the writes per run, so they keep their order.
-      recordAction(current.id, {
-        kind: "refused",
-        url: event.url,
-        refusedReason: `${event.resourceType}: ${event.reason}`,
-        atMs: Date.now() - startedAt,
-      }).catch((error) => {
-        // A trail line that could not be written must not take the whole
-        // worker down with it; the refusal itself already happened.
-        console.error(`[agent] could not record a refusal for ${current.id}:`, error);
-      });
-    },
+    onRefusal,
   });
 
   let closed: { videoPath: string | null } | null = null;
@@ -145,10 +160,17 @@ export async function driveRun(run: Run, options: DriveOptions): Promise<DriveRe
           atMs: Date.now() - startedAt,
         });
 
-        await maybeSignIn(current, session, startedAt);
+        // The app may still ask, on camera: a session that expired, or a
+        // page behind a second login. Signed in there too, or stopped.
+        if (await signInIfAsked(current, session.page, { startedAt, outlineOrdinal: step.ordinal })) {
+          await session.goto(step.url);
+        }
       }
 
-      if (step.action) await performAction(current, session, step, startedAt, options.stepTimeoutMs ?? 5000);
+      if (step.action) {
+        await performAction(current, session, step, startedAt, options.stepTimeoutMs ?? 5000);
+        await signInIfAsked(current, session.page, { startedAt, outlineOrdinal: step.ordinal });
+      }
 
       // Long enough on screen for the step's narration to be read at a
       // speaking pace, so the footage rarely needs holding. A step with no
@@ -244,6 +266,7 @@ async function performAction(
       const found = await firstVisible(candidates, timeoutMs);
       if (!found) {
         await recordAction(run.id, { kind: "click", ...base, refusedReason: "not found on the page", atMs: Date.now() - startedAt });
+        await keepEvidence(run, page, { outlineOrdinal: step.ordinal, startedAt, what: `looking for “${action.target}”` });
         return;
       }
       await found.click({ timeout: timeoutMs });
@@ -258,6 +281,7 @@ async function performAction(
       const found = await firstVisible(candidates, timeoutMs);
       if (!found) {
         await recordAction(run.id, { kind: "type", ...base, refusedReason: "not found on the page", atMs: Date.now() - startedAt });
+        await keepEvidence(run, page, { outlineOrdinal: step.ordinal, startedAt, what: `looking for “${action.target}”` });
         return;
       }
       // Typed at a human pace, so the footage shows the field filling in.
@@ -289,55 +313,31 @@ async function firstVisible(candidates: Locator[], timeoutMs: number): Promise<L
 }
 
 /**
- * Signs in, if there is a credential for wherever the browser actually is.
- *
- * The origin comes from `page.url()`, not from the outline. A step planned
- * for `https://app.acme.com` that redirected to an identity provider is
- * exactly the case where typing the stored password would be wrong, and it
- * is also exactly the case a plan-based check would get wrong.
- *
- * The typed value never reaches the audit trail. "Signed in as sam@acme.com
- * at app.acme.com" is the useful record; the password is not part of it.
+ * Opens a browser that is not recorded, goes where the run starts, and
+ * signs in if the app asks. Returns the resulting cookies and storage for
+ * the recording session, or nothing when no sign-in was needed.
  */
-async function maybeSignIn(
+async function signInOffCamera(
   run: Run,
-  session: Awaited<ReturnType<typeof openSession>>,
+  options: DriveOptions,
   startedAt: number,
-): Promise<void> {
-  const origin = new URL(session.page.url()).origin;
-  const credential = await credentialForOrigin(run.workspaceId, origin);
-  if (!credential) return;
-
-  const password = session.page.locator('input[type="password"]').first();
-  if ((await password.count()) === 0) return;
-
-  const username = session.page
-    .locator('input[type="email"], input[name="username"], input[name="email"]')
-    .first();
-
-  if (credential.username && (await username.count()) > 0) {
-    await username.fill(credential.username);
-  }
-  await password.fill(credential.secret);
-
-  await recordAction(run.id, {
-    kind: "type",
-    url: origin,
-    target: "sign-in form",
-    // The label and the account, never the secret.
-    detail: { credential: credential.label, username: credential.username },
-    atMs: Date.now() - startedAt,
+  onRefusal: SessionOptions["onRefusal"],
+): Promise<SessionOptions["storageState"]> {
+  const outline = (run.outline ?? []) as OutlineStep[];
+  const entry = outline.find((step) => step.url)?.url ?? run.allowedOrigins[0];
+  if (!entry || entry.includes("*")) return undefined;
+  const preflight = await openSession(options.browser, {
+    allowedOrigins: run.allowedOrigins,
+    viewport: options.viewport,
+    resolve: options.resolve,
+    onRefusal,
   });
-
-  const submit = session.page.locator('button[type="submit"], input[type="submit"]').first();
-  if ((await submit.count()) > 0) {
-    await submit.click();
-    await session.page.waitForLoadState("domcontentloaded").catch(() => {});
-    await recordAction(run.id, {
-      kind: "click",
-      url: session.page.url(),
-      target: "sign in",
-      atMs: Date.now() - startedAt,
-    });
+  try {
+    const verdict = await preflight.goto(entry);
+    if (!verdict.ok) return undefined;
+    const signedIn = await signInIfAsked(run, preflight.page, { startedAt });
+    return signedIn ? await preflight.context.storageState() : undefined;
+  } finally {
+    await preflight.close().catch(() => {});
   }
 }

@@ -172,6 +172,28 @@ export async function proposeOutline(
   });
 }
 
+/**
+ * Replaces the plan of a run that is waiting for approval.
+ *
+ * Only there: an approved plan is hashed and a recording one is running,
+ * and changing either would make "approved" mean something other than what
+ * was read. The approval, when it comes, covers the plan as edited.
+ */
+export async function reviseOutline(run: Run, outline: OutlineStep[], actor: ActingParty): Promise<Run> {
+  if (run.status !== "awaiting_approval") {
+    throw new RunStateError(run.status as RunStatus, "awaiting_approval");
+  }
+  if (outline.length === 0) throw new ApprovalError("A plan needs at least one step.");
+  const [updated] = await getDb()
+    .update(s.agentRuns)
+    .set({ outline })
+    .where(and(eq(s.agentRuns.id, run.id), eq(s.agentRuns.status, "awaiting_approval")))
+    .returning();
+  if (!updated) throw new RunStateError(run.status as RunStatus, "awaiting_approval");
+  await note(updated, actor, "agent.run_plan_edited", { steps: outline.length });
+  return updated;
+}
+
 export class ApprovalError extends Error {
   constructor(message: string) {
     super(message);

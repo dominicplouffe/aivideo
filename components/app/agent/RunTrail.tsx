@@ -27,7 +27,7 @@ function timestamp(ms: number): string {
   return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
 }
 
-export function RunTrail({ actions }: { actions: FixtureAction[] }) {
+export function RunTrail({ actions, runId }: { actions: FixtureAction[]; runId?: string }) {
   if (actions.length === 0) {
     return (
       <p className="px-5 py-10 text-center text-[0.875rem] text-fg-subtle">
@@ -76,6 +76,30 @@ export function RunTrail({ actions }: { actions: FixtureAction[] }) {
 
               {action.refusedReason ? (
                 <p className="mt-1 text-2xs leading-relaxed text-rose-400/90">{action.refusedReason}</p>
+              ) : null}
+
+              {/* What the browser showed when something failed: the screenshot,
+                  and the page's own words, so the line can be acted on. */}
+              {action.kind === "screenshot" && action.detail?.pageText ? (
+                <p className="mt-1 rounded-md border border-amber-500/25 bg-amber-500/[0.07] px-2 py-1 text-2xs leading-relaxed text-amber-200">
+                  The page said: “{String(action.detail.pageText)}”
+                </p>
+              ) : null}
+              {action.kind === "screenshot" && typeof action.detail?.evidence === "string" && runId ? (
+                <a
+                  href={`/api/agent/runs/${runId}/evidence?key=${encodeURIComponent(String(action.detail.evidence))}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="mt-1.5 block w-full max-w-sm overflow-hidden rounded-lg border border-[var(--line)] hover:border-[var(--line-strong)]"
+                  title="Open the full screenshot"
+                >
+                  <img
+                    src={`/api/agent/runs/${runId}/evidence?key=${encodeURIComponent(String(action.detail.evidence))}`}
+                    alt={`What the browser showed${action.target ? ` while ${action.target}` : ""}`}
+                    className="block w-full"
+                    loading="lazy"
+                  />
+                </a>
               ) : null}
 
               {action.detail?.value !== undefined && !action.detail?.credential ? (

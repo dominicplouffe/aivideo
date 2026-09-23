@@ -7,11 +7,11 @@ import * as s from "@/lib/db/schema";
 import { authorize, ForbiddenError } from "@/lib/auth/authorize";
 import { resolveActor, UnauthenticatedError } from "@/lib/auth/session";
 import { normaliseList } from "@/lib/agent/allowlist";
-import { getPlanner } from "@/lib/agent/outline";
+import { getPlanner, shapePlan } from "@/lib/agent/outline";
 import { enqueue } from "@/lib/jobs/queue";
 import {
   ApprovalError, RunStateError, actionsFor, approve, beginOutline, cancelRun, createRun,
-  getRun, hasOtherApprover, proposeOutline,
+  getRun, hasOtherApprover, proposeOutline, reviseOutline, type OutlineStep,
 } from "@/lib/agent/run";
 
 /**
@@ -117,7 +117,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "The agent requires a database." }, { status: 503 });
   }
 
-  let body: { brief?: unknown; allowed_origins?: unknown; entry_url?: unknown; project_id?: unknown };
+  let body: { brief?: unknown; allowed_origins?: unknown; entry_url?: unknown; project_id?: unknown; revise_of?: unknown };
   try {
     body = (await request.json()) as typeof body;
   } catch {
@@ -129,6 +129,23 @@ export async function POST(request: Request) {
     authorize(actor, "agent.run", { workspaceId: actor.workspaceId });
     const outside = await assertFeature(actor.workspaceId, "agent", "The Riff Agent");
     if (outside) return outside;
+
+    // Revise and run again: a copy of a finished run — its brief, sites and
+    // plan — waiting for approval, to be edited first. The original stays
+    // as the record of what happened; a project it made is left alone, and
+    // the revised run, once recorded, makes a new one.
+    if (typeof body.revise_of === "string") {
+      if (!UUID.test(body.revise_of)) return NextResponse.json({ error: "No such run." }, { status: 404 });
+      const source = await getRun(actor.workspaceId, body.revise_of);
+      if (!source) return NextResponse.json({ error: "No such run." }, { status: 404 });
+      if (!["failed", "cancelled", "recorded"].includes(source.status)) {
+        return NextResponse.json({ error: "Only a finished run can be revised. Edit this one's plan instead." }, { status: 409 });
+      }
+      let copy = await createRun({ workspaceId: actor.workspaceId, brief: source.brief, actor });
+      copy = await beginOutline(copy);
+      copy = await proposeOutline(copy, (source.outline ?? []) as OutlineStep[], source.allowedOrigins);
+      return NextResponse.json({ run: shape(copy), removed: [] }, { status: 201 });
+    }
 
     const brief = typeof body.brief === "string" ? body.brief.trim() : "";
     if (brief.length < 10) {
@@ -188,7 +205,7 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ error: "The agent requires a database." }, { status: 503 });
   }
 
-  let body: { id?: unknown; decision?: unknown; reason?: unknown };
+  let body: { id?: unknown; decision?: unknown; reason?: unknown; outline?: unknown };
   try {
     body = (await request.json()) as typeof body;
   } catch {
@@ -200,6 +217,24 @@ export async function PATCH(request: Request) {
 
   try {
     const actor = await resolveActor(request);
+
+    if (body.decision === "edit") {
+      authorize(actor, "agent.run", { workspaceId: actor.workspaceId });
+      const run = await getRun(actor.workspaceId, id);
+      if (!run) return NextResponse.json({ error: "No such run." }, { status: 404 });
+      const raw = Array.isArray(body.outline) ? (body.outline as Record<string, unknown>[]) : [];
+      // Checked exactly as a planned outline is: a step off the allowlist is
+      // removed and reported, never kept.
+      const plan = shapePlan(raw, run.allowedOrigins);
+      if (plan.removed.length > 0) {
+        return NextResponse.json(
+          { error: `Step "${plan.removed[0].intent}" goes to ${plan.removed[0].url ?? "a page"}, ${plan.removed[0].reason}.` },
+          { status: 422 },
+        );
+      }
+      const updated = await reviseOutline(run, plan.outline, actor);
+      return NextResponse.json({ run: shape(updated) });
+    }
 
     const decision = body.decision === "approve" ? "approve" : "cancel";
     authorize(

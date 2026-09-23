@@ -4,13 +4,14 @@ import { PageHeader, Panel, StatTile, EmptyState } from "@/components/app/Shared
 import { Icon } from "@/components/ui/Icon";
 import { RunStatusPill } from "@/components/app/agent/RunStatusPill";
 import { RunRequestForm } from "@/components/app/agent/RunRequestForm";
-import { getAgentRuns } from "@/lib/data";
+import { getAgentRuns, viewerMay } from "@/lib/data";
+import { SignInsPanel } from "@/components/app/agent/SignInsPanel";
 import { relativeTime } from "@/lib/utils";
 
 export const metadata: Metadata = { title: "Riff Agent" };
 
 export default async function AgentPage() {
-  const runs = await getAgentRuns();
+  const [runs, canManageSignIns] = await Promise.all([getAgentRuns(), viewerMay("agent.credentials.manage")]);
   const waiting = runs.filter((run) => run.status === "awaiting_approval");
   const recorded = runs.filter((run) => run.status === "recorded");
   const stopped = runs.filter((run) => run.status === "failed");
@@ -81,6 +82,10 @@ export default async function AgentPage() {
               </div>
             </Panel>
 
+            <Panel title="Sign-ins">
+              <SignInsPanel canManage={canManageSignIns} suggestedOrigins={[...new Set(runs.flatMap((run) => run.allowedOrigins))].filter((o) => !o.includes("*"))} />
+            </Panel>
+
             <Panel title="What the agent cannot do">
               <ul className="space-y-3.5 px-5 py-5">
                 {[
@@ -97,7 +102,7 @@ export default async function AgentPage() {
                   {
                     icon: "key" as const,
                     title: "Type a password anywhere else",
-                    body: "A credential is bound to one exact origin and checked against where the browser actually is, which is what a redirect changes.",
+                    body: "A sign-in is bound to one exact site and checked against where the browser actually is, which is what a redirect changes.",
                   },
                   {
                     icon: "eye" as const,
