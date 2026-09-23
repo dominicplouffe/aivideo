@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { providersFor } from "@/lib/providers/for-workspace";
 import { assertFeature } from "@/lib/api/plan-gate";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, lt, sql } from "drizzle-orm";
 import { getDb, isDatabaseConfigured } from "@/lib/db/client";
 import * as s from "@/lib/db/schema";
 import { authorize, ForbiddenError } from "@/lib/auth/authorize";
@@ -84,6 +84,7 @@ export async function GET(request: Request) {
       const actions = await actionsFor(run.id);
       return NextResponse.json({
         run: shape(run),
+        queue: run.status === "approved" ? await queuePlace(run.id) : null,
         actions: actions.map((action) => ({
           ordinal: action.ordinal,
           kind: action.kind,
@@ -233,4 +234,24 @@ export async function PATCH(request: Request) {
   } catch (error) {
     return handle(error);
   }
+}
+
+/**
+ * Where an approved run's job stands: when it joined the line and how much
+ * background work is ahead of it. Renders go first in the worker, so every
+ * queued job created earlier counts, whatever its kind.
+ */
+async function queuePlace(runId: string): Promise<{ queued_at: string; ahead: number } | null> {
+  const [job] = await getDb()
+    .select({ createdAt: s.jobs.createdAt, status: s.jobs.status })
+    .from(s.jobs)
+    .where(and(eq(s.jobs.kind, "agent"), sql`${s.jobs.payload}->>'runId' = ${runId}`))
+    .orderBy(desc(s.jobs.createdAt))
+    .limit(1);
+  if (!job || job.status !== "queued") return null;
+  const [ahead] = await getDb()
+    .select({ n: sql<number>`count(*)::int` })
+    .from(s.jobs)
+    .where(and(sql`${s.jobs.status} in ('queued', 'running')`, lt(s.jobs.createdAt, job.createdAt)));
+  return { queued_at: job.createdAt.toISOString(), ahead: Number(ahead?.n ?? 0) };
 }

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { SHOW_OPERATOR_HINTS, WORKER_COMMAND } from "@/lib/ops";
 import { cn, formatDuration } from "@/lib/utils";
 import { Icon, type IconName } from "@/components/ui/Icon";
 import { Button } from "@/components/ui/Button";
@@ -11,14 +12,6 @@ import { CARD_SECONDS } from "@/lib/brand";
 
 type Step = "configure" | "rendering" | "done" | "error";
 
-/**
- * How to start a worker here. In development the watching variant, which
- * restarts itself on every code change the way `next dev` does — a worker
- * started once and left running quietly renders with code the app has
- * since moved past. In production a deploy restarts it, and the plain
- * command is the one a process supervisor runs.
- */
-const WORKER_COMMAND = process.env.NODE_ENV === "development" ? "npm run worker:dev" : "npm run worker";
 
 /** What the worker reports about a narrated render. See lib/render/narration.ts. */
 interface NarrationSummary {
@@ -348,7 +341,7 @@ export function ExportDialog({
                 </div>
                 <p className="mt-4 text-center text-[0.875rem] text-fg">
                   {stalled
-                    ? "Waiting for a render worker…"
+                    ? "Waiting its turn…"
                     : project.voiceId
                       ? "Narrating and encoding your video…"
                       : "Encoding your video…"}
@@ -358,11 +351,18 @@ export function ExportDialog({
                 </p>
                 {stalled ? (
                   <p className="mt-4 rounded-xl border border-amber-500/25 bg-amber-500/[0.07] p-3.5 text-center text-2xs leading-relaxed text-amber-200">
-                    The job is queued and nothing has picked it up yet. Either a worker is busy
-                    with an earlier render and this one is next, or none is running — renders
-                    run in a separate process; start one with{" "}
-                    <code className="font-mono">{WORKER_COMMAND}</code> and this will continue on
-                    its own.
+                    Your video is in line and starts as soon as the one ahead of it finishes. You can
+                    close this window; the export keeps going and the video appears in the project
+                    when it is done.
+                    {SHOW_OPERATOR_HINTS ? (
+                      <>
+                        {" "}
+                        <span className="text-amber-300/80">
+                          Developing locally? Renders run in a separate process: start it with{" "}
+                          <code className="font-mono">{WORKER_COMMAND}</code>.
+                        </span>
+                      </>
+                    ) : null}
                   </p>
                 ) : null}
               </div>
@@ -395,7 +395,9 @@ export function ExportDialog({
                 </div>
               </div>
 
-              {staleWorker ? (
+              {/* An operator's problem, not the customer's: shown only where
+                  the person reading it is the one who can restart it. */}
+              {staleWorker && SHOW_OPERATOR_HINTS ? (
                 <p className="flex items-start gap-2.5 rounded-xl border border-amber-500/30 bg-amber-500/[0.08] p-3.5 text-[0.8125rem] leading-relaxed text-amber-200">
                   <Icon name="alert" className="mt-0.5 size-4 shrink-0" strokeWidth={1.9} />
                   <span>
