@@ -1,8 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
-import { useEffect, useState } from "react";
+import { usePathname, useRouter } from "next/navigation";
+import { useEffect, useRef, useState } from "react";
+import { DEBUG_COOKIE } from "@/lib/debug";
 
 /** Where the sidebar's collapsed state is kept, per device. */
 const SIDEBAR_KEY = "demoriff.sidebar";
@@ -18,6 +19,8 @@ interface NavEntry {
   href: string;
   icon: IconName;
   badge?: string;
+  /** Only listed while debug mode is on. */
+  debugOnly?: boolean;
 }
 
 const primary: NavEntry[] = [
@@ -25,7 +28,8 @@ const primary: NavEntry[] = [
   { label: "Projects", href: "/app/projects", icon: "folder" },
   { label: "Guides", href: "/app/guides", icon: "doc" },
   { label: "Interactive demos", href: "/app/demos", icon: "cursor" },
-  { label: "Riff Agent", href: "/app/agent", icon: "rocket", badge: "Beta" },
+  // Shown only in debug mode (⌘/): see lib/debug.ts.
+  { label: "Riff Agent", href: "/app/agent", icon: "rocket", badge: "Debug", debugOnly: true },
   { label: "Analytics", href: "/app/analytics", icon: "chart" },
 ];
 
@@ -65,11 +69,14 @@ export interface ShellViewer {
 
 export function AppShell({
   children,
+  debug = false,
   usage = null,
   viewer = null,
   projects = [],
 }: {
   children: React.ReactNode;
+  /** Debug mode: features not ready to be shown. Toggled with ⌘/. */
+  debug?: boolean;
   /** Real metered usage, or null when there is nothing measured to show. */
   usage?: ShellUsage | null;
   /** The signed-in member. Null only while the layout is gating. */
@@ -78,6 +85,15 @@ export function AppShell({
   projects?: PaletteProject[];
 }) {
   const pathname = usePathname();
+  const router = useRouter();
+  const debugRef = useRef(debug);
+  debugRef.current = debug;
+  const [debugNotice, setDebugNotice] = useState<string | null>(null);
+  useEffect(() => {
+    if (!debugNotice) return;
+    const timer = setTimeout(() => setDebugNotice(null), 2500);
+    return () => clearTimeout(timer);
+  }, [debugNotice]);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
 
@@ -130,6 +146,14 @@ export function AppShell({
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
         setPaletteOpen((v) => !v);
+      }
+      // ⌘/ / Ctrl+/ toggles debug mode, for features not ready to show.
+      if ((e.metaKey || e.ctrlKey) && e.key === "/") {
+        e.preventDefault();
+        const on = !debugRef.current;
+        document.cookie = `${DEBUG_COOKIE}=${on ? "1" : "0"}; path=/; max-age=${on ? 60 * 60 * 24 * 365 : 0}; samesite=lax`;
+        setDebugNotice(on ? "Debug mode on: Riff Agent is visible." : "Debug mode off.");
+        router.refresh();
       }
       // ⌘B / Ctrl+B, the editor convention, folds the sidebar.
       if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === "b") {
@@ -212,7 +236,7 @@ export function AppShell({
         </div>
 
         <nav className={cn("flex-1 overflow-y-auto pb-3", rail ? "px-2" : "px-3")} aria-label="Application">
-          <NavGroup entries={primary} pathname={pathname} rail={rail} />
+          <NavGroup entries={primary.filter((e) => debug || !e.debugOnly)} pathname={pathname} rail={rail} />
           <NavGroup label="Studio" entries={studio} pathname={pathname} rail={rail} />
           <NavGroup label="Workspace" entries={admin} pathname={pathname} rail={rail} />
         </nav>
@@ -374,6 +398,12 @@ export function AppShell({
       </div>
 
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} projects={projects} />
+
+      {debugNotice ? (
+        <div role="status" className="fixed bottom-4 left-1/2 z-50 -translate-x-1/2 rounded-lg border border-[var(--line-strong)] bg-ink-900 px-3.5 py-2 text-[0.8125rem] text-fg shadow-lg">
+          {debugNotice}
+        </div>
+      ) : null}
     </div>
   );
 }

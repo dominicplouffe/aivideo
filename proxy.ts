@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
+import { debugFromCookieHeader } from "@/lib/debug";
 
 /**
  * Cross-origin write protection, applied once.
@@ -64,6 +65,11 @@ function trustedOrigins(request: NextRequest): string[] {
 }
 
 export default function proxy(request: NextRequest) {
+  // The Riff Agent is behind debug mode (⌘/). Its API is as absent as its
+  // pages until then; see lib/debug.ts.
+  if (request.nextUrl.pathname.startsWith("/api/agent/") && !debugFromCookieHeader(request.headers.get("cookie"))) {
+    return NextResponse.json({ error: "Not found." }, { status: 404 });
+  }
   if (!MUTATING.has(request.method)) return NextResponse.next();
 
   const origin = request.headers.get("origin");

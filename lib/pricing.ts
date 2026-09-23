@@ -48,7 +48,6 @@ export const plans: Plan[] = [
       { label: "Finished minutes", value: `${minutes(c.free.videoSecondsPerPeriod)} / mo` },
       { label: "Projects", value: `${c.free.projects}` },
       { label: "Brand kits", value: `${c.free.features.brandKits}` },
-      { label: "Riff Agent", value: "No" },
     ],
   },
   {
@@ -62,7 +61,7 @@ export const plans: Plan[] = [
       "Unlimited projects",
       `${minutes(c.byok.videoSecondsPerPeriod).replace(/\B(?=(\d{3})+(?!\d))/g, ",")} finished minutes a month`,
       "Unlimited Tighten, Cut to length and Riff",
-      "Riff Agent, brand kits, voice cloning",
+      "Brand kits and voice cloning",
       "Your Deepgram, ElevenLabs and Anthropic keys, billed by them to you",
       "Twelve-month term",
     ],
@@ -70,7 +69,6 @@ export const plans: Plan[] = [
       { label: "Finished minutes", value: `${minutes(c.byok.videoSecondsPerPeriod)} / mo` },
       { label: "Projects", value: "Unlimited" },
       { label: "Brand kits", value: "Unlimited" },
-      { label: "Riff Agent", value: "Yes" },
     ],
   },
   {
@@ -86,7 +84,7 @@ export const plans: Plan[] = [
       `${c.studio.projects} projects, more in packs of ${pack.size}`,
       `${minutes(c.studio.videoSecondsPerPeriod)} finished minutes a month, +${pack.extraSeconds / 60} per pack`,
       `${c.studio.ai.suggestionsPerPeriod} suggested cuts and ${c.studio.ai.riffMessagesPerPeriod} Riff messages a month`,
-      "Riff Agent, brand kits, voice cloning",
+      "Brand kits and voice cloning",
       "Our vendor accounts do the work",
       `Overage at ${formatOverage("studio")}, or a hard stop you control`,
     ],
@@ -94,7 +92,6 @@ export const plans: Plan[] = [
       { label: "Finished minutes", value: `${minutes(c.studio.videoSecondsPerPeriod)} / mo` },
       { label: "Projects", value: `${c.studio.projects} (+${pack.size} per pack)` },
       { label: "Brand kits", value: "Unlimited" },
-      { label: "Riff Agent", value: "Yes" },
     ],
   },
   {
@@ -115,7 +112,6 @@ export const plans: Plan[] = [
       { label: "Finished minutes", value: "By agreement" },
       { label: "Projects", value: "Unlimited" },
       { label: "Brand kits", value: "Unlimited" },
-      { label: "Riff Agent", value: "Yes" },
     ],
   },
 ];
@@ -156,7 +152,6 @@ export const compareGroups: CompareGroup[] = [
       { label: "AI voice narration, fitted to your footage", values: all(T) },
       { label: "Tighten and Cut to length", hint: "Suggested cuts you preview, apply and undo", values: { free: `${c.free.ai.suggestionsPerPeriod} / mo`, byok: "Unlimited", studio: `${c.studio.ai.suggestionsPerPeriod} / mo`, enterprise: "Unlimited" } },
       { label: "Riff co-editor", values: { free: `${c.free.ai.riffMessagesPerPeriod} msgs / mo`, byok: "Unlimited", studio: `${c.studio.ai.riffMessagesPerPeriod} / mo`, enterprise: "Unlimited" } },
-      { label: "Riff Agent, autonomous capture", values: { free: F, byok: T, studio: T, enterprise: T } },
       { label: "Voice cloning", values: { free: F, byok: T, studio: T, enterprise: T } },
       { label: "Whose vendor accounts do the work", values: { free: "Ours", byok: "Yours", studio: "Ours", enterprise: "Ours or yours" } },
     ],

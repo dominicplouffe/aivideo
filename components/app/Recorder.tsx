@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/Button";
 import { Panel } from "./Shared";
 
 
-type Mode = "record" | "import" | "agent";
+type Mode = "record" | "import";
 type Phase = "setup" | "live" | "review" | "processing";
 
 interface CapturedEvent {
@@ -25,7 +25,7 @@ export function Recorder({ collections = [] }: { collections?: string[] }) {
   const router = useRouter();
   const initialMode = (params.get("mode") as Mode) ?? "record";
   const [mode, setMode] = useState<Mode>(
-    ["record", "import", "agent"].includes(initialMode) ? initialMode : "record",
+    ["record", "import"].includes(initialMode) ? initialMode : "record",
   );
 
   return (
@@ -35,7 +35,6 @@ export function Recorder({ collections = [] }: { collections?: string[] }) {
           {([
             { id: "record", label: "Record", icon: "record" },
             { id: "import", label: "Import", icon: "upload" },
-            { id: "agent", label: "Brief the agent", icon: "sparkles" },
           ] as { id: Mode; label: string; icon: IconName }[]).map((t) => (
             <button
               key={t.id}
@@ -54,7 +53,6 @@ export function Recorder({ collections = [] }: { collections?: string[] }) {
 
         {mode === "record" ? <RecordFlow collections={collections} onDone={(id) => router.push(`/app/studio/${id}`)} /> : null}
         {mode === "import" ? <ImportFlow onDone={(id) => router.push(`/app/studio/${id}`)} /> : null}
-        {mode === "agent" ? <AgentFlow /> : null}
       </div>
     </div>
   );
@@ -1067,158 +1065,6 @@ function ImportFlow({ onDone }: { onDone: (id: string) => void }) {
   );
 }
 
-/* ============================================================ agent */
-
-/**
- * Brief the agent.
- *
- * This tab used to run a 70-tick `setInterval` and then navigate to
- * `projects[2].id` — a hardcoded fixture project with no relationship to
- * anything the person had typed. While the timer ran it reported eight named
- * stages ("Driving your app", "Rendering video, guide, tour and clips") as
- * though each had happened. The brief, the origin, the audience and the
- * length were all discarded.
- *
- * It posts to `/api/agent/runs` now, which is the same endpoint the agent
- * page's own form has always used. This was a second front door onto a
- * feature that already had a working one.
- */
-function AgentFlow() {
-  const router = useRouter();
-  const [brief, setBrief] = useState("");
-  const [origins, setOrigins] = useState("");
-  const [pending, setPending] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const start = async () => {
-    setPending(true);
-    setError(null);
-    try {
-      const response = await fetch("/api/agent/runs", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          brief: brief.trim(),
-          allowed_origins: origins
-            .split(/[\s,]+/)
-            .map((entry) => entry.trim())
-            .filter(Boolean),
-        }),
-      });
-      const body = (await response.json().catch(() => ({}))) as {
-        run?: { id: string };
-        error?: string;
-      };
-      if (!response.ok || !body.run) throw new Error(body.error ?? "That run could not be planned.");
-
-      // To the run, not to a project: a run produces an outline first, and
-      // the outline is the thing waiting for a decision.
-      router.push(`/app/agent/${body.run.id}`);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
-    } finally {
-      setPending(false);
-    }
-  };
-
-  return (
-    <div className="grid gap-4 lg:grid-cols-[1fr_20rem]">
-      <Panel title="Brief Riff Agent" description="It drafts an outline first. Nothing records until you approve it.">
-        <div className="space-y-5 p-5">
-          <div>
-            <label htmlFor="brief" className="text-[0.8125rem] font-medium text-fg">
-              What should the demo cover?
-            </label>
-            <textarea
-              id="brief"
-              rows={4}
-              value={brief}
-              onChange={(e) => setBrief(e.target.value)}
-              placeholder="Make a 90-second demo of the new rate-shopping feature for logistics buyers. Lead with the price comparison, not the setup."
-              className="mt-2 w-full resize-y rounded-xl border border-[var(--line)] bg-ink-900 px-3.5 py-3 text-[0.8125rem] leading-relaxed text-fg placeholder:text-fg-faint focus:border-iris-500/50 focus:outline-none"
-            />
-          </div>
-
-          <div>
-            <label htmlFor="origins" className="text-[0.8125rem] font-medium text-fg">
-              Where the agent may go
-            </label>
-            <textarea
-              id="origins"
-              rows={2}
-              value={origins}
-              onChange={(e) => setOrigins(e.target.value)}
-              placeholder={"https://staging.example.com\nhttps://demo.example.com"}
-              className="mt-2 w-full resize-y rounded-xl border border-[var(--line)] bg-ink-900 px-3.5 py-3 font-mono text-[0.75rem] leading-relaxed text-fg placeholder:text-fg-faint focus:border-iris-500/50 focus:outline-none"
-            />
-            {/*
-              A real allowlist, typed by the person, sent to the server and
-              enforced by the driver. The dropdown this replaced offered two
-              hardcoded hostnames under the words "Allowlisted environments
-              only" and sent neither anywhere.
-            */}
-            <p className="mt-1.5 text-2xs leading-relaxed text-fg-faint">
-              One origin per line. The agent cannot reach anything else — not a link on the page,
-              not a script, not a redirect.
-            </p>
-          </div>
-
-          <div className="flex items-start gap-2.5 rounded-xl border border-[var(--line)] bg-ink-900 p-3.5">
-            <Icon name="shield" className="mt-0.5 size-4 shrink-0 text-mint-400" strokeWidth={1.9} />
-            <p className="text-[0.8125rem] leading-relaxed text-fg-subtle">
-              The run plans an outline and stops. Nothing is recorded, and nothing is published,
-              until you approve it on the run page.
-            </p>
-          </div>
-
-          {error ? (
-            <p
-              role="alert"
-              className="rounded-xl border border-rose-500/30 bg-rose-500/[0.07] px-3.5 py-2.5 text-[0.8125rem] text-rose-200"
-            >
-              {error}
-            </p>
-          ) : null}
-
-          <Button
-            size="md"
-            disabled={pending || brief.trim().length < 10 || origins.trim() === ""}
-            onClick={() => void start()}
-          >
-            <Icon name="sparkles" className="size-4" strokeWidth={2} />
-            {pending ? "Planning…" : "Draft the outline"}
-          </Button>
-        </div>
-      </Panel>
-
-      <Panel title="How the agent works">
-        <ol className="divide-y divide-[var(--line)]">
-          {[
-            { t: "Reads your context", d: "Changelog, Linear issue, existing docs, previous videos" },
-            { t: "Proposes an outline", d: "Beats, angle, length — you approve before it records" },
-            { t: "Drives your app", d: "Isolated browser, scoped credentials, allowlisted URL" },
-            { t: "Cuts and voices it", d: "Your brand kit, your house voice, your glossary" },
-            { t: "Waits for you", d: "Lands in review. Never publishes on its own." },
-          ].map((s, i) => (
-            <li key={s.t} className="flex gap-3 px-5 py-3">
-              <span className="inline-flex size-5 shrink-0 items-center justify-center rounded-md bg-iris-500/15 font-mono text-2xs text-iris-300">
-                {i + 1}
-              </span>
-              <span className="min-w-0">
-                <span className="block text-[0.8125rem] text-fg">{s.t}</span>
-                <span className="block text-2xs leading-snug text-fg-faint">{s.d}</span>
-              </span>
-            </li>
-          ))}
-        </ol>
-      </Panel>
-    </div>
-  );
-}
-
-/* ============================================================ shared bits */
-
-/** The recording state, in one glance: red while recording, amber while paused. */
 function RecPill({ elapsed, paused, resumingIn }: { elapsed: number; paused: boolean; resumingIn: number | null }) {
   const resuming = resumingIn !== null;
   return (

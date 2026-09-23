@@ -11,7 +11,6 @@ export const metadata: Metadata = { title: "Home" };
 const quickActions: { label: string; hint: string; href: string; icon: IconName }[] = [
   { label: "Record your screen", hint: "4K capture with intent tracking", href: "/app/new", icon: "record" },
   { label: "Import a video", hint: "Loom, Zoom, Drive or a file", href: "/app/new?mode=import", icon: "upload" },
-  { label: "Brief Riff Agent", hint: "Describe it, review the cut", href: "/app/new?mode=agent", icon: "sparkles" },
   { label: "Translate a project", hint: "34 languages, no extra minutes", href: "/app/localization", icon: "globe" },
 ];
 

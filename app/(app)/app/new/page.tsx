@@ -16,7 +16,7 @@ export default async function NewRecordingPage() {
     <>
       <PageHeader
         title="New recording"
-        description="Record your screen, import existing footage, or brief the agent to record it for you."
+        description="Record your screen, or import footage you already have."
         breadcrumb={[{ label: "Projects", href: "/app/projects" }, { label: "New" }]}
       />
       <Suspense fallback={<div className="px-8 py-10 text-[0.875rem] text-fg-subtle">Loading…</div>}>

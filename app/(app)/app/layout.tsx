@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { AppShell } from "@/components/app/AppShell";
+import { debugEnabled } from "@/lib/debug";
 import { authRequired, getCurrentActor } from "@/lib/auth/current";
 import { getProjects, getUsage, getViewer } from "@/lib/data";
 
@@ -34,10 +35,11 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   // Read here rather than fetched by the shell: both are server reads the
   // layout is already awaiting, and a usage meter that arrives a beat after
   // the page is a number people watch change.
-  const [usage, viewer, projects] = await Promise.all([getUsage(), getViewer(), getProjects()]);
+  const [usage, viewer, projects, debug] = await Promise.all([getUsage(), getViewer(), getProjects(), debugEnabled()]);
 
   return (
     <AppShell
+      debug={debug}
       usage={usage}
       viewer={viewer}
       // The ⌘K palette searched the seeded fixtures, so a workspace with no
