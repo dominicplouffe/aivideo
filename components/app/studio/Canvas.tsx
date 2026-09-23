@@ -6,7 +6,7 @@ import { Icon } from "@/components/ui/Icon";
 import { MockApp } from "@/components/marketing/MockApp";
 import type { Project, Segment } from "@/lib/app-data";
 import type { EditState } from "./types";
-import { BrandCaption, BrandLogo, useBrandFont } from "@/components/app/brand/BrandPreview";
+import { BrandCaption, BrandCard, BrandLogo, useBrandFont } from "@/components/app/brand/BrandPreview";
 import { DEFAULT_FONT, type ResolvedBrand } from "@/lib/brand";
 
 /** The narrated preview's control and playback state, from the Studio. */
@@ -34,6 +34,9 @@ export function Canvas({
   captionText,
   time,
   duration,
+  cutTime,
+  cutDuration,
+  card = null,
   playing,
   state,
   mediaUrl,
@@ -47,8 +50,14 @@ export function Canvas({
   project: Project;
   segment: Segment | null;
   captionText: string;
+  /** The playhead over the whole export, and the export's length: what the transport shows. */
   time: number;
   duration: number;
+  /** The playhead within the cut, and the cut's length: what the footage and readings follow. */
+  cutTime: number;
+  cutDuration: number;
+  /** The brand card under the playhead, when the export is on one. */
+  card?: "intro" | "outro" | null;
   playing: boolean;
   state: EditState;
   /** The take behind this project, when there is one. */
@@ -80,9 +89,11 @@ export function Canvas({
   useEffect(() => {
     const el = video.current;
     if (!el) return;
-    if (playing && !holding) void el.play().catch(() => {});
+    // On a card the footage is parked at the edge of the cut, not running
+    // under it: otherwise it drifts and gets re-seeked every third of a second.
+    if (playing && !holding && !card) void el.play().catch(() => {});
     else el.pause();
-  }, [playing, holding, mediaUrl]);
+  }, [playing, holding, card, mediaUrl]);
 
   // Under the plan the picture runs at each clip's speed.
   useEffect(() => {
@@ -100,8 +111,8 @@ export function Canvas({
       reader.current?.pause();
       return;
     }
-    const clip = narration.audio.find((a) => time >= a.at && time < a.at + a.durationSec);
-    if (!clip || !playing) {
+    const clip = narration.audio.find((a) => cutTime >= a.at && cutTime < a.at + a.durationSec);
+    if (!clip || !playing || card) {
       reader.current?.pause();
       return;
     }
@@ -110,10 +121,10 @@ export function Canvas({
     if (el.src !== new URL(clip.url, window.location.href).href) {
       el.src = clip.url;
     }
-    const want = time - clip.at;
+    const want = cutTime - clip.at;
     if (Math.abs(el.currentTime - want) > 0.3) el.currentTime = want;
     if (el.paused) void el.play().catch(() => {});
-  }, [previewing, narration?.audio, time, playing]);
+  }, [previewing, narration?.audio, cutTime, playing, card]);
   useEffect(() => () => reader.current?.pause(), []);
 
   // Seek only when the file has drifted from where the edit says it should
@@ -234,6 +245,17 @@ export function Canvas({
               )
             ) : null}
             {brand?.logoUrl ? <BrandLogo url={brand.logoUrl} position={brand.tokens.logoPosition} /> : null}
+
+            {/* the kit's card, over everything but the transport, while the export is on one */}
+            {card && brand ? (
+              <BrandCard
+                brand={brand.tokens}
+                logoUrl={brand.logoUrl}
+                title={card === "intro" ? project.title : brand.tokens.outro}
+                line={card === "intro" ? brand.tokens.intro : ""}
+                kind={card}
+              />
+            ) : null}
 
             {/* play overlay */}
             {!playing ? (
@@ -361,7 +383,7 @@ export function Canvas({
             <span className="ml-1 hidden shrink-0 items-center gap-1.5 border-l border-[var(--line)] pl-3 sm:flex">
               <span className="font-mono text-2xs text-fg-faint">
                 {project.sourceDurationSec > 0
-                  ? `−${Math.round((1 - duration / project.sourceDurationSec) * 100)}% vs raw take`
+                  ? `−${Math.round((1 - cutDuration / project.sourceDurationSec) * 100)}% vs raw take`
                   : ""}
               </span>
             </span>

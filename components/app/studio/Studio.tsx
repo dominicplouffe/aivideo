@@ -24,7 +24,7 @@ interface NarrationPlan {
   words: { seg: number; word: number; start: number; end: number }[];
 }
 import { Transcript, type WordEditChange } from "./Transcript";
-import { resolveBrand } from "@/lib/brand";
+import { CARD_SECONDS, resolveBrand } from "@/lib/brand";
 import { kitLogoUrl } from "@/components/app/brand/BrandPreview";
 import type { KitRecord } from "@/components/app/brand/BrandKitsEditor";
 import { Inspector, type StudioVoice } from "./Inspector";
@@ -61,7 +61,10 @@ export function Studio({
   // back the next morning found all three restored and no explanation.
   const [state, setState] = useState<EditState>(() => hydrateEditState(project.editState));
 
-  const [time, setTime] = useState(0);
+  // The playhead over the whole export: intro card, the cut, outro card.
+  // `time`, derived below, is where it is within the cut, which is what the
+  // timeline, the words and the footage are measured in.
+  const [clock, setClock] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [selected, setSelected] = useState<number | null>(0);
   const [exportOpen, setExportOpen] = useState(false);
@@ -167,7 +170,7 @@ export function Studio({
         words: body.words ?? [],
       });
       setPlanStatus("on");
-      setTime(0);
+      setClock(0);
     } catch (cause) {
       setPlanStatus("error");
       setPlanError(cause instanceof Error ? cause.message : String(cause));
@@ -212,6 +215,14 @@ export function Studio({
     () => (previewing && plan ? plan.durationSec : timelineDuration(editedTimeline)),
     [previewing, plan, editedTimeline],
   );
+  // The kit's cards, as the export will have them, so the preview runs to
+  // the same length the export dialog promises.
+  const introSec = brand?.tokens.intro ? CARD_SECONDS : 0;
+  const outroSec = brand?.tokens.outro ? CARD_SECONDS : 0;
+  const total = introSec + duration + outroSec;
+  const time = Math.max(0, Math.min(clock - introSec, duration));
+  const card: "intro" | "outro" | null =
+    clock < introSec ? "intro" : outroSec > 0 && clock >= introSec + duration ? "outro" : null;
   const planClipAt = useMemo(() => {
     if (!previewing || !plan) return null;
     return plan.clips.find((c) => time >= c.outputStart && time < c.outputStart + clipOutputSeconds(c)) ?? null;
@@ -235,11 +246,11 @@ export function Studio({
     const step = (now: number) => {
       const dt = (now - last.current) / 1000;
       last.current = now;
-      setTime((t) => {
+      setClock((t) => {
         const next = t + dt;
-        if (next >= duration) {
+        if (next >= total) {
           setPlaying(false);
-          return duration;
+          return total;
         }
         return next;
       });
@@ -249,12 +260,12 @@ export function Studio({
     return () => {
       if (raf.current) cancelAnimationFrame(raf.current);
     };
-  }, [playing, duration]);
+  }, [playing, total]);
 
-  // Keep the playhead inside the timeline when an edit shortens it.
+  // Keep the playhead inside the export when an edit shortens it or a card goes.
   useEffect(() => {
-    setTime((t) => Math.min(t, duration));
-  }, [duration]);
+    setClock((t) => Math.min(t, total));
+  }, [total]);
 
   /* ---------------- edits ---------------- */
   const patch = useCallback((p: Partial<EditState>) => {
@@ -521,7 +532,13 @@ export function Studio({
     setDirty(true);
   }, []);
 
-  const seek = useCallback((t: number) => setTime(Math.max(0, Math.min(t, duration))), [duration]);
+  /** Seek in export time: the transport bar and the arrow keys. */
+  const seek = useCallback((t: number) => setClock(Math.max(0, Math.min(t, total))), [total]);
+  /** Seek in cut time: the timeline, which does not show the cards. */
+  const seekCut = useCallback(
+    (t: number) => setClock(introSec + Math.max(0, Math.min(t, duration))),
+    [introSec, duration],
+  );
 
   /* ---------------- keyboard ---------------- */
   useEffect(() => {
@@ -533,12 +550,12 @@ export function Studio({
         setPlaying((p) => !p);
       }
       if (e.key === "Escape") setPinning(null);
-      if (e.key === "ArrowRight") seek(time + (e.shiftKey ? 5 : 1));
-      if (e.key === "ArrowLeft") seek(time - (e.shiftKey ? 5 : 1));
+      if (e.key === "ArrowRight") seek(clock + (e.shiftKey ? 5 : 1));
+      if (e.key === "ArrowLeft") seek(clock - (e.shiftKey ? 5 : 1));
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [time, seek]);
+  }, [clock, seek]);
 
   const captionText = useMemo(() => {
     if (!active) return "";
@@ -566,14 +583,14 @@ export function Studio({
         onToggle: () => {
           if (planStatus === "on" && !planStale) {
             setPlanStatus("off");
-            setTime(0);
+            setClock(0);
           } else {
             void fetchPlan();
           }
         },
         onOff: () => {
           setPlanStatus("off");
-          setTime(0);
+          setClock(0);
         },
         audio: previewing && plan ? plan.audio : [],
         playbackRate: planClipAt?.speed ?? 1,
@@ -752,8 +769,11 @@ export function Studio({
             project={project}
             segment={activeSegment}
             captionText={captionText}
-            time={time}
-            duration={duration}
+            time={clock}
+            duration={total}
+            cutTime={time}
+            cutDuration={duration}
+            card={card}
             playing={playing}
             state={state}
             mediaUrl={mediaUrl}
@@ -787,7 +807,7 @@ export function Studio({
             mediaUrl={mediaUrl}
             pins={narrated ? pins : []}
             onUnpin={unpin}
-            onScrub={seek}
+            onScrub={seekCut}
             onSelectSegment={setSelected}
           />
         </div>
