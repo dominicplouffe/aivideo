@@ -265,6 +265,20 @@ describe("a run, end to end", { skip: !RUN }, () => {
     assert.deepEqual(trail.map((a) => a.attempt), [1, 2], "each line knows its attempt");
   });
 
+  it("queues each attempt of a retried run as its own job", async () => {
+    // Keyed on the run alone, the second attempt matched the first attempt's
+    // finished job and nothing was queued. Keyed on the attempt, each gets one.
+    const { enqueue } = await import("@/lib/jobs/queue");
+    const key = (attempt: number) => `agent:run-x:${attempt}`;
+    const first = await enqueue({ workspaceId: WS, kind: "agent", payload: { runId: "run-x" }, idempotencyKey: key(1), maxAttempts: 1 });
+    const again = await enqueue({ workspaceId: WS, kind: "agent", payload: { runId: "run-x" }, idempotencyKey: key(1), maxAttempts: 1 });
+    const second = await enqueue({ workspaceId: WS, kind: "agent", payload: { runId: "run-x" }, idempotencyKey: key(2), maxAttempts: 1 });
+    assert.equal(first.created, true);
+    assert.equal(again.created, false, "approving the same attempt twice queues it once");
+    assert.equal(second.created, true, "the retry gets a job of its own");
+    assert.notEqual(second.job.id, first.job.id);
+  });
+
   it("will not reopen a run that made a project", async () => {
     const run = await upToApproval();
     const recording = await beginRecording(await approve(run, approver));

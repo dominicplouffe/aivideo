@@ -89,7 +89,7 @@ export async function GET(request: Request) {
       const actions = await actionsFor(run.id);
       return NextResponse.json({
         run: shape(run),
-        queue: run.status === "approved" ? await queuePlace(run.id) : null,
+        queue: run.status === "approved" ? await queuePlace(run) : null,
         actions: actions.map((action) => ({
           ordinal: action.ordinal,
           kind: action.kind,
@@ -250,17 +250,9 @@ export async function PATCH(request: Request) {
           })
         : await cancelRun(run, actor, typeof body.reason === "string" ? body.reason : "cancelled");
 
-    if (decision === "approve") {
-      // The worker does the recording. One job per run, however many times
-      // approval is retried.
-      await enqueue({
-        workspaceId: actor.workspaceId,
-        kind: "agent",
-        payload: { runId: updated.id },
-        idempotencyKey: `agent:${updated.id}`,
-        maxAttempts: 1,
-      });
-    }
+    // The worker does the recording. One job per attempt of the run,
+    // however many times approval is retried.
+    if (decision === "approve") await queueRecording(updated);
 
     return NextResponse.json({ run: shape(updated) });
   } catch (error) {
@@ -273,13 +265,41 @@ export async function PATCH(request: Request) {
  * background work is ahead of it. Renders go first in the worker, so every
  * queued job created earlier counts, whatever its kind.
  */
-async function queuePlace(runId: string): Promise<{ queued_at: string; ahead: number } | null> {
-  const [job] = await getDb()
-    .select({ createdAt: s.jobs.createdAt, status: s.jobs.status })
-    .from(s.jobs)
-    .where(and(eq(s.jobs.kind, "agent"), sql`${s.jobs.payload}->>'runId' = ${runId}`))
-    .orderBy(desc(s.jobs.createdAt))
-    .limit(1);
+/**
+ * Puts an approved run in line for the recorder.
+ *
+ * Keyed on the run *and its attempt*. Keyed on the run alone, a run that
+ * was fixed and retried was approved, handed to the queue, and matched to
+ * its first attempt's finished job — so nothing was queued and the page
+ * said "Starting shortly" for ever.
+ */
+async function queueRecording(run: { id: string; workspaceId: string; attempt: number }) {
+  await enqueue({
+    workspaceId: run.workspaceId,
+    kind: "agent",
+    payload: { runId: run.id, attempt: run.attempt },
+    idempotencyKey: `agent:${run.id}:${run.attempt}`,
+    maxAttempts: 1,
+  });
+}
+
+async function queuePlace(run: { id: string; workspaceId: string; attempt: number }): Promise<{ queued_at: string; ahead: number } | null> {
+  const latest = async () =>
+    (
+      await getDb()
+        .select({ createdAt: s.jobs.createdAt, status: s.jobs.status })
+        .from(s.jobs)
+        .where(and(eq(s.jobs.kind, "agent"), sql`${s.jobs.payload}->>'runId' = ${run.id}`))
+        .orderBy(desc(s.jobs.createdAt))
+        .limit(1)
+    )[0];
+  let job = await latest();
+  // An approved run with no live job is a run nobody will ever record.
+  // Whatever caused it, the answer is to put it in line, not to wait.
+  if (!job || (job.status !== "queued" && job.status !== "running")) {
+    await queueRecording(run);
+    job = await latest();
+  }
   if (!job || job.status !== "queued") return null;
   const [ahead] = await getDb()
     .select({ n: sql<number>`count(*)::int` })
