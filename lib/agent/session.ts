@@ -13,11 +13,10 @@ import {
  *     no `localStorage` entry and no service worker survives a run. Two runs
  *     for two customers cannot see each other's session, and a run cannot
  *     inherit one from a previous run that ended badly.
- *  2. **Every request passes the allowlist, not just navigations.** A page
- *     on an approved origin can `fetch` anywhere, and a page that can fetch
- *     anywhere is a page that can exfiltrate whatever it just saw. The
- *     interception is at `context.route("**")`, which is the only level
- *     where subresources, XHR, and fetch all arrive.
+ *  2. **The tab stays on the listed sites.** A link, a redirect or a script
+ *     that sends the page elsewhere is refused and reported. What a page
+ *     loads or calls — scripts, fonts, its API — is left alone: it is the
+ *     customer's own app making the requests it makes for every visitor.
  *  3. **Downloads are refused and storage is not persisted.** The agent is
  *     here to record a screen, not to collect files.
  *
@@ -28,12 +27,6 @@ import {
 
 export interface SessionOptions {
   allowedOrigins: string[];
-  /**
-   * Services the pages may call — an API, a payment or font host — without
-   * the agent ever opening them. A request to one is let through; a
-   * navigation of the page to one is refused like any other off-list page.
-   */
-  requestOrigins?: string[];
   viewport?: { width: number; height: number };
   /** Record the session to a video file in this directory. Absent in a dry run. */
   recordVideo?: { dir: string };
@@ -80,33 +73,27 @@ export async function openSession(browser: Browser, options: SessionOptions): Pr
     serviceWorkers: "block",
   });
 
+  // Only where the tab itself goes is checked. What a page loads or calls
+  // — its scripts, fonts, API, analytics — is the page's business: it is
+  // the customer's own app running the same requests it runs for every real
+  // visitor, and blocking them broke logins, fonts and data for no gain.
+  // The limits that matter are that the agent stays on the listed sites
+  // and types a password only into the site it belongs to.
   await context.route("**/*", async (route: Route) => {
-    const url = route.request().url();
-
-    if (INTERNAL.test(url)) {
+    const request = route.request();
+    const url = request.url();
+    const topLevel = request.isNavigationRequest() && request.frame() === request.frame().page().mainFrame();
+    if (!topLevel || INTERNAL.test(url)) {
       await route.continue();
       return;
     }
-
-    const request = route.request();
     const verdict = withinAllowlist(url, options.allowedOrigins);
     if (verdict.ok) {
       await route.continue();
       return;
     }
-    // A service the pages may call. Only as a request from a page: the tab
-    // itself going there is a navigation off the list, and refused.
-    const navigating = request.isNavigationRequest() && request.frame() === request.frame().page().mainFrame();
-    if (!navigating && options.requestOrigins?.length && withinAllowlist(url, options.requestOrigins).ok) {
-      await route.continue();
-      return;
-    }
-
-    options.onRefusal?.({
-      url,
-      reason: verdict.reason,
-      resourceType: route.request().resourceType(),
-    });
+    // A link, a redirect or a script sending the tab to another site.
+    options.onRefusal?.({ url, reason: verdict.reason, resourceType: "document" });
     // Aborted rather than failed with a status: a 403 would be rendered by
     // the page and could be mistaken for the site's own answer.
     await route.abort("blockedbyclient");

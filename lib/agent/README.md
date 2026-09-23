@@ -71,27 +71,30 @@ and it does not admit `acme.com`. A wildcard must be written as one, and
 `*.acme.com` never matches `acme.com.evil.example` because the match is on
 the parsed host's suffix *with a leading dot*, not on the string.
 
-Two checks, at two levels, because each catches what the other cannot:
+What the list governs is where the agent goes, and nothing else:
 
-- **Every request, at `context.route("**")`.** Not just navigations: a page
-  on an approved origin can `fetch` anywhere, and a page that can fetch
-  anywhere can exfiltrate whatever it just saw. Requests are aborted rather
-  than failed with a status, because a 403 would be rendered by the page and
-  could be mistaken for the site's own answer.
-- **Every navigation, against the resolved address.** An allowlist is a list
-  of names, and a name resolves to whatever its owner says. `demo.acme.com`
-  pointed at `127.0.0.1` is an approved entry that reaches our own network,
-  so navigations go through the same private-address checks as an outbound
-  webhook. Unlike the webhook worker, there is no development relaxation:
-  the agent is the one place where "it also works against localhost" ends
-  with a credential in someone else's hands.
+- **Every navigation of the tab, at `context.route("**")`.** A link, a
+  redirect or a script sending the page to another site is aborted and
+  reported. What a page loads or calls — its scripts, fonts, API,
+  analytics — is left alone. An earlier version checked every request, on
+  the theory that a page could send what it saw elsewhere; in practice the
+  pages are the customer's own app making the requests it makes for every
+  real visitor, and blocking them broke logins that post to an API on
+  another domain, fonts, and data, with the agent then blaming the
+  password.
+- **Every navigation the agent makes, against the resolved address.** An
+  allowlist is a list of names, and a name resolves to whatever its owner
+  says. `demo.acme.com` pointed at `127.0.0.1` is an approved entry that
+  reaches our own network, so the agent's own navigations go through the
+  same private-address checks as an outbound webhook. Unlike the webhook
+  worker, there is no development relaxation.
 
-Redirects are checked where they *land*, not where they were aimed.
+Redirects are checked where they *land*, not where they were aimed. A
+password is typed only into the exact origin its sign-in is stored for,
+read from where the browser actually is.
 
-This is verified in a real Chromium, not only reasoned about, because the
-claim is about the browser's behaviour rather than ours: a page on an
-approved origin tries to `fetch` an unapproved one that is up and answering,
-and both the fetch and an `<img>` are blocked.
+Verified in a real Chromium: a page's own call to another origin succeeds,
+and the tab being sent to that origin is refused.
 
 ## Isolation
 

@@ -60,7 +60,7 @@ export function normaliseList(entries: string[]): string[] {
 /**
  * Whether a URL is inside the list, by string and shape alone.
  *
- * Synchronous, because it runs on every request a browser makes and a DNS
+ * Synchronous, because it runs on every navigation the browser makes and a DNS
  * lookup per subresource would be both slow and a different answer each
  * time. The address check is separate, runs once per navigation, and is
  * below.

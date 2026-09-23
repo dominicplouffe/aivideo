@@ -6,7 +6,6 @@ import { cn } from "@/lib/utils";
 import { Icon } from "@/components/ui/Icon";
 import { Button } from "@/components/ui/Button";
 import type { OutlineStep } from "@/lib/agent/run";
-import type { BlockedHost } from "@/lib/agent/blocked";
 
 /**
  * Everything about a run, on one screen, all of it editable.
@@ -30,14 +29,11 @@ export interface EditorInitial {
   runId?: string;
   brief: string;
   allowedOrigins: string[];
-  requestOrigins: string[];
   entryUrl: string | null;
   outline: OutlineStep[];
   signIns: Record<string, string>;
   attempt?: number;
   error?: string | null;
-  /** What the last attempt's pages tried to reach and were refused. */
-  blocked?: BlockedHost[];
 }
 
 interface SignIn {
@@ -117,7 +113,6 @@ export function RunEditor({
 }) {
   const router = useRouter();
   const [sitesText, setSitesText] = useState(initial.allowedOrigins.join("\n"));
-  const [servicesText, setServicesText] = useState(initial.requestOrigins.join("\n"));
   const [entryUrl, setEntryUrl] = useState(initial.entryUrl ?? "");
   const [brief, setBrief] = useState(initial.brief);
   const [steps, setSteps] = useState<StepDraft[]>(() => initial.outline.map(toDraft));
@@ -129,9 +124,6 @@ export function RunEditor({
   const [error, setError] = useState<string | null>(null);
 
   const sites = useMemo(() => parseSites(sitesText), [sitesText]);
-  const services = useMemo(() => parseSites(servicesText), [servicesText]);
-  const blocked = (initial.blocked ?? []).filter((host) => !services.includes(host.origin) && !sites.includes(host.origin));
-  const allow = (origin: string) => setServicesText((text) => (text.trim() ? `${text.trim()}\n${origin}` : origin));
   const exactSites = sites.filter((site) => site.startsWith("https://") && !site.includes("*"));
 
   const loadSignIns = async () => {
@@ -209,7 +201,6 @@ export function RunEditor({
       const payload = {
         brief,
         allowed_origins: sites,
-        request_origins: services,
         entry_url: entryUrl.trim() || undefined,
         outline: steps.map(fromDraft),
         sign_ins: signIns,
@@ -265,40 +256,9 @@ export function RunEditor({
         </Notice>
       ) : null}
 
-      <Section n={1} title="Where the agent may go" hint="The sites the agent may open and sign in to, one per line.">
+      <Section n={1} title="Where the agent may go" hint="The sites the agent may open and sign in to, one per line. It will not follow a link or redirect anywhere else.">
         <textarea value={sitesText} onChange={(e) => setSitesText(e.target.value)} rows={2} placeholder={"https://app.yourproduct.com"} className={cn(field, "font-mono")} spellCheck={false} />
 
-        <div className="mt-3">
-          <p className="text-[0.8125rem] font-medium text-fg">Also allow requests to</p>
-          <p className="mt-0.5 mb-1.5 text-2xs leading-relaxed text-fg-faint">
-            Services your app&apos;s pages call — its API, payments, fonts — when they are on another domain. The pages may call these;
-            the agent never opens them or types a password into them. Everything else is blocked.
-          </p>
-          <textarea value={servicesText} onChange={(e) => setServicesText(e.target.value)} rows={2} placeholder={"https://api.yourproduct.com"} className={cn(field, "font-mono")} spellCheck={false} />
-        </div>
-
-        {blocked.length > 0 ? (
-          <div className="mt-3 rounded-xl border border-amber-500/30 bg-amber-500/[0.06] p-3">
-            <p className="text-[0.8125rem] font-medium text-fg">Blocked during the last attempt</p>
-            <p className="mt-0.5 mb-2 text-2xs leading-relaxed text-fg-faint">
-              The pages tried to reach these and could not. If one is your app&apos;s own service, allow it — a login that posts to a
-              blocked service never reaches your app.
-            </p>
-            <ul className="space-y-1">
-              {blocked.map((host) => (
-                <li key={host.origin} className="flex flex-wrap items-center gap-2 rounded-lg px-1 py-1">
-                  <span className={cn("min-w-0 flex-1 truncate font-mono text-2xs", host.tracker ? "text-fg-faint" : "text-fg")}>{host.origin}</span>
-                  <span className="text-2xs text-fg-faint">
-                    {host.kinds.join(", ")} · {host.count}×{host.tracker ? " · analytics, usually not needed" : ""}
-                  </span>
-                  <Button type="button" size="xs" variant={host.tracker ? "ghost" : "outline"} onClick={() => allow(host.origin)}>
-                    Allow
-                  </Button>
-                </li>
-              ))}
-            </ul>
-          </div>
-        ) : null}
       </Section>
 
       <Section n={2} title="Sign-in for each site" hint="Which account the agent signs in with, before recording starts, so the login screen is not in the video. Use an account that signs in with an email and password.">

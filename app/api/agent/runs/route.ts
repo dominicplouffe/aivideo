@@ -54,7 +54,6 @@ function shape(run: typeof s.agentRuns.$inferSelect) {
     outline: run.outline ?? [],
     allowed_origins: run.allowedOrigins,
     entry_url: run.entryUrl,
-    request_origins: run.requestOrigins,
     sign_ins: run.signIns,
     attempt: run.attempt,
     project_id: run.projectId,
@@ -134,12 +133,6 @@ async function parseRequest(
   if (entryUrl && !withinAllowlist(entryUrl, origins).ok) {
     return { ok: false, error: "The start page has to be on one of the sites above." };
   }
-  const requestOrigins = normaliseList(Array.isArray(body.request_origins) ? (body.request_origins as string[]) : []).filter(
-    (origin) => !origins.includes(origin),
-  );
-  if (requestOrigins.some((origin) => !origin.startsWith("https://") && !origin.startsWith("*."))) {
-    return { ok: false, error: "Services the pages call have to be on https." };
-  }
   const plan = shapePlan(Array.isArray(body.outline) ? (body.outline as Record<string, unknown>[]) : [], origins);
   if (plan.removed.length > 0) {
     const first = plan.removed[0];
@@ -158,7 +151,7 @@ async function parseRequest(
     }
     signIns[origin] = label;
   }
-  return { ok: true, request: { brief, allowedOrigins: origins, requestOrigins, entryUrl, outline: plan.outline, signIns } };
+  return { ok: true, request: { brief, allowedOrigins: origins, entryUrl, outline: plan.outline, signIns } };
 }
 
 /**

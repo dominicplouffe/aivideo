@@ -104,7 +104,7 @@ export default async function AgentPage() {
                   {
                     icon: "lock" as const,
                     title: "Leave the origins you named",
-                    body: "Every request is checked, not just navigations, and a name that resolves onto a private address is refused whatever the list says.",
+                    body: "It will not follow a link, a redirect or a script to another site, and a name that resolves onto a private address is refused whatever the list says.",
                   },
                   {
                     icon: "key" as const,

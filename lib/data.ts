@@ -265,7 +265,6 @@ function toViewRun(row: {
   attempt?: number;
   signIns?: Record<string, string>;
   revisedFrom?: string | null;
-  requestOrigins?: string[];
 }): agentFixtures.FixtureRun {
   return {
     id: row.id,
@@ -274,7 +273,6 @@ function toViewRun(row: {
     entryUrl: row.entryUrl ?? null,
     attempt: row.attempt ?? 1,
     signIns: row.signIns ?? {},
-    requestOrigins: row.requestOrigins ?? [],
     revisedFrom: row.revisedFrom ?? null,
     status: row.status as agentFixtures.FixtureStatus,
     outline: (row.outline ?? []) as agentFixtures.FixtureRun["outline"],

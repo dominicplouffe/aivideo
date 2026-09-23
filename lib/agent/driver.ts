@@ -88,19 +88,8 @@ export async function driveRun(run: Run, options: DriveOptions): Promise<DriveRe
   let completed = 0;
   const timings: StepTiming[] = [];
 
-  // Hosts the pages tried to call and could not, most recent last, so a
-  // failed sign-in can say which one it was rather than blame the password.
-  const blockedCalls: string[] = [];
   const onRefusal = (event: { url: string; reason: string; resourceType: string }) => {
     refusals += 1;
-    if (["xhr", "fetch", "document"].includes(event.resourceType)) {
-      try {
-        const origin = new URL(event.url).origin;
-        if (!blockedCalls.includes(origin)) blockedCalls.push(origin);
-      } catch {
-        // Not a URL worth naming.
-      }
-    }
     // Not awaited: a refused subresource must not be able to stall the
     // run. recordAction queues the writes per run, so they keep their order.
     recordAction(current.id, {
@@ -119,7 +108,7 @@ export async function driveRun(run: Run, options: DriveOptions): Promise<DriveRe
   // the account's email being typed, is not the demo anybody asked for.
   let storageState: SessionOptions["storageState"];
   try {
-    storageState = await signInOffCamera(current, options, startedAt, onRefusal, () => blockedCalls);
+    storageState = await signInOffCamera(current, options, startedAt, onRefusal);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     current = await failRun(current, message);
@@ -128,7 +117,6 @@ export async function driveRun(run: Run, options: DriveOptions): Promise<DriveRe
 
   const session = await openSession(options.browser, {
     allowedOrigins: current.allowedOrigins,
-    requestOrigins: current.requestOrigins ?? [],
     viewport: options.viewport,
     recordVideo: options.recordVideo,
     storageState,
@@ -174,14 +162,14 @@ export async function driveRun(run: Run, options: DriveOptions): Promise<DriveRe
 
         // The app may still ask, on camera: a session that expired, or a
         // page behind a second login. Signed in there too, or stopped.
-        if (await signInIfAsked(current, session.page, { startedAt, outlineOrdinal: step.ordinal, blockedCalls: () => blockedCalls })) {
+        if (await signInIfAsked(current, session.page, { startedAt, outlineOrdinal: step.ordinal })) {
           await session.goto(step.url);
         }
       }
 
       if (step.action) {
         await performAction(current, session, step, startedAt, options.stepTimeoutMs ?? 5000);
-        await signInIfAsked(current, session.page, { startedAt, outlineOrdinal: step.ordinal, blockedCalls: () => blockedCalls });
+        await signInIfAsked(current, session.page, { startedAt, outlineOrdinal: step.ordinal });
       }
 
       // Long enough on screen for the step's narration to be read at a
@@ -334,14 +322,12 @@ async function signInOffCamera(
   options: DriveOptions,
   startedAt: number,
   onRefusal: SessionOptions["onRefusal"],
-  blockedCalls: () => string[],
 ): Promise<SessionOptions["storageState"]> {
   const outline = (run.outline ?? []) as OutlineStep[];
   const entry = outline.find((step) => step.url)?.url ?? run.allowedOrigins[0];
   if (!entry || entry.includes("*")) return undefined;
   const preflight = await openSession(options.browser, {
     allowedOrigins: run.allowedOrigins,
-    requestOrigins: run.requestOrigins ?? [],
     viewport: options.viewport,
     resolve: options.resolve,
     onRefusal,
@@ -349,7 +335,7 @@ async function signInOffCamera(
   try {
     const verdict = await preflight.goto(entry);
     if (!verdict.ok) return undefined;
-    const signedIn = await signInIfAsked(run, preflight.page, { startedAt, blockedCalls });
+    const signedIn = await signInIfAsked(run, preflight.page, { startedAt });
     return signedIn ? await preflight.context.storageState() : undefined;
   } finally {
     await preflight.close().catch(() => {});

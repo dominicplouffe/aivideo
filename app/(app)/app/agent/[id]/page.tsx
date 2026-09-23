@@ -221,19 +221,6 @@ export default async function AgentRunPage({ params }: { params: Promise<{ id: s
                   afterwards does not change what this run may reach.
                 </p>
               </div>
-              {(run.requestOrigins ?? []).length > 0 ? (
-                <div>
-                  <p className="text-2xs font-medium uppercase tracking-wide text-fg-faint">Pages may also call</p>
-                  <ul className="mt-2 space-y-1.5">
-                    {(run.requestOrigins ?? []).map((origin) => (
-                      <li key={origin} className="flex items-center gap-2 font-mono text-2xs text-fg-subtle">
-                        <Icon name="link" className="size-3 shrink-0 text-fg-faint" strokeWidth={1.9} />
-                        {origin}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              ) : null}
               {exactOrigins.length > 0 ? (
                 <div>
                   <p className="text-2xs font-medium uppercase tracking-wide text-fg-faint">Signs in as</p>

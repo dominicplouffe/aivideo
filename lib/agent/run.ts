@@ -103,11 +103,7 @@ export type OutlineStep = {
  * recorder checks this before its first action, so a rewritten plan fails
  * closed rather than running under somebody else's name.
  */
-export function outlineHash(
-  outline: OutlineStep[],
-  signIns: Record<string, string> = {},
-  requestOrigins: string[] = [],
-): string {
+export function outlineHash(outline: OutlineStep[], signIns: Record<string, string> = {}): string {
   // Everything that changes what the agent does: the page, the action and
   // what it types. The narration is left out; rewording what is said over
   // a step does not change what the browser does.
@@ -130,19 +126,12 @@ export function outlineHash(
     .sort()
     .map((origin) => `${origin}\u0000${signIns[origin]}`)
     .join("\u0001");
-  // And which services pages may call. Empty adds nothing, so runs approved
-  // before the list existed keep their fingerprint.
-  const services = requestOrigins.length > 0 ? `\u0003${[...requestOrigins].sort().join("\u0001")}` : "";
-  return createHash("sha256").update(`${steps}\u0002${accounts}${services}`, "utf8").digest("hex");
+  return createHash("sha256").update(`${steps}\u0002${accounts}`, "utf8").digest("hex");
 }
 
 /** The approval fingerprint of a run as it stands. */
-export function runHash(run: Pick<Run, "outline" | "signIns" | "requestOrigins">): string {
-  return outlineHash(
-    (run.outline ?? []) as OutlineStep[],
-    (run.signIns ?? {}) as Record<string, string>,
-    (run.requestOrigins ?? []) as string[],
-  );
+export function runHash(run: Pick<Run, "outline" | "signIns">): string {
+  return outlineHash((run.outline ?? []) as OutlineStep[], (run.signIns ?? {}) as Record<string, string>);
 }
 
 /* ----------------------------------------------------------------- moves */
@@ -214,8 +203,6 @@ export async function proposeOutline(
 export interface RunRequest {
   brief: string;
   allowedOrigins: string[];
-  /** Services pages may call but the agent never opens. */
-  requestOrigins: string[];
   entryUrl: string | null;
   outline: OutlineStep[];
   /** Stored sign-in label to use, keyed by origin. */
@@ -226,7 +213,6 @@ function requestColumns(request: RunRequest) {
   return {
     brief: request.brief,
     allowedOrigins: normaliseList(request.allowedOrigins),
-    requestOrigins: normaliseList(request.requestOrigins),
     entryUrl: request.entryUrl,
     outline: request.outline,
     signIns: request.signIns,

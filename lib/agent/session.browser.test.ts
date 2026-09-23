@@ -34,9 +34,8 @@ let elsewhereOrigin = "";
 before(async () => {
   if (!RUN) return;
 
-  // "Elsewhere" is the origin nobody approved. It answers, so a request that
-  // reaches it succeeds — the test would pass vacuously against a server
-  // that was simply down.
+  // "Elsewhere" is a site nobody listed. It answers, so a page's call to it
+  // succeeds, and the tab going there is what must be refused.
   elsewhere = createServer((_req, res) => {
     res.writeHead(200, { "Content-Type": "text/plain", "Access-Control-Allow-Origin": "*" });
     res.end("the-secret");
@@ -76,7 +75,7 @@ after(async () => {
 });
 
 describe("the agent's browser session", { skip: !RUN, timeout: TIMEOUT_MS }, () => {
-  it("blocks every request to an origin nobody approved, not just navigations", async () => {
+  it("lets a page load and call what it needs, and keeps the tab on the listed site", async () => {
     const refusals: { url: string; resourceType: string }[] = [];
     const session = await openSession(browser!, {
       allowedOrigins: [approvedOrigin],
@@ -90,17 +89,16 @@ describe("the agent's browser session", { skip: !RUN, timeout: TIMEOUT_MS }, () 
       await session.page.goto(approvedOrigin, { waitUntil: "load" });
       await session.page.waitForFunction("window.__result !== 'pending'", null, { timeout: 5000 });
 
-      const result = await session.page.evaluate("window.__result");
-      // A page on an approved origin can ask for anything it likes. It does
-      // not get it.
-      assert.match(String(result), /^blocked:/);
+      // The page's own calls go through: they are the app working, the
+      // same requests it makes for every real visitor.
+      assert.equal(await session.page.evaluate("window.__result"), "reached:the-secret");
+      assert.equal(refusals.length, 0);
 
-      const off = refusals.filter((refusal) => refusal.url.startsWith(elsewhereOrigin));
-      // Both the fetch and the image: the interception is at the context, so
-      // subresources arrive there too.
-      assert.ok(off.length >= 2, `expected the fetch and the image, saw ${off.length}`);
-      assert.ok(off.some((refusal) => refusal.resourceType === "fetch" || refusal.resourceType === "xhr"));
-      assert.ok(off.some((refusal) => refusal.resourceType === "image"));
+      // The tab itself going to another site is refused and reported.
+      await session.page.evaluate(`location.href = ${JSON.stringify(`${elsewhereOrigin}/`)}`);
+      await session.page.waitForTimeout(1000);
+      assert.notEqual(new URL(session.page.url()).origin, elsewhereOrigin);
+      assert.ok(refusals.some((refusal) => refusal.url.startsWith(elsewhereOrigin) && refusal.resourceType === "document"));
     } finally {
       await session.close();
     }
