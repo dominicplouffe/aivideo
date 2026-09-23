@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useCallback } from "react";
 import { cn, formatDuration } from "@/lib/utils";
 import { Icon } from "@/components/ui/Icon";
 import { MockApp } from "@/components/marketing/MockApp";
@@ -103,29 +103,71 @@ export function Canvas({
     if (Math.abs(el.playbackRate - rate) > 1e-3) el.playbackRate = Math.min(4, Math.max(0.25, rate));
   }, [previewing, narration?.playbackRate]);
 
-  // The readings, played over the picture from where the playhead is. One
-  // element, re-pointed as the playhead crosses into another chapter.
-  const reader = useRef<HTMLAudioElement | null>(null);
+  /*
+   * The readings, played over the picture from where the playhead is.
+   *
+   * One element per reading, made ahead of time: the next chapter's file is
+   * fetched while the current one plays, so it is ready the moment the
+   * playhead crosses into it. With a single element re-pointed at the
+   * boundary, the file arrived late, the playhead had moved on, and the
+   * catch-up seek threw away the first third of a second of every chapter —
+   * the first word, clipped, on every scene.
+   */
+  const readers = useRef(new Map<string, HTMLAudioElement>());
+  const readerFor = useCallback((url: string) => {
+    let el = readers.current.get(url);
+    if (!el) {
+      el = new Audio();
+      el.preload = "auto";
+      el.src = url;
+      el.load();
+      readers.current.set(url, el);
+    }
+    return el;
+  }, []);
   useEffect(() => {
+    const pool = readers.current;
     if (!previewing) {
-      reader.current?.pause();
+      for (const el of pool.values()) el.pause();
       return;
     }
-    const clip = narration.audio.find((a) => cutTime >= a.at && cutTime < a.at + a.durationSec);
-    if (!clip || !playing || card) {
-      reader.current?.pause();
-      return;
+    const clips = narration.audio;
+    const index = clips.findIndex((a) => cutTime >= a.at && cutTime < a.at + a.durationSec);
+    // What comes next, whether or not we are inside a reading now: a pause
+    // between chapters is the time to fetch the one after it.
+    const upcoming = clips.filter((a) => a.at > cutTime).sort((a, b) => a.at - b.at).slice(0, 2);
+    for (const a of upcoming) readerFor(a.url);
+
+    const clip = index >= 0 ? clips[index] : null;
+    // Keep what is playing, what just played and what is next; let go of the rest.
+    const keep = new Set<string>([...(clip ? [clip.url] : []), ...upcoming.map((a) => a.url), ...(index > 0 ? [clips[index - 1].url] : [])]);
+    for (const [url, el] of pool) {
+      if (!keep.has(url)) {
+        el.pause();
+        el.removeAttribute("src");
+        el.load();
+        pool.delete(url);
+      }
     }
-    if (!reader.current) reader.current = new Audio();
-    const el = reader.current;
-    if (el.src !== new URL(clip.url, window.location.href).href) {
-      el.src = clip.url;
-    }
+    for (const [url, el] of pool) if (url !== clip?.url && !el.paused) el.pause();
+
+    if (!clip || !playing || card) return;
+    const el = readerFor(clip.url);
     const want = cutTime - clip.at;
-    if (Math.abs(el.currentTime - want) > 0.3) el.currentTime = want;
+    // Seek only once the file can be seeked, and only for real drift. A
+    // reading that has just begun is never jumped forward: better a few
+    // frames late than the first word gone.
+    if (el.readyState >= HTMLMediaElement.HAVE_METADATA && Math.abs(el.currentTime - want) > 0.3 && !(want < 0.6 && el.currentTime < want)) {
+      el.currentTime = want;
+    }
     if (el.paused) void el.play().catch(() => {});
-  }, [previewing, narration?.audio, cutTime, playing, card]);
-  useEffect(() => () => reader.current?.pause(), []);
+  }, [previewing, narration?.audio, cutTime, playing, card, readerFor]);
+  useEffect(
+    () => () => {
+      for (const el of readers.current.values()) el.pause();
+    },
+    [],
+  );
 
   // Seek only when the file has drifted from where the edit says it should
   // be. Writing `currentTime` on every frame would re-decode continuously
