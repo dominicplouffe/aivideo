@@ -45,8 +45,6 @@ export function Inspector({
   brandKits,
   brandKitId,
   onBrandKit,
-  ask,
-  onAsked,
 }: {
   project: Project;
   segment: Segment | null;
@@ -62,19 +60,8 @@ export function Inspector({
   brandKits: KitRecord[];
   brandKitId: string | null;
   onBrandKit: (kitId: string | null) => void;
-  /**
-   * A question pushed in from elsewhere — the transcript's action chips.
-   * Opens the Riff tab and sends it, so a chip in one panel and a message
-   * in another are the same request rather than two features that drifted.
-   */
-  ask?: { text: string; at: number } | null;
-  onAsked?: () => void;
 }) {
   const [tab, setTab] = useState<Tab>("scene");
-
-  useEffect(() => {
-    if (ask) setTab("riff");
-  }, [ask]);
 
   return (
     <aside className="flex min-h-0 w-full flex-1 flex-col border-l border-[var(--line)] bg-ink-950">
@@ -125,7 +112,7 @@ export function Inspector({
         ) : null}
         {tab === "output" ? <OutputTab project={project} /> : null}
         {tab === "riff" ? (
-          <RiffTab project={project} onState={onState} ask={ask} onAsked={onAsked} />
+          <RiffTab project={project} onState={onState} />
         ) : null}
       </div>
     </aside>
@@ -859,13 +846,9 @@ interface EditProposal {
 function RiffTab({
   project,
   onState,
-  ask,
-  onAsked,
 }: {
   project: Project;
   onState: (patch: Partial<EditState>) => void;
-  ask?: { text: string; at: number } | null;
-  onAsked?: () => void;
 }) {
   const [log, setLog] = useState<RiffTurn[]>([
     {
@@ -930,19 +913,6 @@ function RiffTab({
       setThinking(false);
     }
   };
-
-  // A chip pressed in the transcript arrives here. Keyed on `at` rather than
-  // the text so pressing the same chip twice asks twice.
-  const lastAsk = useRef<number>(0);
-  useEffect(() => {
-    if (!ask || ask.at === lastAsk.current) return;
-    lastAsk.current = ask.at;
-    void send(ask.text);
-    onAsked?.();
-    // `send` is recreated every render; depending on it would re-fire the
-    // question on each keystroke in the composer.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ask]);
 
   const apply = (index: number, proposal: EditProposal) => {
     const patch: Partial<EditState> = {};

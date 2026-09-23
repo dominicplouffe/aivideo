@@ -16,14 +16,6 @@ import {
   type WordEdit,
 } from "./types";
 
-/** What the four chips ask for, in the words a person would use. */
-const ASK_CHIPS: { label: string; icon: IconName; prompt: string }[] = [
-  { label: "Tighten", icon: "wand", prompt: "Which chapters could I drop to tighten this without losing the point?" },
-  { label: "Formal tone", icon: "target", prompt: "Does this read as too casual for a technical buyer? Be specific about where." },
-  { label: "Cut to 60s", icon: "clock", prompt: "Get this under 60 seconds and tell me what I would lose." },
-  { label: "Simplify language", icon: "globe", prompt: "Where is the language more complicated than it needs to be?" },
-];
-
 /** One change to the word edits: set an edit at a key, or clear it. */
 export interface WordEditChange {
   key: string;
@@ -49,7 +41,10 @@ export function Transcript({
   pinningKey,
   onSplit,
   onMerge,
-  onAsk,
+  onSuggest,
+  suggesting = false,
+  proposed = null,
+  panel = null,
 }: {
   project: Project;
   state: EditState;
@@ -76,8 +71,14 @@ export function Transcript({
   onSplit?: (segIndex: number, wordIndex: number) => void;
   /** Folds this chapter into the one before it. */
   onMerge?: (segIndex: number) => void;
-  /** Sends a request to the Riff panel. Absent in read-only contexts. */
-  onAsk?: (prompt: string) => void;
+  /** Asks for suggested cuts: tighten, or bring the video to a length. */
+  onSuggest?: (goal: "tighten" | "target") => void;
+  /** A suggestion is being worked out; the chips wait. */
+  suggesting?: boolean;
+  /** Cuts being previewed, before anyone applies them: words and whole chapters. */
+  proposed?: { words: Set<string>; chapters: Set<number> } | null;
+  /** The suggestions card, or the applied banner, shown under the chips. */
+  panel?: React.ReactNode;
 }) {
   // Every chapter's words after the hand edits, which is what this panel
   // renders and what the selection ranges over.
@@ -295,25 +296,29 @@ export function Transcript({
       </header>
 
       {/*
-        Action chips.
+        Action chips: the one switch, and the two edits the AI can make.
 
-        "Remove fillers" has always been real. The other four had no onClick
-        at all — four buttons styled identically to the working one, with no
-        disabled state, doing nothing. They now ask Riff, which is where that
-        kind of request actually goes.
+        "Tighten" and "Cut to 60s" propose cuts, shown here struck through
+        in amber until applied; a checkpoint is taken first and Undo is one
+        click. Two more chips lived here once, "Formal tone" and "Simplify
+        language"; nothing could rewrite a sentence, so they went.
       */}
       <div className="flex flex-wrap gap-1.5 border-b border-[var(--line)] px-4 py-3">
         <Chip active={state.removeFillers} onClick={onToggleFillers} icon="scissors">
           Remove fillers
         </Chip>
-        {onAsk
-          ? ASK_CHIPS.map((chip) => (
-              <Chip key={chip.label} icon={chip.icon} onClick={() => onAsk(chip.prompt)}>
-                {chip.label}
-              </Chip>
-            ))
-          : null}
+        {onSuggest ? (
+          <>
+            <Chip icon="wand" onClick={() => onSuggest("tighten")} disabled={suggesting} title="Suggest what to cut so this runs shorter without losing the point">
+              Tighten
+            </Chip>
+            <Chip icon="clock" onClick={() => onSuggest("target")} disabled={suggesting} title="Suggest a cut that brings this under a minute">
+              Cut to 60s
+            </Chip>
+          </>
+        ) : null}
       </div>
+      {panel}
 
       <div ref={scroller} className="relative min-h-0 flex-1 overflow-y-auto px-4 py-4">
         {anchor && selectedWords.length > 0 && !editing ? (
@@ -355,6 +360,7 @@ export function Transcript({
         ) : null}
         {project.segments.map((seg, segIndex) => {
           const deleted = state.deletedSegments.has(segIndex);
+          const wouldDrop = !deleted && (proposed?.chapters.has(segIndex) ?? false);
           const isActive = activeSegment === segIndex;
           const first = index.get(wordKey(segIndex, 0));
           const words = resolved[segIndex];
@@ -368,7 +374,9 @@ export function Transcript({
                 "group/seg mb-5 rounded-xl border p-3 transition-colors",
                 deleted
                   ? "border-[var(--line)] bg-ink-900/40 opacity-45"
-                  : isActive
+                  : wouldDrop
+                    ? "border-dashed border-amber-400/60 bg-amber-500/[0.05]"
+                    : isActive
                     ? "border-iris-500/40 bg-iris-500/[0.06]"
                     : "border-transparent hover:border-[var(--line)]",
               )}
@@ -446,6 +454,7 @@ export function Transcript({
                     const edited = index.get(key);
                     const handCut = state.cutWords.has(key);
                     const isCut = (w.cut && state.removeFillers) || handCut;
+                    const wouldCut = !isCut && (wouldDrop || (proposed?.words.has(key) ?? false));
                     const isNow = activeWord?.segIndex === segIndex && activeWord?.wordIndex === w.wordIndex;
                     const isSelected = position >= from && position <= to;
                     const saysDifferently = w.spoken !== w.text;
@@ -484,7 +493,9 @@ export function Transcript({
                         className={cn(
                           "cursor-pointer rounded px-px transition-colors select-none",
                           isCut && "text-fg-faint line-through decoration-rose-400/70",
-                          !isCut && w.cut && "bg-rose-500/12 text-rose-300",
+                          // Proposed, not yet cut: amber and dashed, so it reads as a question.
+                          wouldCut && "text-fg-subtle line-through decoration-amber-400 decoration-dashed",
+                          !isCut && !wouldCut && w.cut && "bg-rose-500/12 text-rose-300",
                           !isCut && w.em && "font-medium text-cyan-300",
                           !isCut && !w.em && !w.cut && "text-fg-muted hover:text-fg",
                           // A word that is said differently from how it reads.
@@ -853,19 +864,25 @@ function Chip({
   icon,
   active,
   onClick,
+  disabled,
+  title,
 }: {
   children: React.ReactNode;
   icon: IconName;
   active?: boolean;
   onClick?: () => void;
+  disabled?: boolean;
+  title?: string;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
       aria-pressed={active}
+      disabled={disabled}
+      title={title}
       className={cn(
-        "inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-2xs font-medium transition-colors",
+        "inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-2xs font-medium transition-colors disabled:cursor-wait disabled:opacity-60",
         active
           ? "border-iris-500/45 bg-iris-500/12 text-iris-300"
           : "border-[var(--line)] text-fg-subtle hover:border-[var(--line-strong)] hover:text-fg",

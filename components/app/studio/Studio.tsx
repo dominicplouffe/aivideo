@@ -25,6 +25,17 @@ interface NarrationPlan {
 }
 import { Transcript, type WordEditChange } from "./Transcript";
 import { CARD_SECONDS, resolveBrand } from "@/lib/brand";
+import { applyOption, type CutOption, type SuggestGoal } from "@/lib/edit/suggest";
+import {
+  AppliedBanner,
+  HistoryPanel,
+  SuggestionsCard,
+  goalTitle,
+  goalVerb,
+  type Applied,
+  type CheckpointSummary,
+  type Suggesting,
+} from "./Suggestions";
 import { kitLogoUrl } from "@/components/app/brand/BrandPreview";
 import type { KitRecord } from "@/components/app/brand/BrandKitsEditor";
 import { Inspector, type StudioVoice } from "./Inspector";
@@ -70,7 +81,6 @@ export function Studio({
   const [exportOpen, setExportOpen] = useState(false);
   const [saved, setSaved] = useState<"idle" | "saving" | "saved" | "error">("idle");
   // A question pushed from the transcript's chips into the Riff panel.
-  const [ask, setAsk] = useState<{ text: string; at: number } | null>(null);
   // The voices this workspace may narrate with, and which one this project
   // uses. Fetched here rather than in the Audio tab so the header can name
   // the voice before that tab has ever been opened.
@@ -523,6 +533,149 @@ export function Studio({
     [brandKitId, project.id],
   );
 
+  /*
+   * Suggested cuts. The server reads the stored edit, so the unsaved edit is
+   * flushed first; the options come back measured from the transcript, and
+   * picking one previews it in the script. Apply takes a checkpoint of the
+   * edit as it is, then makes the cuts through the same state the hand
+   * edits go through, so the autosave and the narration re-plan follow.
+   */
+  const [suggesting, setSuggesting] = useState<Suggesting | null>(null);
+  const [applied, setApplied] = useState<Applied | null>(null);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [historyKey, setHistoryKey] = useState(0);
+  const [restoring, setRestoring] = useState(false);
+  const [applying, setApplying] = useState(false);
+
+  const flushEdit = useCallback(async () => {
+    if (!dirty) return;
+    const flushed = await fetch(`/api/projects/${project.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ edit_state: serializeEditState(state) }),
+    });
+    if (!flushed.ok) throw new Error("The edit could not be saved first.");
+    setDirty(false);
+  }, [dirty, project.id, state]);
+
+  const suggest = useCallback(
+    async (goal: SuggestGoal) => {
+      setApplied(null);
+      setHistoryOpen(false);
+      setSuggesting({ goal, status: "loading" });
+      try {
+        await flushEdit();
+        const response = await fetch(`/api/projects/${project.id}/suggest`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(goal.kind === "tighten" ? { goal: "tighten" } : { goal: "target", target_sec: goal.targetSec }),
+        });
+        const body = (await response.json()) as { options?: CutOption[]; note?: string; error?: string };
+        if (!response.ok) throw new Error(body.error ?? "Suggestions could not be made.");
+        const options = body.options ?? [];
+        // For a target, the one option previews at once; for tightening,
+        // the middle one is the sensible starting point.
+        const picked = options.length === 0 ? null : options[Math.min(options.length - 1, goal.kind === "tighten" ? 1 : 0)].id;
+        setSuggesting({ goal, status: "ready", options, note: body.note ?? "", picked });
+      } catch (error) {
+        setSuggesting({ goal, status: "error", error: error instanceof Error ? error.message : String(error) });
+      }
+    },
+    [flushEdit, project.id],
+  );
+
+  const pickedOption = suggesting?.status === "ready" ? suggesting.options.find((o) => o.id === suggesting.picked) ?? null : null;
+  const proposed = useMemo(
+    () => (pickedOption ? { words: new Set(pickedOption.cutKeys), chapters: new Set(pickedOption.chapters.map((c) => c.index)) } : null),
+    [pickedOption],
+  );
+
+  const applySuggestion = useCallback(async () => {
+    if (!suggesting || suggesting.status !== "ready" || !pickedOption) return;
+    setApplying(true);
+    try {
+      const label = `Before ${goalTitle(suggesting.goal)} (${pickedOption.label})`;
+      const response = await fetch(`/api/projects/${project.id}/checkpoints`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ label, kind: "ai", edit_state: serializeEditState(state) }),
+      });
+      const body = (await response.json()) as { checkpoint?: { id: string }; error?: string };
+      if (!response.ok || !body.checkpoint) throw new Error(body.error ?? "The checkpoint could not be saved, so nothing was changed.");
+      setState((s) => applyOption(s, pickedOption));
+      setDirty(true);
+      setSelected(null);
+      setApplied({
+        label: `${goalVerb(suggesting.goal)} (${pickedOption.label})`,
+        savedSec: Math.max(0, pickedOption.beforeSec - pickedOption.afterSec),
+        checkpointId: body.checkpoint.id,
+      });
+      setHistoryKey((k) => k + 1);
+      setSuggesting(null);
+    } catch (error) {
+      setSuggesting({ ...suggesting, status: "error", error: error instanceof Error ? error.message : String(error) } as Suggesting);
+    } finally {
+      setApplying(false);
+    }
+  }, [pickedOption, project.id, state, suggesting]);
+
+  const restoreCheckpoint = useCallback(
+    async (checkpointId: string) => {
+      setRestoring(true);
+      setSaved("saving");
+      try {
+        const response = await fetch(`/api/projects/${project.id}/checkpoints/${checkpointId}/restore`, { method: "POST" });
+        const body = (await response.json()) as { edit_state?: Record<string, unknown>; error?: string };
+        if (!response.ok || !body.edit_state) throw new Error(body.error ?? "Could not go back.");
+        setState(hydrateEditState(body.edit_state));
+        setDirty(false);
+        setSaved("saved");
+        setSelected(null);
+        setApplied(null);
+        setHistoryKey((k) => k + 1);
+      } catch (error) {
+        setSaved("error");
+        console.error("[studio] restore failed:", error);
+      } finally {
+        setRestoring(false);
+      }
+    },
+    [project.id],
+  );
+
+  const scriptPanel = (
+    <>
+      {suggesting ? (
+        <SuggestionsCard
+          suggesting={suggesting}
+          applying={applying}
+          onPick={(id) => setSuggesting((s) => (s && s.status === "ready" ? { ...s, picked: id } : s))}
+          onApply={() => void applySuggestion()}
+          onCancel={() => setSuggesting(null)}
+          onRetry={() => void suggest(suggesting.goal)}
+        />
+      ) : null}
+      {applied && !suggesting ? (
+        <AppliedBanner
+          applied={applied}
+          busy={restoring}
+          onUndo={() => void restoreCheckpoint(applied.checkpointId)}
+          onDismiss={() => setApplied(null)}
+          onHistory={() => setHistoryOpen(true)}
+        />
+      ) : null}
+      {historyOpen ? (
+        <HistoryPanel
+          projectId={project.id}
+          busy={restoring}
+          refreshKey={historyKey}
+          onClose={() => setHistoryOpen(false)}
+          onRestore={(checkpoint: CheckpointSummary) => void restoreCheckpoint(checkpoint.id)}
+        />
+      ) : null}
+    </>
+  );
+
   const setWordsCut = useCallback((keys: string[], cut: boolean) => {
     setState((s) => {
       const next = new Set(s.cutWords);
@@ -760,7 +913,10 @@ export function Studio({
             onSplit={(segIndex, wordIndex) => void reshape({ action: "split", segment_index: segIndex, word_index: wordIndex })}
             onMerge={(segIndex) => void reshape({ action: "merge", segment_index: segIndex })}
             onToggleFillers={() => patch({ removeFillers: !state.removeFillers })}
-            onAsk={(text) => setAsk({ text, at: Date.now() })}
+            onSuggest={(goal) => void suggest(goal === "tighten" ? { kind: "tighten" } : { kind: "target", targetSec: 60 })}
+            suggesting={suggesting?.status === "loading"}
+            proposed={proposed}
+            panel={scriptPanel}
           />
         </div>
 
@@ -825,8 +981,6 @@ export function Studio({
             brandKits={brandKits}
             brandKitId={brandKitId}
             onBrandKit={(next) => void chooseBrandKit(next)}
-            ask={ask}
-            onAsked={() => setAsk(null)}
           />
         </div>
       </div>
@@ -853,6 +1007,10 @@ export function Studio({
             onSplit={(segIndex, wordIndex) => void reshape({ action: "split", segment_index: segIndex, word_index: wordIndex })}
             onMerge={(segIndex) => void reshape({ action: "merge", segment_index: segIndex })}
             onToggleFillers={() => patch({ removeFillers: !state.removeFillers })}
+            onSuggest={(goal) => void suggest(goal === "tighten" ? { kind: "tighten" } : { kind: "target", targetSec: 60 })}
+            suggesting={suggesting?.status === "loading"}
+            proposed={proposed}
+            panel={scriptPanel}
           />
         </div>
       </div>

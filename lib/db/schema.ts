@@ -686,6 +686,24 @@ export const voices = pgTable(
  * whatever still comes back wrong is corrected before segmentation, and the
  * spoken form is given to synthesis as a respelling.
  */
+export const projectCheckpoints = pgTable(
+  "project_checkpoints",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workspaceId: uuid("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+    projectId: uuid("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+    /** What a person reads in the history: "Before Tighten (light)". */
+    label: text("label").notNull(),
+    /** Why it was taken: "ai" before an AI cut, "restore" before going back, "manual". */
+    kind: text("kind").notNull(),
+    /** The edit as stored in `projects.edit_state` at that moment. */
+    editState: jsonb("edit_state").$type<Record<string, unknown>>().notNull(),
+    createdBy: uuid("created_by").references(() => members.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("project_checkpoints_project_idx").on(t.projectId, t.createdAt)],
+);
+
 export const glossaryTerms = pgTable(
   "glossary_terms",
   {
