@@ -237,6 +237,7 @@ export async function getAgentRunDetail(id: string) {
         detail: action.detail,
         refusedReason: action.refusedReason,
         atMs: action.atMs,
+        attempt: action.attempt,
       })) as agentFixtures.FixtureAction[],
     };
   } catch (error) {
@@ -261,12 +262,18 @@ function toViewRun(row: {
   createdAt: Date;
   projectId?: string | null;
   entryUrl?: string | null;
+  attempt?: number;
+  signIns?: Record<string, string>;
+  revisedFrom?: string | null;
 }): agentFixtures.FixtureRun {
   return {
     id: row.id,
     brief: row.brief,
     projectId: row.projectId ?? null,
     entryUrl: row.entryUrl ?? null,
+    attempt: row.attempt ?? 1,
+    signIns: row.signIns ?? {},
+    revisedFrom: row.revisedFrom ?? null,
     status: row.status as agentFixtures.FixtureStatus,
     outline: (row.outline ?? []) as agentFixtures.FixtureRun["outline"],
     removed: [],

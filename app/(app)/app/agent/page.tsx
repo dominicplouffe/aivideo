@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { PageHeader, Panel, StatTile, EmptyState } from "@/components/app/Shared";
 import { Icon } from "@/components/ui/Icon";
+import { Button } from "@/components/ui/Button";
 import { RunStatusPill } from "@/components/app/agent/RunStatusPill";
-import { RunRequestForm } from "@/components/app/agent/RunRequestForm";
 import { getAgentRuns, viewerMay } from "@/lib/data";
 import { SignInsPanel } from "@/components/app/agent/SignInsPanel";
 import { relativeTime } from "@/lib/utils";
@@ -78,12 +78,19 @@ export default async function AgentPage() {
           <div className="space-y-5">
             <Panel title="New run">
               <div className="px-5 py-5">
-                <RunRequestForm />
+                <p className="text-[0.8125rem] leading-relaxed text-fg-subtle">
+                  Say where the agent may go and what to show. You plan the steps, read and change them, and choose the
+                  sign-in for each site before anything waits for approval.
+                </p>
+                <Button href="/app/agent/new" size="sm" className="mt-3">
+                  <Icon name="plus" className="size-4" strokeWidth={2.2} />
+                  New run
+                </Button>
               </div>
             </Panel>
 
-            <Panel title="Sign-ins">
-              <SignInsPanel canManage={canManageSignIns} suggestedOrigins={[...new Set(runs.flatMap((run) => run.allowedOrigins))].filter((o) => !o.includes("*"))} />
+            <Panel title="Saved sign-ins">
+              <SignInsPanel canManage={canManageSignIns} />
             </Panel>
 
             <Panel title="What the agent cannot do">

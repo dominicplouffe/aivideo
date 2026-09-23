@@ -3,7 +3,7 @@ import { signInIfAsked } from "./signin";
 import { keepEvidence } from "./evidence";
 import { openSession, type SessionOptions } from "./session";
 import {
-  ApprovalError, beginRecording, failRun, finishRecording, outlineHash, recordAction,
+  ApprovalError, beginRecording, failRun, finishRecording, runHash, recordAction,
   type OutlineStep, type Run,
 } from "./run";
 
@@ -78,7 +78,7 @@ export async function driveRun(run: Run, options: DriveOptions): Promise<DriveRe
 
   // Not a formality. The status says a transition happened; the hash says
   // that what was approved is what is about to run.
-  if (run.approvedOutlineHash !== outlineHash(outline)) {
+  if (run.approvedOutlineHash !== runHash(run)) {
     throw new ApprovalError("The outline has changed since it was approved.");
   }
 

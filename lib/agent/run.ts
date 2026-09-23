@@ -48,8 +48,11 @@ export const TRANSITIONS: Record<RunStatus, RunStatus[]> = {
   approved: ["recording", "cancelled"],
   recording: ["recorded", "failed", "cancelled"],
   recorded: [],
-  failed: [],
-  cancelled: [],
+  // Reopened to be fixed and tried again, but only by `retryRun`, and only
+  // while the run has not produced anything. Back to awaiting_approval, so
+  // the fixed plan is approved again before anything records.
+  failed: ["awaiting_approval"],
+  cancelled: ["awaiting_approval"],
 };
 
 export class RunStateError extends Error {
@@ -100,13 +103,35 @@ export type OutlineStep = {
  * recorder checks this before its first action, so a rewritten plan fails
  * closed rather than running under somebody else's name.
  */
-export function outlineHash(outline: OutlineStep[]): string {
-  const canonical = outline
+export function outlineHash(outline: OutlineStep[], signIns: Record<string, string> = {}): string {
+  // Everything that changes what the agent does: the page, the action and
+  // what it types. The narration is left out; rewording what is said over
+  // a step does not change what the browser does.
+  const steps = outline
     .slice()
     .sort((a, b) => a.ordinal - b.ordinal)
-    .map((step) => `${step.ordinal}\u0000${step.intent.trim()}\u0000${step.url ?? ""}`)
+    .map((step) =>
+      [
+        step.ordinal,
+        step.intent.trim(),
+        step.url ?? "",
+        step.action?.kind ?? "",
+        step.action?.target ?? "",
+        step.action?.kind === "fill" ? step.action.value : "",
+      ].join("\u0000"),
+    )
     .join("\u0001");
-  return createHash("sha256").update(canonical, "utf8").digest("hex");
+  // Which account signs in on which site is part of the approval too.
+  const accounts = Object.keys(signIns)
+    .sort()
+    .map((origin) => `${origin}\u0000${signIns[origin]}`)
+    .join("\u0001");
+  return createHash("sha256").update(`${steps}\u0002${accounts}`, "utf8").digest("hex");
+}
+
+/** The approval fingerprint of a run as it stands. */
+export function runHash(run: Pick<Run, "outline" | "signIns">): string {
+  return outlineHash((run.outline ?? []) as OutlineStep[], (run.signIns ?? {}) as Record<string, string>);
 }
 
 /* ----------------------------------------------------------------- moves */
@@ -174,26 +199,95 @@ export async function proposeOutline(
   });
 }
 
+/** Everything a person fills in for a run. */
+export interface RunRequest {
+  brief: string;
+  allowedOrigins: string[];
+  entryUrl: string | null;
+  outline: OutlineStep[];
+  /** Stored sign-in label to use, keyed by origin. */
+  signIns: Record<string, string>;
+}
+
+function requestColumns(request: RunRequest) {
+  return {
+    brief: request.brief,
+    allowedOrigins: normaliseList(request.allowedOrigins),
+    entryUrl: request.entryUrl,
+    outline: request.outline,
+    signIns: request.signIns,
+  };
+}
+
 /**
- * Replaces the plan of a run that is waiting for approval.
+ * Changes a run that is waiting for approval, in place.
  *
- * Only there: an approved plan is hashed and a recording one is running,
- * and changing either would make "approved" mean something other than what
- * was read. The approval, when it comes, covers the plan as edited.
+ * Only there: an approved run is fingerprinted and a recording one is
+ * running, and changing either would make "approved" mean something other
+ * than what was read. The approval, when it comes, covers the run as edited.
  */
-export async function reviseOutline(run: Run, outline: OutlineStep[], actor: ActingParty): Promise<Run> {
+export async function updateRequest(run: Run, request: RunRequest, actor: ActingParty): Promise<Run> {
   if (run.status !== "awaiting_approval") {
     throw new RunStateError(run.status as RunStatus, "awaiting_approval");
   }
-  if (outline.length === 0) throw new ApprovalError("A plan needs at least one step.");
+  if (request.outline.length === 0) throw new ApprovalError("A run needs at least one step.");
   const [updated] = await getDb()
     .update(s.agentRuns)
-    .set({ outline })
+    .set(requestColumns(request))
     .where(and(eq(s.agentRuns.id, run.id), eq(s.agentRuns.status, "awaiting_approval")))
     .returning();
   if (!updated) throw new RunStateError(run.status as RunStatus, "awaiting_approval");
-  await note(updated, actor, "agent.run_plan_edited", { steps: outline.length });
+  await note(updated, actor, "agent.run_edited", { steps: request.outline.length });
   return updated;
+}
+
+/**
+ * Reopens a run that stopped before it made anything, with the fixes, for
+ * approval again. The same run, one attempt later: its trail keeps the
+ * earlier attempts, and nothing records until the fixed run is approved.
+ *
+ * A run that produced a project is not reopened. Recording it again would
+ * orphan the edits made to that project; it is revised as a new run instead.
+ */
+export async function retryRun(run: Run, request: RunRequest, actor: ActingParty): Promise<Run> {
+  if (run.status !== "failed" && run.status !== "cancelled") {
+    throw new RunStateError(run.status as RunStatus, "awaiting_approval");
+  }
+  if (run.projectId || run.recordingId) {
+    throw new ApprovalError("This run made a project. Record it again as a new run instead, so that project stays as it is.");
+  }
+  if (request.outline.length === 0) throw new ApprovalError("A run needs at least one step.");
+  const updated = await move(run, "awaiting_approval", {
+    ...requestColumns(request),
+    attempt: run.attempt + 1,
+    approvedBy: null,
+    approvedByEmail: null,
+    approvedAt: null,
+    approvedOutlineHash: null,
+    error: null,
+    startedAt: null,
+    finishedAt: null,
+  });
+  await note(updated, actor, "agent.run_retried", { attempt: updated.attempt, steps: request.outline.length });
+  return updated;
+}
+
+/**
+ * A run made from a request the person has already reviewed: planned in
+ * the editor, steps checked, sign-ins chosen. It goes through the same
+ * states as a run planned on the server, straight to waiting for approval.
+ */
+export async function createReviewedRun(input: {
+  workspaceId: string;
+  actor: ActingParty;
+  request: RunRequest;
+  revisedFrom?: string | null;
+}): Promise<Run> {
+  if (input.request.outline.length === 0) throw new ApprovalError("A run needs at least one step.");
+  let run = await createRun({ workspaceId: input.workspaceId, brief: input.request.brief, actor: input.actor, entryUrl: input.request.entryUrl });
+  run = await beginOutline(run);
+  run = await move(run, "awaiting_approval", { ...requestColumns(input.request), revisedFrom: input.revisedFrom ?? null });
+  return run;
 }
 
 export class ApprovalError extends Error {
@@ -241,7 +335,7 @@ export async function approve(
     approvedBy: approver.memberId,
     approvedByEmail: approver.email,
     approvedAt: new Date(),
-    approvedOutlineHash: outlineHash(run.outline as OutlineStep[]),
+    approvedOutlineHash: runHash(run),
   });
 
   await note(updated, approver, "agent.run_approved", {
@@ -289,7 +383,7 @@ export async function beginRecording(run: Run): Promise<Run> {
   if (!run.approvedBy || !run.approvedAt) {
     throw new ApprovalError("This run has not been approved by anybody.");
   }
-  if (run.approvedOutlineHash !== outlineHash((run.outline ?? []) as OutlineStep[])) {
+  if (run.approvedOutlineHash !== runHash(run)) {
     throw new ApprovalError(
       "The outline has changed since it was approved. It needs approving again.",
     );
@@ -371,9 +465,11 @@ async function appendAction(runId: string, action: RecordedAction): Promise<void
       .where(eq(s.agentActions.runId, runId))
       .orderBy(desc(s.agentActions.ordinal))
       .limit(1);
+    const [owner] = await db.select({ attempt: s.agentRuns.attempt }).from(s.agentRuns).where(eq(s.agentRuns.id, runId)).limit(1);
     try {
       await db.insert(s.agentActions).values({
         runId,
+        attempt: owner?.attempt ?? 1,
         ordinal: (last?.ordinal ?? -1) + 1,
         kind: action.kind,
         outlineOrdinal: action.outlineOrdinal ?? null,

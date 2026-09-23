@@ -36,7 +36,9 @@ export async function GET(request: Request) {
 
   try {
     const actor = await resolveActor(request);
-    authorize(actor, "agent.credentials.manage", { workspaceId: actor.workspaceId });
+    // Listing shows labels, sites and emails, never a secret: anybody who
+    // can request a run needs it to choose which account the run uses.
+    authorize(actor, "agent.run", { workspaceId: actor.workspaceId });
     return NextResponse.json({ credentials: await listCredentials(actor.workspaceId) });
   } catch (error) {
     return handle(error);

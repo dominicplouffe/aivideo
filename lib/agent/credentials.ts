@@ -149,10 +149,14 @@ export interface ResolvedCredential {
 export async function credentialForOrigin(
   workspaceId: string,
   origin: string,
+  /** The sign-in the run chose for this site. Without one, any for the site. */
+  label?: string | null,
 ): Promise<ResolvedCredential | null> {
   const normalised = normaliseEntry(origin);
   if (!normalised) return null;
 
+  // The origin is matched even when a label is given: a sign-in chosen for
+  // one site is never typed into another, whatever the run says.
   const [row] = await getDb()
     .select()
     .from(s.agentCredentials)
@@ -161,6 +165,7 @@ export async function credentialForOrigin(
         eq(s.agentCredentials.workspaceId, workspaceId),
         eq(s.agentCredentials.origin, normalised),
         isNull(s.agentCredentials.revokedAt),
+        ...(label ? [eq(s.agentCredentials.label, label)] : []),
       ),
     )
     .limit(1);

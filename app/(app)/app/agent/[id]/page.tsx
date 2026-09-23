@@ -6,7 +6,7 @@ import { ApprovalPanel } from "@/components/app/agent/ApprovalPanel";
 import { RunStatusPill } from "@/components/app/agent/RunStatusPill";
 import { RunTrail } from "@/components/app/agent/RunTrail";
 import { RunProgress } from "@/components/app/agent/RunProgress";
-import { EditablePlan, ReviseButton } from "@/components/app/agent/RunActions";
+import { EDIT_LABEL, editModeFor } from "@/lib/agent/edit-mode";
 import { Button } from "@/components/ui/Button";
 import { getCurrentActor } from "@/lib/auth/current";
 import { allowed } from "@/lib/auth/authorize";
@@ -18,15 +18,8 @@ import { relativeTime } from "@/lib/utils";
 
 export const metadata: Metadata = { title: "Agent run" };
 
-export default async function AgentRunPage({
-  params,
-  searchParams,
-}: {
-  params: Promise<{ id: string }>;
-  searchParams: Promise<{ edit?: string }>;
-}) {
+export default async function AgentRunPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const { edit } = await searchParams;
   const detail = await getAgentRunDetail(id);
   if (!detail) notFound();
 
@@ -39,16 +32,16 @@ export default async function AgentRunPage({
     ? allowed(actor, "agent.approve", { workspaceId: actor.workspaceId })
     : true;
   const isRequester = actor ? actor.email === run.requestedByEmail : false;
-  const canEditPlan = actor ? allowed(actor, "agent.run", { workspaceId: actor.workspaceId }) : false;
-  const finished = run.status === "failed" || run.status === "cancelled" || run.status === "recorded";
-  // Which of the run's sites have a sign-in stored, so a missing one is
-  // said before approval rather than discovered when the run stops at a
-  // login screen. Wildcards are left out: a password is never bound to one.
+  const canEdit = actor ? allowed(actor, "agent.run", { workspaceId: actor.workspaceId }) : false;
+  const mode = canEdit ? editModeFor(run) : null;
+  // The account the run signs in with on each site, as chosen, so the page
+  // says it rather than leaving it to be discovered at a login screen.
+  // Wildcards are left out: a password is never bound to one.
   const exactOrigins = run.allowedOrigins.filter((origin) => !origin.includes("*"));
-  const storedFor = actor
-    ? new Set((await listCredentials(actor.workspaceId)).filter((c) => !c.revoked).map((c) => c.origin))
-    : new Set<string>();
-  const missingSignIns = exactOrigins.filter((origin) => !storedFor.has(origin));
+  const stored = actor ? (await listCredentials(actor.workspaceId)).filter((c) => !c.revoked) : [];
+  const signIns = run.signIns ?? {};
+  const accountFor = (origin: string) => stored.find((c) => c.origin === origin && c.label === signIns[origin]) ?? null;
+  const missingSignIns = exactOrigins.filter((origin) => !accountFor(origin));
   // Alone in the workspace with approval rights: the requester may approve.
   const soleApprover =
     isRequester && actor ? !(await hasOtherApprover(actor.workspaceId, actor.memberId)) : false;
@@ -58,11 +51,14 @@ export default async function AgentRunPage({
       <PageHeader
         breadcrumb={[{ label: "Riff Agent", href: "/app/agent" }, { label: "Run" }]}
         title={headline(run.brief)}
-        description={`Requested by ${run.requestedByEmail} ${relativeTime(run.createdAt)}.`}
+        description={`Requested by ${run.requestedByEmail} ${relativeTime(run.createdAt)}.${run.revisedFrom ? " Records again, with changes, a run that already made a project." : ""}`}
         actions={
           <span className="flex items-center gap-3">
-            {(finished || run.status === "awaiting_approval") && canEditPlan ? (
-              <ReviseButton runId={run.id} hasProject={Boolean(run.projectId)} waiting={run.status === "awaiting_approval"} />
+            {mode ? (
+              <Button href={`/app/agent/${run.id}/edit`} size="sm" variant={mode === "retry" ? "primary" : "outline"}>
+                <Icon name={mode === "rerecord" ? "refresh" : "wand"} className="size-3.5" strokeWidth={2} />
+                {EDIT_LABEL[mode]}
+              </Button>
             ) : null}
             <RunStatusPill status={run.status} />
           </span>
@@ -88,12 +84,17 @@ export default async function AgentRunPage({
             <div className="flex items-start gap-2.5 rounded-xl border border-[var(--line-strong)] bg-ink-900 px-4 py-3.5 text-[0.8125rem] leading-relaxed text-fg-subtle">
               <Icon name="key" className="mt-0.5 size-4 shrink-0 text-fg-faint" strokeWidth={1.9} />
               <span>
-                No sign-in is stored for <span className="font-mono text-fg">{missingSignIns.join(", ")}</span>. If this app
-                asks you to sign in, the run will stop at the login page.{" "}
-                <Link href="/app/agent" className="text-iris-300 underline-offset-2 hover:underline">
-                  Add a sign-in
-                </Link>{" "}
-                first; it is used for this run as soon as it is saved.
+                No sign-in is chosen for <span className="font-mono text-fg">{missingSignIns.join(", ")}</span>. If the site
+                asks to sign in, the run will stop at the login page.
+                {mode ? (
+                  <>
+                    {" "}
+                    <Link href={`/app/agent/${run.id}/edit`} className="text-iris-300 underline-offset-2 hover:underline">
+                      Choose one
+                    </Link>{" "}
+                    before approving.
+                  </>
+                ) : null}
               </span>
             </div>
           ) : null}
@@ -133,12 +134,6 @@ export default async function AgentRunPage({
           ) : null}
 
           <Panel title="The plan" className="overflow-hidden">
-            <EditablePlan
-              runId={run.id}
-              outline={run.outline}
-              canEdit={run.status === "awaiting_approval" && canEditPlan}
-              startEditing={run.status === "awaiting_approval" && edit === "1"}
-            >
             <ol className="divide-y divide-[var(--line)]">
               {run.outline.map((step) => (
                 <li key={step.ordinal} className="flex gap-3.5 px-5 py-3.5">
@@ -196,11 +191,10 @@ export default async function AgentRunPage({
                 </p>
               </div>
             ) : null}
-            </EditablePlan>
           </Panel>
 
           <Panel title="What it did" className="overflow-hidden">
-            <RunTrail actions={actions} runId={run.id} />
+            <RunTrail actions={actions} runId={run.id} attempt={run.attempt ?? 1} />
           </Panel>
         </div>
 
@@ -227,12 +221,34 @@ export default async function AgentRunPage({
                   afterwards does not change what this run may reach.
                 </p>
               </div>
+              {exactOrigins.length > 0 ? (
+                <div>
+                  <p className="text-2xs font-medium uppercase tracking-wide text-fg-faint">Signs in as</p>
+                  <ul className="mt-2 space-y-1.5">
+                    {exactOrigins.map((origin) => {
+                      const account = accountFor(origin);
+                      return (
+                        <li key={origin} className="flex items-start gap-2 text-2xs">
+                          <Icon name="key" className="mt-0.5 size-3 shrink-0 text-fg-faint" strokeWidth={1.9} />
+                          <span className="min-w-0">
+                            <span className="block truncate font-mono text-fg-subtle">{new URL(origin).host}</span>
+                            <span className={account ? "text-fg" : "text-fg-faint"}>
+                              {account ? account.username ?? account.label : signIns[origin] ? "chosen sign-in was removed" : "no sign-in"}
+                            </span>
+                          </span>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </div>
+              ) : null}
             </div>
           </Panel>
 
           <Panel title="Approval">
             <dl className="space-y-3 px-5 py-5 text-[0.8125rem]">
               <Row label="Requested by" value={run.requestedByEmail} />
+              {(run.attempt ?? 1) > 1 ? <Row label="Attempt" value={String(run.attempt)} /> : null}
               <Row label="Approved by" value={run.approvedByEmail ?? "—"} />
               <Row
                 label="Approved"

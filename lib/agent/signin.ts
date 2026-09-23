@@ -120,7 +120,8 @@ export async function signInIfAsked(
   if (!(await looksLikeSignIn(page))) return false;
 
   const origin = new URL(page.url()).origin;
-  const credential = await credentialForOrigin(run.workspaceId, origin);
+  const chosen = ((run.signIns ?? {}) as Record<string, string>)[origin] ?? null;
+  const credential = await credentialForOrigin(run.workspaceId, origin, chosen);
   const at = () => Date.now() - options.startedAt;
   // Every stop below carries what the page looked like and what it said.
   const stop = async (what: string, message: string): Promise<never> => {
@@ -134,10 +135,15 @@ export async function signInIfAsked(
       outlineOrdinal: options.outlineOrdinal ?? null,
       url: page.url(),
       target: "sign-in form",
-      refusedReason: "no sign-in stored for this site",
+      refusedReason: chosen ? `the chosen sign-in "${chosen}" is no longer stored` : "no sign-in chosen for this site",
       atMs: at(),
     });
-    return stop("sign-in", `The app asked to sign in at ${origin} and no sign-in is stored for that site. Add one under Riff Agent → Sign-ins, then choose Revise and run again.`);
+    return stop(
+      "sign-in",
+      chosen
+        ? `The app asked to sign in at ${origin}, and the sign-in this run uses ("${chosen}") has been removed. Choose another under Edit and retry.`
+        : `The app asked to sign in at ${origin} and this run has no sign-in for that site. Add one under Edit and retry.`,
+    );
   }
 
   // Email first, when the password is not on screen yet.
@@ -180,7 +186,7 @@ export async function signInIfAsked(
       refusedReason: "the site did not accept the sign-in",
       atMs: at(),
     });
-    return stop("sign-in", `The site at ${origin} did not accept the stored sign-in "${credential.label}". Check the email and password under Riff Agent → Sign-ins. If the account uses two-factor codes, the agent cannot enter them.`);
+    return stop("sign-in", `The site at ${origin} did not accept the stored sign-in "${credential.label}". Check the email and password under Edit and retry. If the account uses two-factor codes, the agent cannot enter them.`);
   }
   await recordAction(run.id, { kind: "click", outlineOrdinal: options.outlineOrdinal ?? null, url: page.url(), target: "sign in", atMs: at() });
   return true;

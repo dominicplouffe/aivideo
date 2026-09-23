@@ -1,17 +1,17 @@
 import { NextResponse } from "next/server";
-import { providersFor } from "@/lib/providers/for-workspace";
 import { assertFeature } from "@/lib/api/plan-gate";
 import { and, desc, eq, lt, sql } from "drizzle-orm";
 import { getDb, isDatabaseConfigured } from "@/lib/db/client";
 import * as s from "@/lib/db/schema";
 import { authorize, ForbiddenError } from "@/lib/auth/authorize";
 import { resolveActor, UnauthenticatedError } from "@/lib/auth/session";
-import { normaliseList } from "@/lib/agent/allowlist";
-import { getPlanner, shapePlan } from "@/lib/agent/outline";
+import { normaliseList, withinAllowlist } from "@/lib/agent/allowlist";
+import { listCredentials } from "@/lib/agent/credentials";
+import { shapePlan } from "@/lib/agent/outline";
 import { enqueue } from "@/lib/jobs/queue";
 import {
-  ApprovalError, RunStateError, actionsFor, approve, beginOutline, cancelRun, createRun,
-  getRun, hasOtherApprover, proposeOutline, reviseOutline,
+  ApprovalError, RunStateError, actionsFor, approve, cancelRun,
+  createReviewedRun, getRun, hasOtherApprover, retryRun, updateRequest, type RunRequest,
 } from "@/lib/agent/run";
 
 /**
@@ -53,6 +53,11 @@ function shape(run: typeof s.agentRuns.$inferSelect) {
     brief: run.brief,
     outline: run.outline ?? [],
     allowed_origins: run.allowedOrigins,
+    entry_url: run.entryUrl,
+    sign_ins: run.signIns,
+    attempt: run.attempt,
+    project_id: run.projectId,
+    revised_from: run.revisedFrom,
     requested_by: run.requestedByEmail,
     approved_by: run.approvedByEmail,
     approved_at: run.approvedAt?.toISOString() ?? null,
@@ -111,22 +116,58 @@ export async function GET(request: Request) {
   }
 }
 
-/** Asks for a run, and plans it. Nothing records. */
+/**
+ * Everything a person filled in for a run, checked as the server would
+ * check a planned one: sites normalised, every step inside them, and every
+ * chosen sign-in stored for exactly the site it is chosen for.
+ */
+async function parseRequest(
+  body: Record<string, unknown>,
+  workspaceId: string,
+): Promise<{ ok: true; request: RunRequest } | { ok: false; error: string }> {
+  const brief = typeof body.brief === "string" ? body.brief.trim() : "";
+  if (brief.length < 10) return { ok: false, error: "Say what to demonstrate, in a sentence or two." };
+  const origins = normaliseList(Array.isArray(body.allowed_origins) ? (body.allowed_origins as string[]) : []);
+  if (origins.length === 0) return { ok: false, error: "Name at least one site the agent may go to." };
+  const entryUrl = typeof body.entry_url === "string" && body.entry_url.trim() ? body.entry_url.trim() : null;
+  if (entryUrl && !withinAllowlist(entryUrl, origins).ok) {
+    return { ok: false, error: "The start page has to be on one of the sites above." };
+  }
+  const plan = shapePlan(Array.isArray(body.outline) ? (body.outline as Record<string, unknown>[]) : [], origins);
+  if (plan.removed.length > 0) {
+    const first = plan.removed[0];
+    return { ok: false, error: `Step "${first.intent}" goes to ${first.url ?? "a page"}, ${first.reason}.` };
+  }
+  if (plan.outline.length === 0) return { ok: false, error: "A run needs at least one step. Plan the steps from the brief, or add one." };
+
+  const signIns: Record<string, string> = {};
+  const raw = body.sign_ins && typeof body.sign_ins === "object" ? (body.sign_ins as Record<string, unknown>) : {};
+  const stored = (await listCredentials(workspaceId)).filter((c) => !c.revoked);
+  for (const [origin, label] of Object.entries(raw)) {
+    if (typeof label !== "string" || !label) continue;
+    if (!origins.includes(origin)) continue;
+    if (!stored.some((c) => c.label === label && c.origin === origin)) {
+      return { ok: false, error: `The sign-in chosen for ${origin} is not stored for that site any more. Choose it again.` };
+    }
+    signIns[origin] = label;
+  }
+  return { ok: true, request: { brief, allowedOrigins: origins, entryUrl, outline: plan.outline, signIns } };
+}
+
+/**
+ * Saves a run the person has reviewed in the editor.
+ *
+ * With no `revise_of`, a new run. With `revise_of` naming a run that made
+ * a project, a new run that records into a new project and points back at
+ * the original, which stays as it is. Nothing records until approval.
+ */
 export async function POST(request: Request) {
   if (!isDatabaseConfigured()) {
     return NextResponse.json({ error: "The agent requires a database." }, { status: 503 });
   }
-
-  let body: {
-    brief?: unknown;
-    allowed_origins?: unknown;
-    entry_url?: unknown;
-    project_id?: unknown;
-    revise_of?: unknown;
-    keep_steps?: unknown;
-  };
+  let body: Record<string, unknown>;
   try {
-    body = (await request.json()) as typeof body;
+    body = (await request.json()) as Record<string, unknown>;
   } catch {
     return NextResponse.json({ error: "Body must be valid JSON." }, { status: 400 });
   }
@@ -137,83 +178,22 @@ export async function POST(request: Request) {
     const outside = await assertFeature(actor.workspaceId, "agent", "The Riff Agent");
     if (outside) return outside;
 
-    // A revision names the run it replaces. It carries every field of the
-    // form, edited or not; the steps are planned again from the brief unless
-    // the person chose to keep the ones they had.
-    let source: Awaited<ReturnType<typeof getRun>> = null;
+    let revisedFrom: string | null = null;
     if (body.revise_of !== undefined) {
-      if (typeof body.revise_of !== "string" || !UUID.test(body.revise_of)) {
-        return NextResponse.json({ error: "No such run." }, { status: 404 });
-      }
-      source = await getRun(actor.workspaceId, body.revise_of);
+      const id = typeof body.revise_of === "string" ? body.revise_of : "";
+      const source = UUID.test(id) ? await getRun(actor.workspaceId, id) : null;
       if (!source) return NextResponse.json({ error: "No such run." }, { status: 404 });
-      if (source.status === "approved" || source.status === "recording") {
-        return NextResponse.json({ error: "That run is recording or about to; wait for it to finish, then revise it." }, { status: 409 });
+      if (!source.projectId) {
+        return NextResponse.json({ error: "That run made no project, so it is fixed and retried as itself." }, { status: 409 });
       }
+      revisedFrom = source.id;
     }
 
-    const brief = typeof body.brief === "string" ? body.brief.trim() : "";
-    if (brief.length < 10) {
-      return NextResponse.json(
-        { error: "A brief has to say what to demonstrate." },
-        { status: 422 },
-      );
-    }
+    const parsed = await parseRequest(body, actor.workspaceId);
+    if (!parsed.ok) return NextResponse.json({ error: parsed.error }, { status: 422 });
 
-    const origins = normaliseList(
-      Array.isArray(body.allowed_origins) ? (body.allowed_origins as string[]) : [],
-    );
-    if (origins.length === 0) {
-      // An empty allowlist is not "anywhere", it is "nowhere", and refusing
-      // here is clearer than planning a run that can reach nothing.
-      return NextResponse.json(
-        { error: "A run needs at least one allowed origin." },
-        { status: 422 },
-      );
-    }
-
-    const entryUrl = typeof body.entry_url === "string" && body.entry_url.trim() ? body.entry_url.trim() : null;
-
-    let run = await createRun({
-      workspaceId: actor.workspaceId,
-      brief,
-      actor,
-      entryUrl,
-      projectId: typeof body.project_id === "string" && UUID.test(body.project_id) ? body.project_id : null,
-    });
-
-    run = await beginOutline(run);
-
-    // Kept steps are checked against the sites as they are now, exactly as
-    // planned ones are: a step on a site that was taken off the list is
-    // removed and reported.
-    const plan =
-      source && body.keep_steps === true && (source.outline ?? []).length > 0
-        ? shapePlan((source.outline ?? []) as Record<string, unknown>[], origins)
-        : await getPlanner((await providersFor(actor.workspaceId)).anthropic.key).plan({
-            brief,
-            allowedOrigins: origins,
-            entryUrl: entryUrl ?? undefined,
-          });
-
-    run = await proposeOutline(run, plan.outline, origins);
-
-    // A run still waiting for approval is replaced, not left beside its
-    // revision for somebody to approve by mistake.
-    if (source && source.status === "awaiting_approval") {
-      await cancelRun(source, actor, "Replaced by a revised run.").catch(() => {});
-    }
-
-    return NextResponse.json(
-      {
-        run: shape(run),
-        // Shown to whoever approves. A plan that reads as approvable while
-        // hiding a step nobody would approve is the failure this gate is
-        // for.
-        removed: plan.removed,
-      },
-      { status: 201 },
-    );
+    const run = await createReviewedRun({ workspaceId: actor.workspaceId, actor, request: parsed.request, revisedFrom });
+    return NextResponse.json({ run: shape(run) }, { status: 201 });
   } catch (error) {
     return handle(error);
   }
@@ -225,7 +205,7 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ error: "The agent requires a database." }, { status: 503 });
   }
 
-  let body: { id?: unknown; decision?: unknown; reason?: unknown; outline?: unknown };
+  let body: { id?: unknown; decision?: unknown; reason?: unknown } & Record<string, unknown>;
   try {
     body = (await request.json()) as typeof body;
   } catch {
@@ -238,21 +218,18 @@ export async function PATCH(request: Request) {
   try {
     const actor = await resolveActor(request);
 
+    // Edit: a waiting run changes in place; a run that stopped before it
+    // made anything is reopened as its next attempt, for approval again.
     if (body.decision === "edit") {
       authorize(actor, "agent.run", { workspaceId: actor.workspaceId });
       const run = await getRun(actor.workspaceId, id);
       if (!run) return NextResponse.json({ error: "No such run." }, { status: 404 });
-      const raw = Array.isArray(body.outline) ? (body.outline as Record<string, unknown>[]) : [];
-      // Checked exactly as a planned outline is: a step off the allowlist is
-      // removed and reported, never kept.
-      const plan = shapePlan(raw, run.allowedOrigins);
-      if (plan.removed.length > 0) {
-        return NextResponse.json(
-          { error: `Step "${plan.removed[0].intent}" goes to ${plan.removed[0].url ?? "a page"}, ${plan.removed[0].reason}.` },
-          { status: 422 },
-        );
-      }
-      const updated = await reviseOutline(run, plan.outline, actor);
+      const parsed = await parseRequest(body as Record<string, unknown>, actor.workspaceId);
+      if (!parsed.ok) return NextResponse.json({ error: parsed.error }, { status: 422 });
+      const updated =
+        run.status === "awaiting_approval"
+          ? await updateRequest(run, parsed.request, actor)
+          : await retryRun(run, parsed.request, actor);
       return NextResponse.json({ run: shape(updated) });
     }
 

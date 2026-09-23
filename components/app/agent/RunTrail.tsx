@@ -27,12 +27,34 @@ function timestamp(ms: number): string {
   return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
 }
 
-export function RunTrail({ actions, runId }: { actions: FixtureAction[]; runId?: string }) {
+/**
+ * The trail, current attempt first. A run that was fixed and retried keeps
+ * its earlier attempts, folded underneath, so what went wrong the first
+ * time is still there to read.
+ */
+export function RunTrail({ actions, runId, attempt = 1 }: { actions: FixtureAction[]; runId?: string; attempt?: number }) {
+  const current = actions.filter((a) => (a.attempt ?? 1) === attempt);
+  const earlier = [...new Set(actions.map((a) => a.attempt ?? 1).filter((n) => n < attempt))].sort((a, b) => b - a);
+  return (
+    <>
+      <AttemptTrail actions={current} runId={runId} emptyText={attempt > 1 ? `Attempt ${attempt} has not run yet.` : undefined} />
+      {earlier.map((n) => (
+        <details key={n} className="border-t border-[var(--line)]">
+          <summary className="cursor-pointer px-5 py-3 text-[0.8125rem] text-fg-subtle hover:text-fg">
+            Attempt {n} · {actions.filter((a) => (a.attempt ?? 1) === n).length} action{actions.filter((a) => (a.attempt ?? 1) === n).length === 1 ? "" : "s"}
+          </summary>
+          <AttemptTrail actions={actions.filter((a) => (a.attempt ?? 1) === n)} runId={runId} />
+        </details>
+      ))}
+    </>
+  );
+}
+
+function AttemptTrail({ actions, runId, emptyText }: { actions: FixtureAction[]; runId?: string; emptyText?: string }) {
   if (actions.length === 0) {
     return (
       <p className="px-5 py-10 text-center text-[0.875rem] text-fg-subtle">
-        Nothing has run yet. The trail fills in as the agent works, and it keeps
-        every refusal alongside every action.
+        {emptyText ?? "Nothing has run yet. The trail fills in as the agent works, and it keeps every refusal alongside every action."}
       </p>
     );
   }

@@ -473,6 +473,12 @@ export const agentRuns = pgTable(
     brief: text("brief").notNull(),
     /** Where the run starts, as typed. Null when none was given. */
     entryUrl: text("entry_url"),
+    /** Which try this is. A failed run that is edited and retried counts up. */
+    attempt: integer("attempt").notNull().default(1),
+    /** The stored sign-in (by label) the run uses on each site, keyed by origin. Part of what is approved. */
+    signIns: jsonb("sign_ins").$type<Record<string, string>>().notNull().default(sql`'{}'::jsonb`),
+    /** The run this one re-records with changes, when it is one. */
+    revisedFrom: uuid("revised_from"),
     status: agentRunStatusEnum("status").notNull().default("drafted"),
     /** The plan, as steps. Nothing records until this is approved. */
     outline: jsonb("outline").$type<{ ordinal: number; intent: string; url?: string }[]>(),
@@ -522,6 +528,8 @@ export const agentActions = pgTable(
     /** Set when the action was refused, with why. */
     refusedReason: text("refused_reason"),
     atMs: integer("at_ms").notNull().default(0),
+    /** Which try of the run this belongs to. */
+    attempt: integer("attempt").notNull().default(1),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [

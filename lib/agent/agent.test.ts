@@ -10,7 +10,8 @@ import { credentialForOrigin, CredentialError, revokeCredential, storeCredential
 import { MockPlanner, shapePlan } from "./outline";
 import {
   ApprovalError, TRANSITIONS, actionsFor, approve, beginOutline,
-  beginRecording, canTransition, createRun, outlineHash, proposeOutline, recordAction,
+  beginRecording, canTransition, createRun, failRun, outlineHash, proposeOutline, recordAction,
+  retryRun, updateRequest,
 } from "./run";
 
 /**
@@ -151,10 +152,21 @@ describe("the approval gate, as a table", () => {
     assert.equal(canTransition("drafted", "recording"), false);
   });
 
-  it("makes every terminal state terminal", () => {
-    for (const terminal of ["recorded", "failed", "cancelled"] as const) {
-      assert.deepEqual(TRANSITIONS[terminal], []);
-    }
+  it("keeps a recorded run final, and lets a stopped run go back only for approval", () => {
+    assert.deepEqual(TRANSITIONS.recorded, []);
+    // Fixed and retried, a stopped run is approved again before anything
+    // records: its only way out is back to awaiting_approval.
+    assert.deepEqual(TRANSITIONS.failed, ["awaiting_approval"]);
+    assert.deepEqual(TRANSITIONS.cancelled, ["awaiting_approval"]);
+  });
+
+  it("fingerprints what the agent does and which account it uses, not what is said", () => {
+    const base = [{ ordinal: 0, intent: "Ask", action: { kind: "fill" as const, target: "Question", value: "Top campaigns?" } }];
+    const hash = outlineHash(base);
+    assert.notEqual(hash, outlineHash([{ ...base[0], action: { kind: "fill", target: "Question", value: "Delete my account" } }]), "what is typed");
+    assert.notEqual(hash, outlineHash([{ ...base[0], action: { kind: "click", target: "Question" } }]), "the kind of action");
+    assert.notEqual(hash, outlineHash(base, { "https://app.acme.com": "app.acme.com · other@acme.com" }), "the account");
+    assert.equal(hash, outlineHash([{ ...base[0], narration: "Reworded." }]), "narration does not change what the browser does");
   });
 
   it("hashes an outline by what it says, not how it is ordered in memory", () => {
@@ -206,6 +218,63 @@ describe("a run, end to end", { skip: !RUN }, () => {
     assert.equal(trail.length, 12);
     assert.deepEqual(trail.map((a) => a.ordinal), Array.from({ length: 12 }, (_, i) => i));
     assert.deepEqual(trail.map((a) => a.url), Array.from({ length: 12 }, (_, i) => `https://tracker.example/${i}`), "in the order they were asked for");
+  });
+
+  it("edits a waiting run in place, and a changed plan needs the new approval", async () => {
+    const run = await upToApproval();
+    const edited = await updateRequest(
+      run,
+      {
+        brief: "Demo the shipments flow, briefly.",
+        allowedOrigins: ["https://app.acme.com"],
+        entryUrl: "https://app.acme.com/shipments",
+        outline: [{ ordinal: 0, intent: "Open shipments", url: "https://app.acme.com/shipments" }],
+        signIns: {},
+      },
+      requester,
+    );
+    assert.equal(edited.id, run.id);
+    assert.equal(edited.status, "awaiting_approval");
+    assert.equal(edited.entryUrl, "https://app.acme.com/shipments");
+    assert.equal((edited.outline ?? []).length, 1);
+    const approved = await approve(edited, approver);
+    await assert.rejects(() => updateRequest(approved, { brief: "x", allowedOrigins: [], entryUrl: null, outline: [], signIns: {} }, requester));
+  });
+
+  it("retries a stopped run as itself, one attempt later, back to approval", async () => {
+    const run = await upToApproval();
+    const approved = await approve(run, approver);
+    const recording = await beginRecording(approved);
+    await recordAction(recording.id, { kind: "navigate", url: "https://app.acme.com/login" });
+    const failed = await failRun(recording, "The site did not accept the sign-in.");
+
+    const retried = await retryRun(
+      failed,
+      { brief: failed.brief, allowedOrigins: ["https://app.acme.com"], entryUrl: null, outline, signIns: {} },
+      requester,
+    );
+    assert.equal(retried.id, run.id, "the same run");
+    assert.equal(retried.attempt, 2);
+    assert.equal(retried.status, "awaiting_approval");
+    assert.equal(retried.approvedBy, null, "the old approval does not carry over");
+    assert.equal(retried.error, null);
+    await assert.rejects(() => beginRecording(retried), ApprovalError, "nothing records before the fix is approved");
+
+    await recordAction(retried.id, { kind: "navigate", url: "https://app.acme.com/shipments" });
+    const trail = await actionsFor(run.id);
+    assert.deepEqual(trail.map((a) => a.attempt), [1, 2], "each line knows its attempt");
+  });
+
+  it("will not reopen a run that made a project", async () => {
+    const run = await upToApproval();
+    const recording = await beginRecording(await approve(run, approver));
+    const [project] = await getDb().insert(s.projects).values({ workspaceId: WS, slug: `p-${Date.now()}`, title: "Made" }).returning();
+    await getDb().update(s.agentRuns).set({ projectId: project.id }).where(eq(s.agentRuns.id, recording.id));
+    const failed = await failRun({ ...recording, projectId: project.id }, "later failure");
+    await assert.rejects(
+      () => retryRun(failed, { brief: failed.brief, allowedOrigins: ["https://app.acme.com"], entryUrl: null, outline, signIns: {} }, requester),
+      ApprovalError,
+    );
   });
 
   it("lets a requester approve their own run only when nobody else could", async () => {

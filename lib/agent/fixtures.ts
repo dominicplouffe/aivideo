@@ -23,6 +23,8 @@ export interface FixtureAction {
   detail?: Record<string, unknown> | null;
   refusedReason?: string | null;
   atMs: number;
+  /** Which try of the run this belongs to. */
+  attempt?: number;
 }
 
 export interface FixtureRun {
@@ -44,6 +46,12 @@ export interface FixtureRun {
   projectId?: string | null;
   /** Where the run starts, as typed when it was requested. */
   entryUrl?: string | null;
+  /** Which try this is, when it has been fixed and retried. */
+  attempt?: number;
+  /** The saved sign-in chosen for each site, by label. */
+  signIns?: Record<string, string>;
+  /** The run this one re-records with changes. */
+  revisedFrom?: string | null;
 }
 
 export const agentRuns: FixtureRun[] = [
