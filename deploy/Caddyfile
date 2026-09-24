@@ -1,0 +1,18 @@
+# HTTPS for the domain, with certificates from Let's Encrypt, renewed by
+# Caddy on its own. www redirects to the bare domain.
+{
+	email {$ACME_EMAIL}
+}
+
+www.{$DOMAIN} {
+	redir https://{$DOMAIN}{uri} permanent
+}
+
+{$DOMAIN} {
+	encode zstd gzip
+	# Recordings upload in one request, up to 512 MB.
+	request_body {
+		max_size 600MB
+	}
+	reverse_proxy web:3000
+}

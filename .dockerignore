@@ -1,0 +1,10 @@
+node_modules
+.next
+.git
+.storage
+.env*
+deploy/.env*
+deploy/backups
+*.log
+.DS_Store
+extension/dist

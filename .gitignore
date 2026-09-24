@@ -15,3 +15,6 @@ extension/dist/
 
 # Built by scripts/build-embed.mjs as part of `npm run build`.
 public/embed.js
+
+# Database dumps taken by scripts/lightsail.sh backup / destroy.
+deploy/backups/
