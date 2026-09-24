@@ -32,7 +32,10 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U demoriff -d demoriff"]
+      # Over TCP, not the local socket: on its very first start the image
+      # runs a setup server on the socket only, and a socket check reports
+      # it ready while the app still cannot connect.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U demoriff -d demoriff"]
       interval: 5s
       timeout: 5s
       retries: 20

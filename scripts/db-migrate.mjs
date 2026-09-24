@@ -37,7 +37,7 @@ function redact(value) {
 }
 
 function die(problem, ...remedies) {
-  console.error(`\nCannot reach the database at ${redact(url)}\n`);
+  console.error(`\nCannot migrate the database at ${redact(url)}\n`);
   console.error(`  ${problem}\n`);
   for (const line of remedies) console.error(`  ${line}`);
   console.error("");
@@ -81,13 +81,19 @@ try {
 // later one that assigns it fail together, silently, with the spinner
 // stopping and no message. Every `ADD VALUE IF NOT EXISTS` in the migration
 // files is run here on its own, idempotently, before drizzle-kit starts.
+//
+// Only for types that already exist. On a new database the types do not
+// yet, and do not need this: a type created in the same transaction may use
+// values added to it there, so the migrations create and extend it together.
+// Running the ALTER on a missing type failed every first deploy.
 try {
   const { readdirSync, readFileSync } = await import("node:fs");
   const dir = new URL("../lib/db/migrations/", import.meta.url);
   for (const file of readdirSync(dir).filter((f) => f.endsWith(".sql")).sort()) {
     const text = readFileSync(new URL(file, dir), "utf8");
-    for (const match of text.matchAll(/ALTER TYPE\s+[^;]*?ADD VALUE IF NOT EXISTS\s+'[^']+'/g)) {
-      await sql.unsafe(match[0]);
+    for (const match of text.matchAll(/ALTER TYPE\s+("?[\w.]+"?(?:\."?\w+"?)?)\s+ADD VALUE IF NOT EXISTS\s+'[^']+'/g)) {
+      const [{ exists }] = await sql`select to_regtype(${match[1]}) is not null as exists`;
+      if (exists) await sql.unsafe(match[0]);
     }
   }
 } catch (error) {
