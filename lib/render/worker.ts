@@ -1,7 +1,7 @@
 import { mkdtemp, rm, writeFile, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { claim, complete, fail, heartbeat, type Job } from "@/lib/jobs/queue";
+import { claim, complete, fail, heartbeat, reportProgress, type Job, type JobProgress } from "@/lib/jobs/queue";
 import { getStorage } from "@/lib/storage";
 import { ProviderError } from "@/lib/providers/errors";
 import { recordQuietly } from "@/lib/audit/log";
@@ -43,7 +43,11 @@ export interface RenderWorkerOptions {
    * Adds the project's chosen voice to an EDL, or returns null when the
    * project keeps the voice on its recording. Injectable for tests.
    */
-  narrate?: (job: Job, edl: Edl) => Promise<{ edl: Edl; report: NarrationReport } | null>;
+  narrate?: (
+    job: Job,
+    edl: Edl,
+    onChapter?: (done: number, total: number) => void,
+  ) => Promise<{ edl: Edl; report: NarrationReport } | null>;
   /** Where intermediates live. Defaults to the system temp directory. */
   scratchRoot?: string;
   ffmpegBinary?: string;
@@ -378,6 +382,49 @@ async function assertQuota(job: Job): Promise<void> {
  * One job per call, by design: a worker loop belongs to the process that owns
  * the shutdown signal, not to a library function that cannot be interrupted.
  */
+/**
+ * Tells whoever is watching how far a render has got.
+ *
+ * The export dialog used to invent its own progress — two percent every poll,
+ * stopping at 92 — because the worker's real figure only reached its log.
+ * The steps are weighted by how long they take: encoding is most of a render,
+ * and narration, when there is any, most of the rest. Writes are throttled to
+ * about one a second and sent in order, so a slow write cannot land after a
+ * later step's.
+ */
+function progressReporter(jobId: string, workerId: string) {
+  let last = { stage: "", fraction: -1, at: 0 };
+  let narrated = false;
+  let chain: Promise<void> = Promise.resolve();
+
+  const write = (next: JobProgress) => {
+    const now = Date.now();
+    const sameStage = next.stage === last.stage;
+    if (sameStage && (now - last.at < 1000 || Math.abs(next.fraction - last.fraction) < 0.01)) return;
+    last = { stage: next.stage, fraction: next.fraction, at: now };
+    chain = chain
+      .then(() => reportProgress(jobId, workerId, next))
+      // Progress is for a person watching a bar; failing the render over it would be absurd.
+      .catch((error) => console.error(`[render] could not report progress for ${jobId}:`, error));
+  };
+  const round = (n: number) => Math.round(n * 1000) / 1000;
+
+  return {
+    preparing: () => write({ stage: "preparing", fraction: 0.02 }),
+    narrating: (done: number, total: number) => {
+      narrated = true;
+      write({ stage: "narrating", fraction: round(0.05 + 0.3 * (total > 0 ? done / total : 0)), done, total });
+    },
+    encoding: (fraction: number) => {
+      const [from, to] = narrated ? [0.35, 0.95] : [0.05, 0.95];
+      write({ stage: "encoding", fraction: round(from + (to - from) * Math.min(1, Math.max(0, fraction))) });
+    },
+    finishing: () => write({ stage: "finishing", fraction: 0.97 }),
+    /** Waits for the writes in flight, so none lands after the job completes. */
+    flush: () => chain,
+  };
+}
+
 export async function processOne(options: RenderWorkerOptions): Promise<RenderOutcome | null> {
   const job = await claim(options.workerId, ["render"]);
   if (!job) return null;
@@ -388,10 +435,12 @@ export async function processOne(options: RenderWorkerOptions): Promise<RenderOu
   // Keep the heartbeat from holding the process open at shutdown.
   beat.unref?.();
 
+  const progress = progressReporter(job.id, options.workerId);
   let dir: string | null = null;
   try {
+    progress.preparing();
     let edl = await (options.resolveEdl ?? defaultResolveEdl)(job);
-    const narrated = await (options.narrate ?? defaultNarrate)(job, edl);
+    const narrated = await (options.narrate ?? defaultNarrate)(job, edl, progress.narrating);
     if (narrated) edl = narrated.edl;
     await assertVoicesUsable(edl);
     await assertQuota(job);
@@ -400,9 +449,13 @@ export async function processOne(options: RenderWorkerOptions): Promise<RenderOu
       scratchRoot: options.scratchRoot,
       ffmpegBinary: options.ffmpegBinary,
       ffprobeBinary: options.ffprobeBinary,
-      onProgress: (fraction) => options.onProgress?.(job.id, fraction),
+      onProgress: (fraction) => {
+        progress.encoding(fraction);
+        options.onProgress?.(job.id, fraction);
+      },
     });
     dir = result.dir;
+    progress.finishing();
 
     const key = {
       workspaceId: job.workspaceId,
@@ -423,6 +476,7 @@ export async function processOne(options: RenderWorkerOptions): Promise<RenderOu
     // directory does.
     const guide = await produceGuide(job, edl, result.sourcePath, options.ffmpegBinary);
 
+    await progress.flush();
     await complete(job.id, options.workerId, {
       video: { status: "ready", url: signed.url, key: `${key.workspaceId}/${key.path}` },
       ...(guide ? { guide } : {}),
@@ -567,7 +621,7 @@ async function announce(
  */
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-async function defaultNarrate(job: Job, edl: Edl) {
+async function defaultNarrate(job: Job, edl: Edl, onChapter?: (done: number, total: number) => void) {
   const payload = job.payload as { projectId?: string };
   // A job whose project id is not one of ours — a test's "prj_1", a
   // pre-computed EDL from elsewhere — has no stored voice choice to read.
@@ -594,6 +648,7 @@ async function defaultNarrate(job: Job, edl: Edl) {
     pronunciations: pronunciationsFor(await listGlossary(job.workspaceId)),
     stillness: recording?.stillness ?? null,
     lookupVoice: getVoice,
+    onChapter,
   });
 }
 

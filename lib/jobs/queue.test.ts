@@ -4,7 +4,7 @@ import { eq, sql } from "drizzle-orm";
 import { getDb, closeDb, isDatabaseConfigured } from "@/lib/db/client";
 import * as s from "@/lib/db/schema";
 import { eraseWorkspace } from "@/lib/db/erase";
-import { enqueue, claim, complete, fail, heartbeat, getJob, stats, reclaimable } from "./queue";
+import { enqueue, claim, complete, fail, heartbeat, getJob, stats, reclaimable, reportProgress } from "./queue";
 
 /**
  * These exercise the queue against a real Postgres. The properties under test
@@ -155,6 +155,23 @@ describe("job queue", { skip: RUN ? false : "DATABASE_URL not set" }, () => {
     assert.ok(job);
     assert.equal(await heartbeat(job!.id, "worker-a"), true);
     assert.equal(await heartbeat(job!.id, "worker-b"), false, "only the holder may heartbeat");
+  });
+
+  it("keeps the holder's progress, ignores anyone else's, and starts a retry from nothing", async () => {
+    await enqueue({ workspaceId: WS, kind: RENDER, payload: {} });
+    const job = await claim("worker-a", MINE);
+    assert.ok(job);
+    assert.equal(job!.progress, null);
+
+    await reportProgress(job!.id, "worker-a", { stage: "encoding", fraction: 0.4 });
+    await reportProgress(job!.id, "worker-b", { stage: "encoding", fraction: 0.9 });
+    assert.deepEqual((await getJob(job!.id))?.progress, { stage: "encoding", fraction: 0.4 });
+
+    // The lease lapses and another worker takes it over: its attempt starts at zero.
+    await getDb().update(s.jobs).set({ leaseExpiresAt: new Date(Date.now() - 1000) }).where(eq(s.jobs.id, job!.id));
+    const retried = await claim("worker-c", MINE);
+    assert.equal(retried?.id, job!.id);
+    assert.equal(retried?.progress, null);
   });
 
   it("backs off exponentially then dead-letters", async () => {

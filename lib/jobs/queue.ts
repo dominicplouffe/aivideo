@@ -21,6 +21,20 @@ import * as s from "@/lib/db/schema";
 
 export type JobStatus = "queued" | "running" | "completed" | "failed" | "dead";
 
+/**
+ * Where a running job has got to.
+ *
+ * `fraction` is the whole job, 0 to 1, as the worker weighs its steps;
+ * `done` and `total` count the units of the current step when it has them
+ * (chapters narrated, say).
+ */
+export interface JobProgress {
+  stage: string;
+  fraction: number;
+  done?: number;
+  total?: number;
+}
+
 export interface Job {
   id: string;
   workspaceId: string;
@@ -28,6 +42,7 @@ export interface Job {
   status: JobStatus;
   payload: Record<string, unknown>;
   result: Record<string, unknown> | null;
+  progress: JobProgress | null;
   attempts: number;
   maxAttempts: number;
   lastError: string | null;
@@ -81,6 +96,7 @@ function toJob(r: typeof s.jobs.$inferSelect): Job {
     status: r.status,
     payload: r.payload,
     result: r.result,
+    progress: r.progress ?? null,
     attempts: r.attempts,
     maxAttempts: r.maxAttempts,
     lastError: r.lastError,
@@ -181,6 +197,8 @@ export async function claim(workerId: string, kinds?: string[]): Promise<Job | n
            locked_by = ${workerId},
            lease_expires_at = now() + interval '${sql.raw(String(LEASE_SECONDS))} seconds',
            attempts = j.attempts + 1,
+           -- A retry starts over; the last attempt's progress is not this one's.
+           progress = NULL,
            started_at = COALESCE(j.started_at, now())
       FROM ready
      WHERE j.id = ready.id
@@ -207,6 +225,7 @@ interface RawJobRow {
   status: JobStatus;
   payload: Record<string, unknown>;
   result: Record<string, unknown> | null;
+  progress: JobProgress | null;
   attempts: number;
   max_attempts: number;
   last_error: string | null;
@@ -224,6 +243,7 @@ function fromRawRow(r: RawJobRow): Job {
     status: r.status,
     payload: r.payload,
     result: r.result,
+    progress: r.progress ?? null,
     attempts: r.attempts,
     maxAttempts: r.max_attempts,
     lastError: r.last_error,
@@ -246,6 +266,19 @@ export async function heartbeat(jobId: string, workerId: string): Promise<boolea
     RETURNING id;
   `);
   return (rows as unknown as unknown[]).length > 0;
+}
+
+/**
+ * Records how far a running job has got, for whoever is watching it.
+ *
+ * Only while this worker holds it, like the heartbeat: a worker whose lease
+ * was taken over must not overwrite the progress of the one now doing it.
+ */
+export async function reportProgress(jobId: string, workerId: string, progress: JobProgress): Promise<void> {
+  await getDb()
+    .update(s.jobs)
+    .set({ progress })
+    .where(and(eq(s.jobs.id, jobId), eq(s.jobs.lockedBy, workerId), eq(s.jobs.status, "running")));
 }
 
 export async function complete(

@@ -1001,6 +1001,8 @@ export const jobs = pgTable(
     status: jobStatusEnum("status").notNull().default("queued"),
     payload: jsonb("payload").$type<Record<string, unknown>>().notNull(),
     result: jsonb("result").$type<Record<string, unknown>>(),
+    /** Where a running job has got to, as its worker last reported. Cleared when it is claimed. */
+    progress: jsonb("progress").$type<{ stage: string; fraction: number; done?: number; total?: number }>(),
 
     // Replaying a key returns the original job rather than doing the work
     // twice. A retried HTTP request must not produce a second render.

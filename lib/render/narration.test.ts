@@ -237,3 +237,12 @@ test("a deleted chapter is not read, and a withdrawn or missing voice is refused
   );
   assert.equal(requests.length, before);
 });
+
+test("reports each chapter as it starts, and the end", async () => {
+  const p = project();
+  const edl = buildEdl({ project: p, sourceUrl: "file://a.mp4" });
+  const { provider } = synthesizer(0.5);
+  const calls: [number, number][] = [];
+  await narrate({ edl, project: p, workspaceId: "ws", synthesis: provider, lookupVoice: lookup, onChapter: (done, total) => calls.push([done, total]) });
+  assert.deepEqual(calls, [[0, 2], [1, 2], [2, 2]]);
+});

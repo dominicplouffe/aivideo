@@ -228,6 +228,7 @@ function webhookJob(payload: Record<string, unknown>): Job {
     status: "running",
     payload,
     result: null,
+    progress: null,
     attempts: 1,
     maxAttempts: 8,
     lastError: null,

@@ -22,7 +22,13 @@ function toRenderJob(job: Job, req?: RenderRequest): RenderJob {
       : job.status === "running" ? "running"
       : job.status === "completed" ? "completed"
       : "failed",
-    progress: done ? 1 : job.status === "running" ? 0.5 : 0,
+    // What the worker last reported. A running job it has not reported on
+    // yet is at the start, not halfway: this used to say 0.5 for any running
+    // job, which is a number nobody measured.
+    progress: done ? 1 : job.status === "running" ? (job.progress?.fraction ?? 0) : 0,
+    ...(job.status === "running" && job.progress
+      ? { stage: { name: job.progress.stage, done: job.progress.done, total: job.progress.total } }
+      : {}),
     minutesBilled: Number(job.payload.minutesBilled ?? 0),
     outputs: Object.fromEntries(
       outputs.map((o) => [o, result[o] ?? { status: done ? "ready" : "pending" }]),

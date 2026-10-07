@@ -201,6 +201,8 @@ export interface RenderJob {
   id: string;
   status: "queued" | "running" | "completed" | "failed";
   progress: number;
+  /** The step a running render is on, when its worker reports one: "narrating", "encoding"… */
+  stage?: { name: string; done?: number; total?: number };
   minutesBilled: number;
   outputs: Partial<Record<RenderOutput, { status: string; url?: string }>>;
   /** Present when the render was narrated in a chosen voice. Shape: lib/render/narration.ts. */

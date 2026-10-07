@@ -69,6 +69,8 @@ export function ExportDialog({
   const [resolution, setResolution] = useState("1080p");
   const [locales, setLocales] = useState<string[]>(["en-US"]);
   const [progress, setProgress] = useState(0);
+  /** The step the worker reports it is on, for the line under the bar. */
+  const [stage, setStage] = useState<RenderStage | null>(null);
   const [copied, setCopied] = useState(false);
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const [published, setPublished] = useState(project.status === "published");
@@ -95,7 +97,8 @@ export function ExportDialog({
    */
   const submit = async () => {
     setStep("rendering");
-    setProgress(0.04);
+    setProgress(0);
+    setStage(null);
     setFailure(null);
     setStalled(false);
 
@@ -126,6 +129,7 @@ export function ExportDialog({
       const job = (await response.json()) as {
         status?: string;
         progress?: number;
+        stage?: RenderStage | null;
         error?: string;
         outputs?: Record<string, { status: string; url?: string }>;
         narration?: NarrationSummary | null;
@@ -158,7 +162,11 @@ export function ExportDialog({
       // it set, so a job that waited its turn was reported as "no worker"
       // for the whole of its own render.
       setStalled(job.status === "queued" && Date.now() - startedAt > 15_000);
-      setProgress((p) => Math.min(0.92, Math.max(p, job.progress ?? 0) + 0.02));
+      // The worker's own figure, never an invented one: this used to add two
+      // percent a poll and stop at 92, so every export looked stuck at 92%
+      // for however long the encode really took.
+      setProgress((p) => Math.max(p, job.progress ?? 0));
+      setStage(job.stage ?? null);
       timer.current = window.setTimeout(poll, 1500);
     };
 
@@ -335,16 +343,12 @@ export function ExportDialog({
               <div className="mx-auto max-w-sm">
                 <div className="h-1.5 overflow-hidden rounded-full bg-ink-800">
                   <div
-                    className="h-full rounded-full bg-[linear-gradient(90deg,var(--color-iris-500),var(--color-cyan-400))] transition-[width] duration-150"
+                    className="h-full rounded-full bg-[linear-gradient(90deg,var(--color-iris-500),var(--color-cyan-400))] transition-[width] duration-700 ease-out"
                     style={{ width: `${progress * 100}%` }}
                   />
                 </div>
                 <p className="mt-4 text-center text-[0.875rem] text-fg">
-                  {stalled
-                    ? "Waiting its turn…"
-                    : project.voiceId
-                      ? "Narrating and encoding your video…"
-                      : "Encoding your video…"}
+                  {stalled ? "Waiting its turn…" : stageLabel(stage, Boolean(project.voiceId))}
                 </p>
                 <p className="mt-1.5 text-center font-mono text-2xs text-fg-faint">
                   {Math.round(progress * 100)}%
@@ -657,4 +661,30 @@ function brandLine(brand: { name: string; cards: number; logo: boolean }): strin
   else if (brand.cards === 1) parts.push("a title card");
   if (brand.logo) parts.push("your logo");
   return `Dressed in ${brand.name}${parts.length > 0 ? `, with ${parts.join(" and ")}` : ""}.`;
+}
+
+/** A running render's step, as GET /api/renders reports it. */
+interface RenderStage {
+  name: string;
+  done?: number;
+  total?: number;
+}
+
+/** What the render is doing now, in words. */
+function stageLabel(stage: RenderStage | null, voiced: boolean): string {
+  switch (stage?.name) {
+    case "preparing":
+      return "Preparing your edit…";
+    case "narrating":
+      return stage.total
+        ? `Recording narration · chapter ${Math.min(stage.total, (stage.done ?? 0) + 1)} of ${stage.total}`
+        : "Recording narration…";
+    case "encoding":
+      return "Encoding your video…";
+    case "finishing":
+      return "Saving your video…";
+    default:
+      // Not started, or a worker too old to say which step it is on.
+      return stage ? "Rendering…" : voiced ? "Starting the narration and encode…" : "Starting the encode…";
+  }
 }

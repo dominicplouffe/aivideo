@@ -111,6 +111,9 @@ describe("render worker", { skip: RUN ? false : "DATABASE_URL and ffmpeg are bot
     // is a prediction, and not rounded up to a minute.
     assert.equal(Math.abs((result.billedSeconds ?? 0) - 6) < 0.1, true);
 
+    // The last step it reported, for the export dialog: real figures, not a 50% placeholder.
+    assert.deepEqual(stored?.progress, { stage: "finishing", fraction: 0.97 });
+
     // The video is actually in storage and is not empty.
     const bytes = await new LocalStorage(path.join(dir, "storage"), "test-secret").get({
       workspaceId: WS,

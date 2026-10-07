@@ -85,6 +85,8 @@ export interface NarrateInput {
    * way; false only for the older word-cut path, where the voice bends.
    */
   continuous?: boolean;
+  /** Called as each chapter starts and once at the end, for a progress bar: chapters done, of how many. */
+  onChapter?: (done: number, total: number) => void;
   /** Looks a voice up. Injectable so the fitting logic can be tested without a database. */
   lookupVoice: (id: string) => Promise<{
     id: string;
@@ -191,8 +193,12 @@ export async function narrate(
   const preview: NarrationPreview = { audio: [], words: [] };
   let working = edl;
 
+  const total = project.segments.filter((_, index) => !state.deletedSegments.has(index)).length;
+  let done = 0;
+
   for (const [segIndex, segment] of project.segments.entries()) {
     if (state.deletedSegments.has(segIndex)) continue;
+    input.onChapter?.(done++, total);
 
     // The chapter's surviving words, each with what is shown, what is said
     // (respelled per the glossary), where it was spoken in the recording,
@@ -349,6 +355,8 @@ export async function narrate(
       overrunSec: round(Math.max(0, spokenSec - availableSec)),
     });
   }
+
+  input.onChapter?.(total, total);
 
   return {
     edl: withNarration(working, clips),

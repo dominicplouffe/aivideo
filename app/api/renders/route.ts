@@ -163,6 +163,7 @@ export async function GET(request: Request) {
       id: job.id,
       status: job.status,
       progress: job.progress,
+      stage: job.stage ?? null,
       minutes_billed: job.minutesBilled,
       outputs: job.outputs,
       narration: job.narration ?? null,

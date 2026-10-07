@@ -20,12 +20,12 @@ import {
 import { MemberChangeError, membershipsFor } from "./members";
 
 const RUN = isDatabaseConfigured();
-const WS = "33333333-3333-4333-8333-333333333333";
-const OTHER = "33333333-3333-4333-8333-333333333334";
-const SSO_WS = "33333333-3333-4333-8333-333333333335";
-const OWNER = "33333333-3333-4333-8333-33333333aaaa";
-const ADMIN = "33333333-3333-4333-8333-33333333bbbb";
-const CREATOR = "33333333-3333-4333-8333-33333333cccc";
+const WS = "4e4e4e4e-4e4e-4e4e-8e4e-4e4e4e4e4e01";
+const OTHER = "4e4e4e4e-4e4e-4e4e-8e4e-4e4e4e4e4e02";
+const SSO_WS = "4e4e4e4e-4e4e-4e4e-8e4e-4e4e4e4e4e03";
+const OWNER = "4e4e4e4e-4e4e-4e4e-8e4e-4e4e4e4eaaaa";
+const ADMIN = "4e4e4e4e-4e4e-4e4e-8e4e-4e4e4e4ebbbb";
+const CREATOR = "4e4e4e4e-4e4e-4e4e-8e4e-4e4e4e4ecccc";
 // Unique per run, so a newcomer never matches a row some other test left.
 const NEWCOMER = `new-${randomUUID().slice(0, 8)}@invite-test.example`;
 
