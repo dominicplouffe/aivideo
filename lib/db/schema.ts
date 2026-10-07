@@ -204,6 +204,39 @@ export const sessions = pgTable(
   ],
 );
 
+/**
+ * An invitation to join a workspace.
+ *
+ * Bound to an email address, not to whoever holds the link: it is accepted
+ * by signing in with that address, verified by the identity provider, so a
+ * forwarded link is worth nothing to anybody else. Only the token's hash is
+ * kept, as with sessions; resending mints a new one.
+ */
+export const invitations = pgTable(
+  "invitations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workspaceId: uuid("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+    /** Lowercased. */
+    email: text("email").notNull(),
+    role: roleEnum("role").notNull(),
+    invitedBy: uuid("invited_by").references(() => members.id, { onDelete: "set null" }),
+    tokenHash: text("token_hash").notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    acceptedAt: timestamp("accepted_at", { withTimezone: true }),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("invitations_token_hash_key").on(t.tokenHash),
+    index("invitations_email_idx").on(t.email),
+    // One open invitation per address per workspace; resending replaces its token.
+    uniqueIndex("invitations_open_key")
+      .on(t.workspaceId, t.email)
+      .where(sql`${t.acceptedAt} is null and ${t.revokedAt} is null`),
+  ],
+);
+
 /* ============================================================
    Single sign-on and directory sync
    ============================================================ */

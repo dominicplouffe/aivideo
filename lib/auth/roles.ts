@@ -177,3 +177,14 @@ export function canChangeRole(input: {
   }
   return { ok: true };
 }
+
+/**
+ * Which roles somebody may invite into their workspace.
+ *
+ * The same ceiling as changing a role, for the same reason: an invitation
+ * at a higher rank is a promotion by way of a colleague's inbox.
+ */
+export function invitableRoles(actorRole: Role): Role[] {
+  if (!can(actorRole, "member.invite")) return [];
+  return ROLES.filter((role) => RANK[role] <= RANK[actorRole]);
+}

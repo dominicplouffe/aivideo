@@ -69,12 +69,19 @@ export function AuthForm({
   mode,
   error,
   next,
+  title,
+  subtitle,
+  initialEmail = "",
 }: {
   mode: "signin" | "signup";
   error?: string;
   next?: string;
+  /** In place of the default heading, for a page with more to say — an invitation. */
+  title?: string;
+  subtitle?: string;
+  initialEmail?: string;
 }) {
-  const [email, setEmail] = useState("");
+  const [email, setEmail] = useState(initialEmail);
   const [pending, setPending] = useState(false);
   const [message, setMessage] = useState<string | null>(explain(error));
 
@@ -107,12 +114,13 @@ export function AuthForm({
   return (
     <div>
       <h1 className="text-[1.5rem] leading-tight tracking-[-0.025em]">
-        {isSignup ? "Create your workspace" : "Welcome back"}
+        {title ?? (isSignup ? "Create your workspace" : "Welcome back")}
       </h1>
       <p className="mt-2 text-[0.875rem] leading-relaxed text-fg-subtle">
-        {isSignup
-          ? "Ten free video minutes, unlimited guides, and every AI feature unlocked. No credit card."
-          : "Sign in to your DemoRiff workspace."}
+        {subtitle ??
+          (isSignup
+            ? "Ten free video minutes, unlimited guides, and every AI feature unlocked. No credit card."
+            : "Sign in to your DemoRiff workspace.")}
       </p>
 
       {message ? (
@@ -178,7 +186,7 @@ export function AuthForm({
         </p>
       </form>
 
-      {isSignup ? (
+      {isSignup && !title ? (
         <ul className="mt-6 space-y-2">
           {[
             "10 AI video minutes every month",
@@ -196,7 +204,9 @@ export function AuthForm({
       <p className="mt-7 text-center text-[0.8125rem] text-fg-subtle">
         {isSignup ? "Already have an account?" : "No account yet?"}{" "}
         <Link
-          href={isSignup ? "/signin" : "/signup"}
+          // Carries where they were headed, so an invitee who already has an
+          // account comes back to the invitation after signing in.
+          href={`${isSignup ? "/signin" : "/signup"}${next ? `?next=${encodeURIComponent(next)}` : ""}`}
           className="font-medium text-iris-300 hover:text-iris-400"
         >
           {isSignup ? "Sign in" : "Start free"}

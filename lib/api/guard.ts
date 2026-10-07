@@ -3,6 +3,7 @@ import { authorize, ForbiddenError, type Actor } from "@/lib/auth/authorize";
 import { resolveActor, UnauthenticatedError } from "@/lib/auth/session";
 import type { Permission } from "@/lib/auth/roles";
 import { isStaff } from "@/lib/admin/staff";
+import { MemberChangeError } from "@/lib/db/repositories/members";
 
 /**
  * The shape every authenticated route repeats.
@@ -58,4 +59,25 @@ export async function requireStaff(request: Request): Promise<{ actor: Actor } |
     if (error instanceof UnauthenticatedError) return notFound;
     throw error;
   }
+}
+
+/** A refused membership change as a response: 409 for a rule, 404 for a missing row, 403 for a permission. */
+export function membershipRefusal(error: unknown): NextResponse {
+  if (error instanceof MemberChangeError) {
+    return NextResponse.json({ error: error.message, reason: error.reason }, { status: error.reason === "not-found" ? 404 : 409 });
+  }
+  if (error instanceof ForbiddenError) {
+    return NextResponse.json({ error: error.message }, { status: 403 });
+  }
+  throw error;
+}
+
+/** The address links in emails point at: the configured site, or the request's own origin. */
+export function siteOrigin(request: Request): string {
+  return process.env.NEXT_PUBLIC_SITE_URL ?? new URL(request.url).origin;
+}
+
+/** The caller's address, for the audit log. */
+export function clientIp(request: Request): string | null {
+  return request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? null;
 }

@@ -399,6 +399,8 @@ export async function getTeam(): Promise<
     lastActiveAt: string | null;
     projects: number;
     deactivated: boolean;
+    /** The person viewing the page. */
+    you: boolean;
   }[]
 > {
   const { allowed: may, actor } = await guard("project.view");
@@ -440,9 +442,65 @@ export async function getTeam(): Promise<
       lastActiveAt: row.lastActiveAt?.toISOString() ?? null,
       projects: Number(row.projects ?? 0),
       deactivated: row.deactivatedAt !== null,
+      you: row.id === actor.memberId,
     }));
   } catch (error) {
     console.error("[data] team read failed:", error);
+    return [];
+  }
+}
+
+/**
+ * Who may be invited, what is pending, and what the viewer may change.
+ *
+ * Null without a database, or for somebody who may not invite: the page
+ * then shows the roster alone.
+ */
+export async function getTeamManagement(): Promise<{
+  invitations: { id: string; email: string; role: string; expiresAt: string; expired: boolean }[];
+  seats: { limit: number | null; members: number; invited: number };
+  invitableRoles: string[];
+  mayChangeRoles: boolean;
+  mayRemove: boolean;
+  role: string;
+} | null> {
+  const { allowed: may, actor } = await guard("member.invite");
+  if (!may || !actor || !isDatabaseConfigured()) return null;
+
+  try {
+    const { listInvitations, seats } = await import("@/lib/db/repositories/invitations");
+    const { invitableRoles } = await import("@/lib/auth/roles");
+    const [invitations, room] = await Promise.all([listInvitations(actor.workspaceId), seats(actor.workspaceId)]);
+    return {
+      invitations: invitations.map((i) => ({
+        id: i.id,
+        email: i.email,
+        role: i.role,
+        expiresAt: i.expiresAt.toISOString(),
+        expired: i.expired,
+      })),
+      seats: room,
+      invitableRoles: invitableRoles(actor.role),
+      mayChangeRoles: allowed(actor, "member.role.change", { workspaceId: actor.workspaceId }),
+      mayRemove: allowed(actor, "member.remove", { workspaceId: actor.workspaceId }),
+      role: actor.role,
+    };
+  } catch (error) {
+    console.error("[data] team management read failed:", error);
+    return null;
+  }
+}
+
+/** The workspaces the viewer can switch between, for the sidebar. */
+export async function getMemberships(): Promise<{ workspaceId: string; workspaceName: string; role: string; current: boolean }[]> {
+  if (!isDatabaseConfigured()) return [];
+  const actor = await getCurrentActor();
+  if (!actor) return [];
+  try {
+    const { membershipsFor } = await import("@/lib/db/repositories/members");
+    return (await membershipsFor(actor)).map(({ workspaceId, workspaceName, role, current }) => ({ workspaceId, workspaceName, role, current }));
+  } catch (error) {
+    console.error("[data] memberships read failed:", error);
     return [];
   }
 }

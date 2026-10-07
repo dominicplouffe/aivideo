@@ -107,3 +107,15 @@ export function seeded(seed: string): () => number {
 export function stablePercent(fraction: number): string {
   return `${(fraction * 100).toFixed(2)}%`;
 }
+
+/**
+ * A calendar date, written the same on the server and in the browser.
+ *
+ * `toLocaleDateString()` with no arguments uses each side's own locale and
+ * time zone, so a client component rendered on a server in UTC and hydrated
+ * in Montreal disagrees about the text — a hydration error, and a date that
+ * changes as you watch. Pinned to English and UTC, it reads the same in both.
+ */
+export function formatDate(iso: string): string {
+  return new Date(iso).toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric", timeZone: "UTC" });
+}

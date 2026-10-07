@@ -81,6 +81,8 @@ export async function issue(input: {
    * email sign-in, which has no upstream session to end.
    */
   workosSessionId?: string | null;
+  /** Inherited from the session this one replaces, so switching never extends a sign-in. */
+  absoluteExpiresAt?: Date;
   now?: Date;
 }): Promise<IssuedSession> {
   const now = input.now ?? new Date();
@@ -93,7 +95,7 @@ export async function issue(input: {
       workspaceId: input.workspaceId,
       tokenHash: hashToken(token),
       lastSeenAt: now,
-      absoluteExpiresAt: new Date(now.getTime() + ABSOLUTE_TIMEOUT_MS),
+      absoluteExpiresAt: input.absoluteExpiresAt ?? new Date(now.getTime() + ABSOLUTE_TIMEOUT_MS),
       ip: input.ip ?? null,
       userAgent: input.userAgent ?? null,
       workosSessionId: input.workosSessionId ?? null,
@@ -209,6 +211,31 @@ export async function rotate(
     void reason;
     return { token, session: toRecord(updated) };
   });
+}
+
+/**
+ * Moves a signed-in browser to another of the same person's memberships.
+ *
+ * A session belongs to one member, and a member to one workspace, so
+ * switching workspace is a new session for the other member and the end of
+ * this one. It keeps this one's absolute expiry and identity-provider
+ * session, so switching back and forth never extends a sign-in.
+ */
+export async function handOver(
+  from: SessionRecord,
+  to: { memberId: string; workspaceId: string },
+  reason: string,
+): Promise<IssuedSession> {
+  const issued = await issue({
+    memberId: to.memberId,
+    workspaceId: to.workspaceId,
+    ip: from.ip,
+    userAgent: from.userAgent,
+    workosSessionId: from.workosSessionId,
+    absoluteExpiresAt: from.absoluteExpiresAt,
+  });
+  await revoke(from.id, reason);
+  return issued;
 }
 
 export async function revoke(sessionId: string, reason: string, now = new Date()): Promise<boolean> {

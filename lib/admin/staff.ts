@@ -1,7 +1,5 @@
-import { eq } from "drizzle-orm";
 import type { Actor } from "@/lib/auth/authorize";
-import { getDb } from "@/lib/db/client";
-import * as s from "@/lib/db/schema";
+import { usesSingleSignOn } from "@/lib/auth/sso";
 
 /**
  * DemoRiff staff: the people who run the service, as opposed to the owners
@@ -37,10 +35,5 @@ export function listedAsStaff(actor: Pick<Actor, "email" | "deactivatedAt"> | nu
  */
 export async function isStaff(actor: Pick<Actor, "email" | "deactivatedAt" | "workspaceId"> | null): Promise<boolean> {
   if (!listedAsStaff(actor)) return false;
-  const [connection] = await getDb()
-    .select({ id: s.ssoConnections.id })
-    .from(s.ssoConnections)
-    .where(eq(s.ssoConnections.workspaceId, actor!.workspaceId))
-    .limit(1);
-  return !connection;
+  return !(await usesSingleSignOn(actor!.workspaceId));
 }

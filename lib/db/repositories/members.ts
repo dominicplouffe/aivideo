@@ -1,4 +1,4 @@
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { getDb } from "@/lib/db/client";
 import * as s from "@/lib/db/schema";
 import { record } from "@/lib/audit/log";
@@ -207,4 +207,47 @@ function refusalMessage(reason: string): string {
     default:
       return "You do not have permission to change roles.";
   }
+}
+
+export interface Membership {
+  memberId: string;
+  workspaceId: string;
+  workspaceName: string;
+  role: Role;
+  current: boolean;
+}
+
+/**
+ * The workspaces this person can switch between: every live membership
+ * under the same address.
+ *
+ * Only from a self-serve workspace, and only into one. An address asserted
+ * by a customer's identity provider proves nothing about memberships
+ * elsewhere, and a workspace that signs people in through its own provider
+ * must be entered through it.
+ */
+export async function membershipsFor(actor: Actor): Promise<Membership[]> {
+  const db = getDb();
+  const rows = await db
+    .select({
+      memberId: s.members.id,
+      workspaceId: s.workspaces.id,
+      workspaceName: s.workspaces.name,
+      role: s.members.role,
+      sso: sql<boolean>`exists (select 1 from ${s.ssoConnections} where ${s.ssoConnections.workspaceId} = ${s.workspaces.id})`,
+    })
+    .from(s.members)
+    .innerJoin(s.workspaces, eq(s.workspaces.id, s.members.workspaceId))
+    .where(and(eq(s.members.email, actor.email), isNull(s.members.deactivatedAt), isNull(s.workspaces.deletedAt)))
+    .orderBy(s.workspaces.name);
+
+  const here = rows.find((row) => row.workspaceId === actor.workspaceId);
+  const reachable = here && !here.sso ? rows.filter((row) => !row.sso) : rows.filter((row) => row.workspaceId === actor.workspaceId);
+  return reachable.map((row) => ({
+    memberId: row.memberId,
+    workspaceId: row.workspaceId,
+    workspaceName: row.workspaceName,
+    role: row.role as Role,
+    current: row.workspaceId === actor.workspaceId,
+  }));
 }

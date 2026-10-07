@@ -4,7 +4,7 @@ import { AppShell } from "@/components/app/AppShell";
 import { debugEnabled } from "@/lib/debug";
 import { isStaff } from "@/lib/admin/staff";
 import { authRequired, getCurrentActor } from "@/lib/auth/current";
-import { getProjects, getUsage, getViewer } from "@/lib/data";
+import { getMemberships, getProjects, getUsage, getViewer } from "@/lib/data";
 
 export const metadata: Metadata = {
   title: { default: "Workspace", template: "%s · DemoRiff" },
@@ -35,12 +35,19 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   // Read here rather than fetched by the shell: both are server reads the
   // layout is already awaiting, and a usage meter that arrives a beat after
   // the page is a number people watch change.
-  const [usage, viewer, projects, debug] = await Promise.all([getUsage(), getViewer(), getProjects(), debugEnabled()]);
+  const [usage, viewer, projects, debug, workspaces] = await Promise.all([
+    getUsage(),
+    getViewer(),
+    getProjects(),
+    debugEnabled(),
+    getMemberships(),
+  ]);
 
   return (
     <AppShell
       debug={debug}
       staff={await isStaff(actor)}
+      workspaces={workspaces}
       usage={usage}
       viewer={viewer}
       // The ⌘K palette searched the seeded fixtures, so a workspace with no

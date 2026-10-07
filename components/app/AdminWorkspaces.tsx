@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { cn } from "@/lib/utils";
+import { cn, formatDate } from "@/lib/utils";
 import { Icon } from "@/components/ui/Icon";
 import { Button } from "@/components/ui/Button";
 import { Panel } from "./Shared";
@@ -26,7 +26,6 @@ export interface PlanOption {
 }
 
 const minutes = (seconds: number) => Math.round(seconds / 60);
-const date = (iso: string) => new Date(iso).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
 
 export function AdminWorkspaces({
   query,
@@ -70,7 +69,7 @@ export function AdminWorkspaces({
                   <div className="col-span-full min-w-0 lg:col-span-1">
                     <p className="truncate text-[0.875rem] font-medium text-fg-strong">{w.name}</p>
                     <p className="truncate font-mono text-2xs text-fg-faint">
-                      {w.slug} · {w.owner ?? "no owner"} · since {date(w.createdAt)}
+                      {w.slug} · {w.owner ?? "no owner"} · since {formatDate(w.createdAt)}
                     </p>
                   </div>
                   <Figure label="Plan" value={planName(w.plan) + (w.projectPacks ? ` + ${w.projectPacks} packs` : "")} />
@@ -224,7 +223,7 @@ function GrantForm({
           Reset usage now
           <span className="block text-2xs text-fg-faint">
             Starts a new period: {minutes(workspace.videoSecondsUsed)} minutes used and this period&apos;s AI actions go back to zero.
-            Without Stripe, nothing else resets them. Period started {date(workspace.periodStartsAt)}.
+            Without Stripe, nothing else resets them. Period started {formatDate(workspace.periodStartsAt)}.
           </span>
         </span>
       </label>

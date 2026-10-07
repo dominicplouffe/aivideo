@@ -5,6 +5,7 @@ import { randomBytes } from "node:crypto";
 import { slugify } from "@/lib/utils";
 import { ROLES, type Role } from "../roles";
 import { revokeAllForMember } from "../sessions";
+import { acceptInvitationsFor } from "@/lib/db/repositories/invitations";
 import type { AuthProfile } from "./types";
 
 /**
@@ -388,6 +389,14 @@ async function provisionSelfServe(profile: AuthProfile): Promise<ProvisionResult
     .orderBy(desc(s.members.lastActiveAt), s.members.createdAt, s.members.id);
 
   if (memberships.length === 0) {
+    // Somebody invited, signing in for the first time, joins the workspaces
+    // that invited them rather than getting an empty one of their own. The
+    // address is verified by the gate above, which is what accepting needs.
+    const invited = await acceptInvitationsFor(profile);
+    if (invited) {
+      return { ok: true, member: invited, created: true, workspaceCreated: false, roleChanged: false };
+    }
+
     // Including somebody whose only membership was deactivated. That is
     // deliberate and is not the same as the enterprise path's refusal: an
     // offboarding removes a person from *that workspace*, not from the

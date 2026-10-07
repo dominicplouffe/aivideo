@@ -70,10 +70,18 @@ export interface ShellViewer {
   region: string;
 }
 
+export interface ShellWorkspace {
+  workspaceId: string;
+  workspaceName: string;
+  role: string;
+  current: boolean;
+}
+
 export function AppShell({
   children,
   debug = false,
   staff = false,
+  workspaces = [],
   usage = null,
   viewer = null,
   projects = [],
@@ -83,6 +91,8 @@ export function AppShell({
   debug?: boolean;
   /** DemoRiff staff, who see the admin page. */
   staff?: boolean;
+  /** Every workspace the viewer can switch to, this one included. */
+  workspaces?: ShellWorkspace[];
   /** Real metered usage, or null when there is nothing measured to show. */
   usage?: ShellUsage | null;
   /** The signed-in member. Null only while the layout is gating. */
@@ -201,37 +211,7 @@ export function AppShell({
           </button>
         </div>
 
-        {/*
-          The workspace you are in.
-
-          A card, not a button. It was a button with a chevron-down — the
-          universal promise of a menu — and no `onClick`, because an account
-          belongs to exactly one workspace in this build. An affordance for
-          something that cannot happen is a worse lie than a plain label.
-        */}
-        <div className={cn("border-b border-[var(--line)]", rail ? "p-2" : "p-3")}>
-          <div
-            title={rail && viewer ? `${viewer.workspaceName} · ${viewer.plan} · ${viewer.region.toUpperCase()}` : undefined}
-            className={cn(
-              "flex w-full items-center gap-2.5 rounded-xl border border-[var(--line)] bg-ink-900 text-left",
-              rail ? "justify-center px-0 py-2" : "px-3 py-2.5",
-            )}
-          >
-            <span className="inline-flex size-7 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-cyan-400 to-iris-500 text-[0.6875rem] font-bold text-white">
-              {(viewer?.workspaceName ?? "·").charAt(0).toUpperCase()}
-            </span>
-            {rail ? null : (
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-[0.8125rem] font-medium text-fg-strong">
-                  {viewer?.workspaceName ?? "Your workspace"}
-                </span>
-                <span className="block text-2xs text-fg-faint">
-                  {viewer ? `${viewer.plan} · ${viewer.region.toUpperCase()}` : ""}
-                </span>
-              </span>
-            )}
-          </div>
-        </div>
+        <WorkspaceCard viewer={viewer} workspaces={workspaces} rail={rail} />
 
         {/* new project */}
         <div className={rail ? "p-2" : "p-3"}>
@@ -410,6 +390,120 @@ export function AppShell({
         <div role="status" className="fixed bottom-4 left-1/2 z-50 -translate-x-1/2 rounded-lg border border-[var(--line-strong)] bg-ink-900 px-3.5 py-2 text-[0.8125rem] text-fg shadow-lg">
           {debugNotice}
         </div>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * The workspace you are in, and — for somebody who belongs to more than
+ * one — the way to another.
+ *
+ * A plain card for everybody else. It used to be a button with a
+ * chevron-down and no handler, the universal promise of a menu that
+ * cannot open; the chevron only appears when there is somewhere to go.
+ */
+function WorkspaceCard({
+  viewer,
+  workspaces,
+  rail,
+}: {
+  viewer: ShellViewer | null;
+  workspaces: ShellWorkspace[];
+  rail: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const [switching, setSwitching] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const others = workspaces.filter((w) => !w.current);
+  const switchable = others.length > 0 && !rail;
+
+  const switchTo = async (workspaceId: string) => {
+    setSwitching(workspaceId);
+    setError(null);
+    try {
+      const response = await fetch("/api/workspace/switch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ workspace_id: workspaceId }),
+      });
+      const body = (await response.json().catch(() => ({}))) as { error?: string };
+      if (!response.ok) throw new Error(body.error ?? "Could not switch workspace.");
+      // A full load: every server read on the page belongs to the old one.
+      window.location.href = "/app";
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+      setSwitching(null);
+    }
+  };
+
+  const card = (
+    <>
+      <span className="inline-flex size-7 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-cyan-400 to-iris-500 text-[0.6875rem] font-bold text-white">
+        {(viewer?.workspaceName ?? "·").charAt(0).toUpperCase()}
+      </span>
+      {rail ? null : (
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-[0.8125rem] font-medium text-fg-strong">
+            {viewer?.workspaceName ?? "Your workspace"}
+          </span>
+          <span className="block text-2xs text-fg-faint">
+            {viewer ? `${viewer.plan} · ${viewer.region.toUpperCase()}` : ""}
+          </span>
+        </span>
+      )}
+      {switchable ? (
+        <Icon name="chevronDown" className={cn("size-4 shrink-0 text-fg-faint transition-transform", open && "rotate-180")} />
+      ) : null}
+    </>
+  );
+  const cardClass = cn(
+    "flex w-full items-center gap-2.5 rounded-xl border border-[var(--line)] bg-ink-900 text-left",
+    rail ? "justify-center px-0 py-2" : "px-3 py-2.5",
+  );
+
+  return (
+    <div className={cn("border-b border-[var(--line)]", rail ? "p-2" : "p-3")}>
+      {switchable ? (
+        <button
+          type="button"
+          onClick={() => setOpen((o) => !o)}
+          aria-expanded={open}
+          aria-label={`${viewer?.workspaceName ?? "Workspace"}: switch workspace`}
+          className={cn(cardClass, "transition-colors hover:border-[var(--line-strong)]")}
+        >
+          {card}
+        </button>
+      ) : (
+        <div
+          title={rail && viewer ? `${viewer.workspaceName} · ${viewer.plan} · ${viewer.region.toUpperCase()}` : undefined}
+          className={cardClass}
+        >
+          {card}
+        </div>
+      )}
+      {switchable && open ? (
+        <ul className="mt-1.5 overflow-hidden rounded-xl border border-[var(--line)] bg-ink-900" aria-label="Your other workspaces">
+          {others.map((w) => (
+            <li key={w.workspaceId}>
+              <button
+                type="button"
+                disabled={switching !== null}
+                onClick={() => void switchTo(w.workspaceId)}
+                className="flex w-full items-center gap-2.5 px-3 py-2 text-left transition-colors hover:bg-ink-850 disabled:opacity-60"
+              >
+                <span className="inline-flex size-6 shrink-0 items-center justify-center rounded-md bg-ink-750 text-2xs font-bold text-fg-muted">
+                  {w.workspaceName.charAt(0).toUpperCase()}
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-[0.8125rem] text-fg">{w.workspaceName}</span>
+                  <span className="block text-2xs capitalize text-fg-faint">{switching === w.workspaceId ? "Switching…" : w.role}</span>
+                </span>
+              </button>
+            </li>
+          ))}
+          {error ? <li className="px-3 py-2 text-2xs text-rose-300">{error}</li> : null}
+        </ul>
       ) : null}
     </div>
   );

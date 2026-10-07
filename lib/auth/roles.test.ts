@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { ForbiddenError, allowed, authorize, type Actor } from "./authorize";
-import { ROLES, can, canChangeRole, permissionsFor, rolesWith, type Role } from "./roles";
+import { ROLES, can, canChangeRole, invitableRoles, permissionsFor, rolesWith, type Role } from "./roles";
 
 /**
  * A permission matrix is only worth having if the claims it makes are
@@ -147,4 +147,11 @@ test("allowed answers the same question without throwing", () => {
   assert.equal(allowed(actor("creator"), "project.edit", { workspaceId: "ws1" }), true);
   assert.equal(allowed(actor("creator"), "project.publish", { workspaceId: "ws1" }), false);
   assert.equal(allowed(actor("owner"), "project.publish", { workspaceId: "ws2" }), false);
+});
+
+test("an invitation never carries a role above the inviter's", () => {
+  assert.deepEqual(invitableRoles("owner"), ["owner", "admin", "creator", "reviewer", "viewer"]);
+  assert.deepEqual(invitableRoles("admin"), ["admin", "creator", "reviewer", "viewer"]);
+  assert.deepEqual(invitableRoles("creator"), []);
+  assert.deepEqual(invitableRoles("viewer"), []);
 });

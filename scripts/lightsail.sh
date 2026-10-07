@@ -121,6 +121,7 @@ check_env() {
   else
     warn "WORKOS_API_KEY / WORKOS_CLIENT_ID are empty: the site will run, but nobody can sign in (email-only sign-in is off in production)."
   fi
+  [ -n "$(env_value RESEND_API_KEY)" ] || warn "RESEND_API_KEY is empty: invitations are not emailed; the Team page shows the link to send by hand."
   [ -n "$(env_value STRIPE_SECRET_KEY)" ] || warn "STRIPE_SECRET_KEY is empty: plans cannot be bought."
   if [ -n "$(env_value STRIPE_SECRET_KEY)" ] && [ -z "$(env_value STRIPE_WEBHOOK_SECRET)" ]; then
     warn "STRIPE_WEBHOOK_SECRET is empty: purchases will not change a workspace's plan."

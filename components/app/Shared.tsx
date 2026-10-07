@@ -49,6 +49,17 @@ export function PageHeader({
   );
 }
 
+/* ---------------------------------------------------------- roles */
+
+/** A member role's badge colours, keyed by the role as stored. */
+export const roleTone: Record<string, string> = {
+  owner: "bg-violet-500/15 text-violet-400 border-violet-500/30",
+  admin: "bg-iris-500/15 text-iris-300 border-iris-500/30",
+  creator: "bg-cyan-500/15 text-cyan-300 border-cyan-500/30",
+  reviewer: "bg-amber-500/15 text-amber-400 border-amber-500/30",
+  viewer: "bg-fg/6 text-fg-subtle border-[var(--line)]",
+};
+
 /* ---------------------------------------------------------- status pill */
 
 const statusMeta: Record<ProjectStatus, { label: string; cls: string; dot: string }> = {
