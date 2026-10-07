@@ -25,6 +25,8 @@ import { resolveBrand, type ResolvedBrand } from "@/lib/brand";
  */
 
 export interface ResolvedShare {
+  /** Whose project this is, so the page can tell its own members from visitors. */
+  workspaceId: string;
   project: Project;
   /** A signed, expiring URL for the rendered file. */
   videoUrl: string;
@@ -69,6 +71,7 @@ export async function resolveShare(slug: string): Promise<ResolvedShare | null> 
   );
 
   return {
+    workspaceId: asset.workspaceId,
     project,
     videoUrl: signed.url,
     publishedAt: asset.publishedAt?.toISOString() ?? null,
@@ -110,6 +113,7 @@ export async function resolvePreview(
   }
 
   return {
+    workspaceId,
     project,
     videoUrl,
     publishedAt: video?.publishedAt?.toISOString() ?? null,

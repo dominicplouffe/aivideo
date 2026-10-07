@@ -40,14 +40,24 @@ export async function generateMetadata({
 
 export default async function PublicSharePage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
-  const share = await resolveShare(slug);
-  if (share) return <SharePage project={share.project} videoUrl={share.videoUrl} brand={share.brand} />;
+  const [share, actor] = await Promise.all([resolveShare(slug), getCurrentActor()]);
+  if (share) {
+    return (
+      <SharePage
+        project={share.project}
+        videoUrl={share.videoUrl}
+        brand={share.brand}
+        // The embed code is for the people who own the video, not for
+        // everyone it is sent to.
+        member={actor?.workspaceId === share.workspaceId}
+      />
+    );
+  }
 
   // Not public. Its own workspace still sees it — that is what the Studio's
   // Preview button is for. Everybody else gets the same answer for "never
   // existed" and "not published": a different one tells a stranger which
   // slugs a company is sitting on.
-  const actor = await getCurrentActor();
   const preview = actor ? await resolvePreview(slug, actor.workspaceId) : null;
   if (!preview) notFound();
 
@@ -75,6 +85,7 @@ export default async function PublicSharePage({ params }: { params: Promise<{ sl
       videoUrl={preview.videoUrl}
       brand={preview.brand}
       preview={{ published: preview.publishedAt !== null }}
+      member
     />
   );
 }

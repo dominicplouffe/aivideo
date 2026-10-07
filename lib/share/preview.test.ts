@@ -125,7 +125,10 @@ describe("previewing a share page, and a project's exports", { skip: !RUN && "DA
 
   it("publishing makes it public, and the list says so", async () => {
     await setPublished(MINE, RENDERED, true);
-    assert.equal((await resolve.resolveShare("preview-rendered"))?.project.id, RENDERED);
+    const shared = await resolve.resolveShare("preview-rendered");
+    assert.equal(shared?.project.id, RENDERED);
+    // So the page can tell the project's own members, who get the embed code, from visitors.
+    assert.equal(shared?.workspaceId, MINE);
     assert.equal((await listExports(MINE, RENDERED))[0].published, true);
   });
 });

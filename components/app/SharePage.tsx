@@ -20,6 +20,7 @@ export function SharePage({
   videoUrl = null,
   brand = null,
   preview = null,
+  member = false,
 }: {
   project: Project;
   /**
@@ -41,6 +42,8 @@ export function SharePage({
    * checking your own work is not an audience.
    */
   preview?: { published: boolean } | null;
+  /** The viewer belongs to the project's workspace, and is shown the embed code. */
+  member?: boolean;
 }) {
   const kit = brand?.kit ?? null;
   const accent = kit?.tokens.colors.accent ?? null;
@@ -374,6 +377,8 @@ export function SharePage({
               {/* The second copy of the language switcher, which changed
                   the same unused state variable as the first. */}
             </div>
+
+            {member ? <EmbedCode slug={pathname.split("/").pop() ?? project.slug} title={project.title} live={!preview || preview.published} /> : null}
           </aside>
         </div>
       </main>
@@ -387,6 +392,45 @@ export function SharePage({
           <p className="text-2xs text-fg-faint">© {name}. All rights reserved.</p>
         </div>
       </footer>
+    </div>
+  );
+}
+
+/**
+ * The snippet that puts this video on another website.
+ *
+ * Shown to the video's own workspace only: it is how they publish it on
+ * their site, and the people a link is sent to have no use for it.
+ */
+function EmbedCode({ slug, title, live }: { slug: string; title: string; live: boolean }) {
+  const [copied, setCopied] = useState(false);
+  const code = `<iframe src="${site.url}/embed/${slug}" width="100%" style="aspect-ratio:16/9;border:0" allowfullscreen title="${title.replace(/"/g, "&quot;")}"></iframe>`;
+  return (
+    <div className="mt-4 rounded-2xl border border-[var(--line)] p-5">
+      <div className="flex items-center justify-between gap-3">
+        <p className="font-mono text-2xs tracking-[0.14em] text-fg-faint uppercase">Embed on your website</p>
+        <Button
+          variant="secondary"
+          size="sm"
+          aria-label={copied ? "Embed code copied" : "Copy embed code"}
+          onClick={() => {
+            void navigator.clipboard?.writeText(code).then(() => {
+              setCopied(true);
+              setTimeout(() => setCopied(false), 1600);
+            });
+          }}
+        >
+          <Icon name={copied ? "check" : "copy"} className="size-3.5" strokeWidth={2} />
+        </Button>
+      </div>
+      <pre className="mt-3 overflow-x-auto rounded-lg border border-[var(--line)] bg-ink-900 p-3 font-mono text-[0.6875rem] leading-relaxed whitespace-pre-wrap break-all text-fg-muted">
+        {code}
+      </pre>
+      <p className="mt-2 text-2xs leading-relaxed text-fg-faint">
+        {live
+          ? "Paste it into your site's HTML. Only your workspace sees this box."
+          : "The embed stays blank until the video is published. Only your workspace sees this box."}
+      </p>
     </div>
   );
 }
