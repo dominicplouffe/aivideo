@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { isDatabaseConfigured } from "@/lib/db/client";
-import { needsDatabase, requireActor } from "@/lib/api/guard";
+import { needsDatabase, requireActor, siteOrigin } from "@/lib/api/guard";
 import { getExport } from "@/lib/db/repositories/assets";
 import { getProjectById } from "@/lib/db/repositories/projects";
 import { getStorage } from "@/lib/storage";
@@ -38,7 +38,10 @@ export async function GET(request: Request, context: Context) {
   const [workspaceId, ...rest] = key.split("/");
   const signed = await getStorage().signedReadUrl({ workspaceId, path: rest.join("/") }, DOWNLOAD_TTL_SECONDS);
 
-  const target = new URL(signed.url, request.url);
+  // Against the site's own address, not the request's: behind the proxy a
+  // request arrives addressed to the container (http://0.0.0.0:3000), and a
+  // redirect built from that sends the browser nowhere.
+  const target = new URL(signed.url, siteOrigin(request));
   // Saved under the project's name rather than "render.mp4" every time.
   const project = await getProjectById(guard.actor.workspaceId, id);
   const base = project?.slug ?? "export";

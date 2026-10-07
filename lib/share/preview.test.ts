@@ -32,6 +32,7 @@ describe("previewing a share page, and a project's exports", { skip: !RUN && "DA
       { id: MINE, slug: "preview-mine", name: "Mine" },
       { id: THEIRS, slug: "preview-theirs", name: "Theirs" },
     ]);
+    await db.insert(s.members).values({ workspaceId: MINE, name: "Mo", email: "mo@preview-test.example", role: "owner" });
     await db.insert(s.projects).values([
       { id: RENDERED, workspaceId: MINE, slug: "preview-rendered", title: "Rendered", status: "ready" },
       { id: UNRENDERED, workspaceId: MINE, slug: "preview-unrendered", title: "Unrendered", status: "ready" },
@@ -98,6 +99,28 @@ describe("previewing a share page, and a project's exports", { skip: !RUN && "DA
     assert.equal((await getExport(MINE, RENDERED, video.id))?.storageKey, `${MINE}/renders/${jobId}/render.mp4`);
     assert.equal(await getExport(THEIRS, RENDERED, video.id), null);
     assert.equal(await getExport(MINE, UNRENDERED, video.id), null);
+  });
+
+  it("downloads through a redirect to the site's own address, named after the project", async () => {
+    const { GET } = await import("@/app/api/projects/[id]/exports/[assetId]/route");
+    const [video] = await listExports(MINE, RENDERED);
+    const saved = process.env.NEXT_PUBLIC_SITE_URL;
+    process.env.NEXT_PUBLIC_SITE_URL = "https://demoriff.example";
+    try {
+      // Addressed the way the proxy hands a request to the container.
+      const request = new Request(`http://0.0.0.0:3000/api/projects/${RENDERED}/exports/${video.id}`, {
+        headers: { "x-demoriff-actor": "mo@preview-test.example" },
+      });
+      const response = await GET(request, { params: Promise.resolve({ id: RENDERED, assetId: video.id }) });
+      assert.equal(response.status, 302);
+      const location = new URL(response.headers.get("location") ?? "");
+      assert.equal(location.origin, "https://demoriff.example");
+      assert.equal(location.pathname, "/api/storage/read");
+      assert.equal(location.searchParams.get("name"), "preview-rendered.mp4");
+    } finally {
+      if (saved === undefined) delete process.env.NEXT_PUBLIC_SITE_URL;
+      else process.env.NEXT_PUBLIC_SITE_URL = saved;
+    }
   });
 
   it("publishing makes it public, and the list says so", async () => {
