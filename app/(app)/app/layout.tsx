@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { AppShell } from "@/components/app/AppShell";
 import { debugEnabled } from "@/lib/debug";
+import { isStaff } from "@/lib/admin/staff";
 import { authRequired, getCurrentActor } from "@/lib/auth/current";
 import { getProjects, getUsage, getViewer } from "@/lib/data";
 
@@ -27,10 +28,9 @@ export const metadata: Metadata = {
  * explorable from a fresh clone.
  */
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
-  if (await authRequired()) {
-    const actor = await getCurrentActor();
-    if (!actor) redirect("/signin?next=/app");
-  }
+  const required = await authRequired();
+  const actor = required ? await getCurrentActor() : null;
+  if (required && !actor) redirect("/signin?next=/app");
 
   // Read here rather than fetched by the shell: both are server reads the
   // layout is already awaiting, and a usage meter that arrives a beat after
@@ -40,6 +40,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   return (
     <AppShell
       debug={debug}
+      staff={isStaff(actor)}
       usage={usage}
       viewer={viewer}
       // The ⌘K palette searched the seeded fixtures, so a workspace with no

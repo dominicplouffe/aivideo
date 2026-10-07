@@ -45,6 +45,9 @@ const admin: NavEntry[] = [
   { label: "Settings", href: "/app/settings", icon: "settings" },
 ];
 
+/** DemoRiff staff only: every workspace, not this one. */
+const staffNav: NavEntry[] = [{ label: "Admin", href: "/app/admin", icon: "shield" }];
+
 export interface ShellUsage {
   usedSeconds: number;
   allowanceSeconds: number;
@@ -70,6 +73,7 @@ export interface ShellViewer {
 export function AppShell({
   children,
   debug = false,
+  staff = false,
   usage = null,
   viewer = null,
   projects = [],
@@ -77,6 +81,8 @@ export function AppShell({
   children: React.ReactNode;
   /** Debug mode: features not ready to be shown. Toggled with ⌘/. */
   debug?: boolean;
+  /** DemoRiff staff, who see the admin page. */
+  staff?: boolean;
   /** Real metered usage, or null when there is nothing measured to show. */
   usage?: ShellUsage | null;
   /** The signed-in member. Null only while the layout is gating. */
@@ -239,6 +245,7 @@ export function AppShell({
           <NavGroup entries={primary.filter((e) => debug || !e.debugOnly)} pathname={pathname} rail={rail} />
           <NavGroup label="Studio" entries={studio} pathname={pathname} rail={rail} />
           <NavGroup label="Workspace" entries={admin} pathname={pathname} rail={rail} />
+          {staff ? <NavGroup label="DemoRiff" entries={staffNav} pathname={pathname} rail={rail} /> : null}
         </nav>
 
         {/*

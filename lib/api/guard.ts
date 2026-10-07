@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { authorize, ForbiddenError, type Actor } from "@/lib/auth/authorize";
 import { resolveActor, UnauthenticatedError } from "@/lib/auth/session";
 import type { Permission } from "@/lib/auth/roles";
+import { isStaff } from "@/lib/admin/staff";
 
 /**
  * The shape every authenticated route repeats.
@@ -40,4 +41,21 @@ export function needsDatabase(): NextResponse {
     },
     { status: 503 },
   );
+}
+
+/**
+ * A DemoRiff staff member, or a 404.
+ *
+ * Not a 403: to everybody else these routes do not exist, and a refusal
+ * that names a permission is an invitation to look for a way to get it.
+ */
+export async function requireStaff(request: Request): Promise<{ actor: Actor } | { response: NextResponse }> {
+  const notFound = { response: NextResponse.json({ error: "Not found." }, { status: 404 }) };
+  try {
+    const actor = await resolveActor(request);
+    return isStaff(actor) ? { actor } : notFound;
+  } catch (error) {
+    if (error instanceof UnauthenticatedError) return notFound;
+    throw error;
+  }
 }
