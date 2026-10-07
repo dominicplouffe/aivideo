@@ -2,12 +2,14 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { cn, formatDuration } from "@/lib/utils";
 import { Icon } from "@/components/ui/Icon";
 import { Button } from "@/components/ui/Button";
 import { LogoMark } from "@/components/brand/Logo";
 import { MockApp } from "@/components/marketing/MockApp";
 import type { Project } from "@/lib/app-data";
+import { site } from "@/lib/site";
 import { WatchTracker } from "./WatchTracker";
 import { DEFAULT_FONT } from "@/lib/brand";
 import { useBrandFont } from "@/components/app/brand/BrandPreview";
@@ -17,6 +19,7 @@ export function SharePage({
   project,
   videoUrl = null,
   brand = null,
+  preview = null,
 }: {
   project: Project;
   /**
@@ -32,6 +35,12 @@ export function SharePage({
    * typeface and accent colour.
    */
   brand?: ShareBrand | null;
+  /**
+   * Set when a member of the project's workspace is looking at a page the
+   * public may not see yet. Shows a banner saying so, and records no views:
+   * checking your own work is not an audience.
+   */
+  preview?: { published: boolean } | null;
 }) {
   const kit = brand?.kit ?? null;
   const accent = kit?.tokens.colors.accent ?? null;
@@ -42,6 +51,9 @@ export function SharePage({
   const [copied, setCopied] = useState(false);
   const [time, setTime] = useState(0);
   const video = useRef<HTMLVideoElement>(null);
+  // This page's own address. It showed and copied demos.meridian.app — a
+  // seeded fixture's custom domain — on every share page, for every account.
+  const pathname = usePathname();
 
   const seg = project.segments[chapter];
 
@@ -97,6 +109,22 @@ export function SharePage({
           : undefined
       }
     >
+      {preview ? (
+        <div className="border-b border-amber-500/30 bg-amber-500/10">
+          <p className="container-page flex flex-wrap items-center gap-x-3 gap-y-1 py-2.5 text-[0.8125rem] text-fg">
+            <Icon name="eye" className="size-4 shrink-0 text-amber-400" strokeWidth={1.9} />
+            <span className="min-w-0 flex-1">
+              {preview.published
+                ? "You are viewing this page as a member of its workspace."
+                : "Preview — only your workspace can see this page. Publish the video from Export in the Studio to share it."}
+            </span>
+            <a href={`/app/studio/${project.id}`} className="font-medium text-amber-300 hover:text-amber-200">
+              Back to the Studio
+            </a>
+          </p>
+        </div>
+      ) : null}
+
       {/* branded header */}
       <header className="hairline-b bg-ink-950">
         <div className="container-page flex h-14 items-center justify-between gap-4">
@@ -178,7 +206,7 @@ export function SharePage({
                     view of this page before: somebody could publish a demo,
                     watch it, and find zero views on their analytics. */}
                 {videoUrl ? (
-                  <WatchTracker projectId={project.id} videoRef={video} />
+                  preview ? null : <WatchTracker projectId={project.id} videoRef={video} />
                 ) : (
                   <div
                     className="absolute inset-0 transition-transform duration-700"
@@ -327,7 +355,7 @@ export function SharePage({
                 <input
                   readOnly
                   aria-label="Share link"
-                  value={`demos.meridian.app/${project.slug}`}
+                  value={`${site.domain}${pathname}`}
                   className="h-9 min-w-0 flex-1 rounded-lg border border-[var(--line)] bg-ink-900 px-3 font-mono text-2xs text-fg"
                 />
                 <Button
@@ -335,7 +363,7 @@ export function SharePage({
                   size="sm"
                   aria-label={copied ? "Link copied" : "Copy share link"}
                   onClick={() => {
-                    navigator.clipboard?.writeText(`https://demos.meridian.app/${project.slug}`);
+                    navigator.clipboard?.writeText(`https://${site.domain}${pathname}`);
                     setCopied(true);
                     setTimeout(() => setCopied(false), 1600);
                   }}

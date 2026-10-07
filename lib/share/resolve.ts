@@ -76,6 +76,47 @@ export async function resolveShare(slug: string): Promise<ResolvedShare | null> 
   };
 }
 
+/**
+ * The share page as its own workspace sees it, published or not.
+ *
+ * The Studio's Preview button opens the share page, and that page is a 404
+ * until the video is both rendered and published — so somebody checking
+ * their own work before sharing it was told it did not exist. Members get
+ * the page with whatever was last rendered; everybody else still gets the
+ * 404, from the public path above. `videoUrl` is null when nothing has been
+ * rendered yet.
+ */
+export async function resolvePreview(
+  slug: string,
+  workspaceId: string,
+): Promise<(Omit<ResolvedShare, "videoUrl"> & { videoUrl: string | null }) | null> {
+  if (!isDatabaseConfigured()) return null;
+
+  const { getProjectById, getProjectBySlugForWorkspace } = await import("@/lib/db/repositories/projects");
+  const project =
+    (await getProjectBySlugForWorkspace(workspaceId, slug)) ??
+    (UUID.test(slug) ? await getProjectById(workspaceId, slug) : null);
+  if (!project) return null;
+
+  const { listAssets } = await import("@/lib/db/repositories/assets");
+  const video = (await listAssets(project.id)).find(
+    (asset) => asset.kind === "video" && asset.workspaceId === workspaceId && asset.storageKey,
+  );
+
+  let videoUrl: string | null = null;
+  if (video?.storageKey) {
+    const [owner, ...rest] = video.storageKey.split("/");
+    videoUrl = (await getStorage().signedReadUrl({ workspaceId: owner, path: rest.join("/") }, SHARE_URL_TTL_SECONDS)).url;
+  }
+
+  return {
+    project,
+    videoUrl,
+    publishedAt: video?.publishedAt?.toISOString() ?? null,
+    brand: await shareBrand(workspaceId, project),
+  };
+}
+
 async function shareBrand(workspaceId: string, project: Project): Promise<ShareBrand> {
   const [workspace] = await getDb()
     .select({ name: s.workspaces.name })

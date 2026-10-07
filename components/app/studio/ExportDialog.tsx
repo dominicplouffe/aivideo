@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { SHOW_OPERATOR_HINTS, WORKER_COMMAND } from "@/lib/ops";
-import { cn, formatDuration } from "@/lib/utils";
+import { cn, formatBytes, formatDuration } from "@/lib/utils";
 import { Icon, type IconName } from "@/components/ui/Icon";
 import { Button } from "@/components/ui/Button";
 import type { Project } from "@/lib/app-data";
@@ -80,6 +80,23 @@ export function ExportDialog({
   const [narration, setNarration] = useState<NarrationSummary | null>(null);
   // Set when the worker that rendered ran older code than the app.
   const [staleWorker, setStaleWorker] = useState<{ worker: string; app: string } | null>(null);
+  /** What this project has already produced. Null until loaded. */
+  const [exports, setExports] = useState<ProjectExport[] | null>(null);
+
+  const loadExports = async () => {
+    try {
+      const response = await fetch(`/api/projects/${project.id}/exports`);
+      const body = (await response.json()) as { exports?: ProjectExport[] };
+      setExports(response.ok ? (body.exports ?? []) : []);
+    } catch {
+      setExports([]);
+    }
+  };
+  useEffect(() => {
+    void loadExports();
+    // Once per dialog: a finished render reloads it below.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [project.id]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
@@ -147,6 +164,7 @@ export function ExportDialog({
             : null,
         );
         setStep("done");
+        void loadExports();
         return;
       }
       if (job.status === "failed") {
@@ -192,6 +210,7 @@ export function ExportDialog({
         throw new Error(body.error ?? "That did not work.");
       }
       setPublished(!published);
+      void loadExports();
     } catch (cause) {
       setFailure(cause instanceof Error ? cause.message : String(cause));
     } finally {
@@ -236,7 +255,20 @@ export function ExportDialog({
         <div className="min-h-0 flex-1 overflow-y-auto p-5">
           {step === "configure" ? (
             <div className="space-y-6">
-              <Section label="Outputs">
+              {exports && exports.length > 0 ? (
+                <Section label="Your exports">
+                  <ExportsList
+                    exports={exports}
+                    projectId={project.id}
+                    slug={project.slug}
+                    publishing={publishing}
+                    onTogglePublish={togglePublish}
+                  />
+                  <p className="mt-2 text-2xs text-fg-faint">Rendering again replaces these files; a published link keeps working.</p>
+                </Section>
+              ) : null}
+
+              <Section label={exports && exports.length > 0 ? "Render again" : "Outputs"}>
                 <div className="grid gap-2 sm:grid-cols-2">
                   {formats.map((f) => {
                     const on = picked.includes(f.id);
@@ -485,7 +517,7 @@ export function ExportDialog({
               {videoUrl ? (
                 <Section label="File">
                   <a
-                    href={videoUrl}
+                    href={exports?.find((e) => e.kind === "video")?.download_url ?? videoUrl}
                     download={`${project.slug}.mp4`}
                     className="flex items-center gap-3 rounded-xl border border-[var(--line)] bg-ink-950 px-3.5 py-2.5 transition-colors hover:border-[var(--line-strong)]"
                   >
@@ -496,7 +528,7 @@ export function ExportDialog({
                     <Icon name="download" className="size-3.5 shrink-0 text-iris-300" strokeWidth={2} />
                   </a>
                   <p className="mt-2 text-2xs text-fg-faint">
-                    The link is signed and expires; re-open this dialog for a fresh one.
+                    You can download it again any time from Export, under Your exports.
                   </p>
                 </Section>
               ) : null}
@@ -614,6 +646,88 @@ function NarrationFit({ summary }: { summary: NarrationSummary }) {
         Cut a few words from those chapters in the Script panel and render again.
       </p>
     </div>
+  );
+}
+
+/** One of the project's files, as GET /api/projects/:id/exports lists it. */
+interface ProjectExport {
+  id: string;
+  kind: string;
+  locale: string;
+  published: boolean;
+  rendered_at: string | null;
+  bytes: number | null;
+  share_url: string | null;
+  download_url: string;
+}
+
+/**
+ * What the project has already produced, and what can be done with each.
+ *
+ * The download links go through the app and are signed when clicked, so
+ * they work however long the dialog has been open.
+ */
+function ExportsList({
+  exports,
+  projectId,
+  slug,
+  publishing,
+  onTogglePublish,
+}: {
+  exports: ProjectExport[];
+  projectId: string;
+  slug: string;
+  publishing: boolean;
+  onTogglePublish: () => void;
+}) {
+  return (
+    <ul className="divide-y divide-[var(--line)] overflow-hidden rounded-xl border border-[var(--line)] bg-ink-950">
+      {exports.map((e) => (
+        <li key={e.id} className="flex flex-wrap items-center gap-x-3 gap-y-2 px-3.5 py-2.5">
+          <Icon name={e.kind === "video" ? "play" : "doc"} className="size-3.5 shrink-0 text-fg-faint" strokeWidth={1.9} />
+          <span className="min-w-0 flex-1 basis-40">
+            <span className="block truncate text-[0.8125rem] text-fg">
+              {e.kind === "video" ? "Video" : "Guide"} · {e.locale}
+              {e.kind === "video" ? (
+                <span className={cn("ml-2 text-2xs", e.published ? "text-mint-400" : "text-fg-faint")}>
+                  {e.published ? "Published" : "Not shared"}
+                </span>
+              ) : null}
+            </span>
+            <span className="block text-2xs text-fg-faint">
+              Rendered {e.rendered_at ? new Date(e.rendered_at).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" }) : "—"}
+              {e.bytes ? ` · ${formatBytes(e.bytes)}` : ""}
+            </span>
+          </span>
+          <span className="flex flex-wrap gap-1.5">
+            {e.kind === "video" ? (
+              <>
+                <Button href={e.share_url ?? `/d/${slug}`} variant="ghost" size="sm">
+                  {e.published ? "Open page" : "Preview page"}
+                </Button>
+                <Button variant="ghost" size="sm" disabled={publishing} onClick={onTogglePublish}>
+                  {publishing ? "Working…" : e.published ? "Unpublish" : "Publish"}
+                </Button>
+              </>
+            ) : (
+              <Button href={`/app/guides/${projectId}`} variant="ghost" size="sm">
+                Open guide
+              </Button>
+            )}
+            {/* A plain link, not a Button: its href is a route that answers with
+                a redirect to the file, which client-side navigation cannot follow. */}
+            <a
+              href={e.download_url}
+              download={e.kind === "video" ? `${slug}.mp4` : `${slug}-guide.md`}
+              className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-[var(--line-strong)] px-3 text-[0.8125rem] font-medium text-fg transition-colors hover:bg-[color-mix(in_oklab,var(--color-fg)_6%,transparent)]"
+            >
+              <Icon name="download" className="size-3.5" strokeWidth={2} />
+              Download
+            </a>
+          </span>
+        </li>
+      ))}
+    </ul>
   );
 }
 

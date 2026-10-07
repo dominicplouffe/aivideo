@@ -1,4 +1,4 @@
-import { and, eq, isNotNull, ne } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, ne } from "drizzle-orm";
 import { randomBytes } from "node:crypto";
 import { getDb } from "../client";
 import * as s from "../schema";
@@ -122,6 +122,67 @@ export async function recordRenderedAsset(input: {
 /** Every output a project has produced. */
 export async function listAssets(projectId: string): Promise<Asset[]> {
   return getDb().select().from(s.assets).where(eq(s.assets.projectId, projectId));
+}
+
+export interface ProjectExport {
+  id: string;
+  kind: Asset["kind"];
+  locale: string;
+  publicSlug: string;
+  published: boolean;
+  /** When the render that produced the current file finished. */
+  renderedAt: string | null;
+  bytes: number | null;
+}
+
+/**
+ * What a project has produced, for the Studio's list of exports.
+ *
+ * Read with the render job behind each file, because the asset row is
+ * created once and only its file changes on a re-render: its own timestamp
+ * says when the project was first exported, not when this file was made.
+ */
+export async function listExports(workspaceId: string, projectId: string): Promise<ProjectExport[]> {
+  const rows = await getDb()
+    .select()
+    .from(s.assets)
+    .where(and(eq(s.assets.workspaceId, workspaceId), eq(s.assets.projectId, projectId), isNotNull(s.assets.storageKey)));
+
+  // The render job that wrote a file is in its key: <workspace>/renders/<job>/<file>.
+  const jobIdOf = (key: string | null) => /\/renders\/([0-9a-f-]{36})\//i.exec(key ?? "")?.[1];
+  const jobIds = rows.map((row) => jobIdOf(row.storageKey)).filter((id): id is string => Boolean(id));
+  const jobs = jobIds.length
+    ? await getDb()
+        .select({ id: s.jobs.id, completedAt: s.jobs.completedAt, result: s.jobs.result })
+        .from(s.jobs)
+        .where(and(eq(s.jobs.workspaceId, workspaceId), inArray(s.jobs.id, jobIds)))
+    : [];
+
+  return rows
+    .map((row) => {
+      const job = jobs.find((j) => j.id === jobIdOf(row.storageKey));
+      const bytes = (job?.result as { bytes?: unknown } | null)?.bytes;
+      return {
+        id: row.id,
+        kind: row.kind,
+        locale: row.locale,
+        publicSlug: row.publicSlug,
+        published: row.publishedAt !== null,
+        renderedAt: (job?.completedAt ?? row.createdAt).toISOString(),
+        bytes: row.kind === "video" && typeof bytes === "number" ? bytes : null,
+      };
+    })
+    .sort((a, b) => (a.kind === b.kind ? a.locale.localeCompare(b.locale) : a.kind === "video" ? -1 : 1));
+}
+
+/** One of a project's files, for a download. */
+export async function getExport(workspaceId: string, projectId: string, assetId: string): Promise<Asset | null> {
+  const [row] = await getDb()
+    .select()
+    .from(s.assets)
+    .where(and(eq(s.assets.id, assetId), eq(s.assets.workspaceId, workspaceId), eq(s.assets.projectId, projectId)))
+    .limit(1);
+  return row ?? null;
 }
 
 /**

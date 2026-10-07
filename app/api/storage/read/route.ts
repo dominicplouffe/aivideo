@@ -88,6 +88,9 @@ export async function GET(request: Request) {
     // Cacheable only until the signature expires, and never by a shared
     // cache: the URL is the credential.
     cacheControl: `private, max-age=${Math.max(0, Math.floor((exp - Date.now()) / 1000))}`,
-    filename: key.split("/").pop() ?? "download",
+    // What a download is saved as. Outside the signature on purpose: it
+    // changes only the suggested filename, never which file is served, and
+    // it is reduced to plain characters so it cannot break the header.
+    filename: url.searchParams.get("name")?.replace(/[^\w.-]+/g, "-").slice(0, 120) || (key.split("/").pop() ?? "download"),
   });
 }
