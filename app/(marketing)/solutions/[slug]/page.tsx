@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { pageMetadata } from "@/lib/seo";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { cn } from "@/lib/utils";
@@ -24,11 +25,11 @@ export async function generateMetadata({
   const { slug } = await params;
   const page = getSolutionPage(slug);
   if (!page) return {};
-  return {
+  return pageMetadata({
     title: `${page.nav} — DemoRiff for ${page.nav.toLowerCase()}`,
     description: page.lede.slice(0, 300),
-    alternates: { canonical: `/solutions/${page.slug}` },
-  };
+    path: `/solutions/${page.slug}`,
+  });
 }
 
 export default async function SolutionDetailPage({

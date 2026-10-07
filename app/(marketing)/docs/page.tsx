@@ -1,14 +1,16 @@
 import type { Metadata } from "next";
+import { pageMetadata } from "@/lib/seo";
 import Link from "next/link";
 import { docSections } from "@/lib/docs-content";
 import { Icon } from "@/components/ui/Icon";
 import { Card, Eyebrow } from "@/components/ui/Primitives";
 
-export const metadata: Metadata = {
+export const metadata: Metadata = pageMetadata({
   title: "Help center",
-  description: "Guides, references and troubleshooting for DemoRiff — recording, the Studio, publishing, billing and the API.",
-  alternates: { canonical: "/docs" },
-};
+  description:
+    "Guides, references and troubleshooting for DemoRiff — recording, the Studio, publishing, billing and the API.",
+  path: "/docs",
+});
 
 export default function DocsIndexPage() {
   return (

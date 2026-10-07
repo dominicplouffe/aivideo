@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { pageMetadata } from "@/lib/seo";
 import { notFound } from "next/navigation";
 import { allDocPages, getDocPage } from "@/lib/docs-content";
 import { Prose } from "@/components/marketing/Prose";
@@ -16,11 +17,11 @@ export async function generateMetadata({
   const { slug } = await params;
   const found = getDocPage(slug);
   if (!found) return {};
-  return {
+  return pageMetadata({
     title: found.page.title,
     description: found.page.summary,
-    alternates: { canonical: `/docs/${slug}` },
-  };
+    path: `/docs/${slug}`,
+  });
 }
 
 export default async function DocDetailPage({ params }: { params: Promise<{ slug: string }> }) {

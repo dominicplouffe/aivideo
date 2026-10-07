@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { pageMetadata } from "@/lib/seo";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { courses, getLesson } from "@/lib/academy-content";
@@ -20,11 +21,11 @@ export async function generateMetadata({
   const { course, lesson } = await params;
   const found = getLesson(course, lesson);
   if (!found) return {};
-  return {
+  return pageMetadata({
     title: `${found.lesson.title} — ${found.course.title}`,
     description: found.lesson.summary,
-    alternates: { canonical: `/academy/${course}/${lesson}` },
-  };
+    path: `/academy/${course}/${lesson}`,
+  });
 }
 
 export default async function LessonPage({

@@ -1,16 +1,17 @@
 import type { Metadata } from "next";
+import { pageMetadata } from "@/lib/seo";
 import Link from "next/link";
 import { legalDocs } from "@/lib/legal-content";
 import { Section, SectionHeader, Card, Eyebrow } from "@/components/ui/Primitives";
 import { Icon } from "@/components/ui/Icon";
 import { Reveal } from "@/components/ui/Reveal";
 
-export const metadata: Metadata = {
+export const metadata: Metadata = pageMetadata({
   title: "Legal",
   description:
     "Terms of Service, Privacy Policy, Data Processing Addendum, sub-processors and Acceptable Use Policy for DemoRiff.",
-  alternates: { canonical: "/legal" },
-};
+  path: "/legal",
+});
 
 /**
  * The legal index.

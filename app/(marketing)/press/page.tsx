@@ -1,15 +1,17 @@
 import type { Metadata } from "next";
+import { pageMetadata } from "@/lib/seo";
 import { site } from "@/lib/site";
 import { LogoMark } from "@/components/brand/Logo";
 import { Button } from "@/components/ui/Button";
 import { Icon } from "@/components/ui/Icon";
 import { Eyebrow, Section, SectionHeader, Card } from "@/components/ui/Primitives";
 
-export const metadata: Metadata = {
+export const metadata: Metadata = pageMetadata({
   title: "Press kit",
-  description: "Logos, brand assets, company facts and media contacts for DemoRiff.",
-  alternates: { canonical: "/press" },
-};
+  description:
+    "Logos, brand assets, company facts and media contacts for DemoRiff.",
+  path: "/press",
+});
 
 const facts = [
   { label: "Founded", value: "2024" },

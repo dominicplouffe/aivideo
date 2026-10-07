@@ -1,15 +1,16 @@
 import type { Metadata } from "next";
+import { pageMetadata } from "@/lib/seo";
 import { Button } from "@/components/ui/Button";
 import { Icon } from "@/components/ui/Icon";
 import { Eyebrow, Section, SectionHeader, Card, IconTile } from "@/components/ui/Primitives";
 import { Reveal } from "@/components/ui/Reveal";
 
-export const metadata: Metadata = {
+export const metadata: Metadata = pageMetadata({
   title: "Partners",
   description:
     "Agency, technology and reseller partnerships with DemoRiff — margins, co-marketing, and a certification programme for practitioners.",
-  alternates: { canonical: "/partners" },
-};
+  path: "/partners",
+});
 
 const programmes = [
   {

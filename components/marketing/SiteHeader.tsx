@@ -265,14 +265,14 @@ function ProductMenu() {
       <div className="surface-card rounded-2xl p-5">
         <p className="font-mono text-2xs tracking-[0.16em] text-iris-300 uppercase">New</p>
         <p className="mt-2 text-[0.9375rem] font-medium text-fg-strong">
-          Riff Agent writes the demo for you
+          Brand kits on every export
         </p>
         <p className="mt-1.5 text-[0.8125rem] leading-snug text-fg-subtle">
-          Describe the feature. The agent scripts it, records the flow against your staging app,
-          and returns a finished cut.
+          Your fonts, colours and logo on the captions, with an intro and outro card on every
+          video.
         </p>
         <Link
-          href="/product/agent"
+          href="/product/brand"
           className="mt-4 inline-flex items-center gap-1.5 text-[0.8125rem] font-medium text-iris-300 hover:text-iris-400"
         >
           See how it works

@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { pageMetadata } from "@/lib/seo";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { cn } from "@/lib/utils";
@@ -25,12 +26,11 @@ export async function generateMetadata({
   const { slug } = await params;
   const page = getProductPage(slug);
   if (!page) return {};
-  return {
+  return pageMetadata({
     title: page.nav,
     description: page.lede.slice(0, 300),
-    alternates: { canonical: `/product/${page.slug}` },
-    openGraph: { title: `${page.nav} · DemoRiff`, description: page.lede.slice(0, 300) },
-  };
+    path: `/product/${page.slug}`,
+  });
 }
 
 export default async function ProductDetailPage({

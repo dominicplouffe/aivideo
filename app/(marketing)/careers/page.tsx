@@ -1,14 +1,16 @@
 import type { Metadata } from "next";
+import { pageMetadata } from "@/lib/seo";
 import { Button } from "@/components/ui/Button";
 import { Icon } from "@/components/ui/Icon";
 import { Eyebrow, Section, SectionHeader, Card, Badge } from "@/components/ui/Primitives";
 import { Reveal } from "@/components/ui/Reveal";
 
-export const metadata: Metadata = {
+export const metadata: Metadata = pageMetadata({
   title: "Careers",
-  description: "Open roles at DemoRiff across engineering, product, design and go-to-market. Remote-first across 14 countries.",
-  alternates: { canonical: "/careers" },
-};
+  description:
+    "Open roles at DemoRiff across engineering, product, design and go-to-market. Remote-first across 14 countries.",
+  path: "/careers",
+});
 
 const roles = [
   { title: "Senior Video Pipeline Engineer", team: "Engineering", location: "Remote (US / EU)", type: "Full-time", desc: "FFmpeg, GPU encoding, and making a three-minute render finish in ninety seconds." },

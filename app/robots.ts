@@ -7,11 +7,11 @@ export default function robots(): MetadataRoute.Robots {
       {
         userAgent: "*",
         allow: "/",
-        // The workspace is private and the auth screens have nothing to index.
-        disallow: ["/app", "/app/", "/signin", "/api/"],
+        // The workspace is private. Sign-in is left crawlable so its noindex
+        // tag can be read; a blocked page can still be indexed from links.
+        disallow: ["/app", "/app/", "/api/"],
       },
     ],
     sitemap: `${site.url}/sitemap.xml`,
-    host: site.url,
   };
 }

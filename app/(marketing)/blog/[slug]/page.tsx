@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { articleStructuredData, jsonLd, pageMetadata } from "@/lib/seo";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { posts, getPost } from "@/lib/blog-content";
@@ -20,12 +21,12 @@ export async function generateMetadata({
   const { slug } = await params;
   const p = getPost(slug);
   if (!p) return {};
-  return {
+  return pageMetadata({
     title: p.title,
     description: p.dek,
-    alternates: { canonical: `/blog/${p.slug}` },
-    openGraph: { type: "article", title: p.title, description: p.dek, publishedTime: p.date },
-  };
+    path: `/blog/${p.slug}`,
+    openGraph: { type: "article", publishedTime: p.date, authors: [p.author.name] },
+  });
 }
 
 const fmt = (d: string) =>
@@ -41,6 +42,7 @@ export default async function PostPage({ params }: { params: Promise<{ slug: str
 
   return (
     <>
+      <script type="application/ld+json" dangerouslySetInnerHTML={jsonLd(articleStructuredData(post))} />
       <article>
         <header className="relative overflow-hidden pt-14 pb-10 md:pt-20">
           <div aria-hidden className="pointer-events-none absolute inset-0 grid-bg mask-fade-b opacity-30" />

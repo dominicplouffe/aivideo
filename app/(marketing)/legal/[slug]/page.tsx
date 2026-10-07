@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { pageMetadata } from "@/lib/seo";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { legalDocs, getLegalDoc } from "@/lib/legal-content";
@@ -19,7 +20,7 @@ export async function generateMetadata({
   const { slug } = await params;
   const d = getLegalDoc(slug);
   if (!d) return {};
-  return { title: d.title, description: d.summary, alternates: { canonical: `/legal/${slug}` } };
+  return pageMetadata({ title: d.title, description: d.summary, path: `/legal/${slug}` });
 }
 
 export default async function LegalPage({ params }: { params: Promise<{ slug: string }> }) {

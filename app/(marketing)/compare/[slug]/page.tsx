@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { pageMetadata } from "@/lib/seo";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { cn } from "@/lib/utils";
@@ -23,11 +24,11 @@ export async function generateMetadata({
   const { slug } = await params;
   const page = getComparePage(slug);
   if (!page) return {};
-  return {
+  return pageMetadata({
     title: `DemoRiff vs. ${page.competitor}`,
     description: page.lede.slice(0, 300),
-    alternates: { canonical: `/compare/${page.slug}` },
-  };
+    path: `/compare/${page.slug}`,
+  });
 }
 
 function Cell({ value, ours }: { value: CompareRowData["us"] | CompareRowData["them"]; ours?: boolean }) {

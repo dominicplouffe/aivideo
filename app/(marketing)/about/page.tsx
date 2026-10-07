@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { pageMetadata } from "@/lib/seo";
 import { site } from "@/lib/site";
 import { Button } from "@/components/ui/Button";
 import { Icon } from "@/components/ui/Icon";
@@ -6,12 +7,12 @@ import { Eyebrow, Section, SectionHeader, Card, Stat } from "@/components/ui/Pri
 import { Reveal } from "@/components/ui/Reveal";
 import { LogoWall } from "@/components/marketing/LogoWall";
 
-export const metadata: Metadata = {
+export const metadata: Metadata = pageMetadata({
   title: "About",
   description:
     "DemoRiff builds the production layer for software companies. Why we started, what we believe about demos, and how we run the company.",
-  alternates: { canonical: "/about" },
-};
+  path: "/about",
+});
 
 const beliefs = [
   {

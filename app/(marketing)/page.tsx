@@ -1,5 +1,6 @@
 import Link from "next/link";
 import type { Metadata } from "next";
+import { jsonLd, pageMetadata, siteStructuredData } from "@/lib/seo";
 import { Button } from "@/components/ui/Button";
 import { Icon } from "@/components/ui/Icon";
 import {
@@ -27,15 +28,17 @@ import {
 import { heroMetrics, proofMetrics, homeFaqs } from "@/lib/marketing-data";
 import { site } from "@/lib/site";
 
-export const metadata: Metadata = {
+export const metadata: Metadata = pageMetadata({
   title: `${site.name} — ${site.tagline}`,
   description: site.description,
-  alternates: { canonical: "/" },
-};
+  path: "/",
+  absoluteTitle: true,
+});
 
 export default function HomePage() {
   return (
     <>
+      <script type="application/ld+json" dangerouslySetInnerHTML={jsonLd(siteStructuredData())} />
       {/* ================================================= HERO */}
       <section className="relative overflow-hidden pt-16 pb-20 md:pt-24 md:pb-28">
         <div aria-hidden className="pointer-events-none absolute inset-0 grid-bg mask-fade-b opacity-[0.55]" />
@@ -53,14 +56,14 @@ export default function HomePage() {
           <div className="mx-auto max-w-4xl text-center">
             <Reveal>
               <Link
-                href="/product/agent"
+                href="/product/brand"
                 className="group inline-flex items-center gap-2 rounded-full border border-[var(--line-strong)] bg-[color-mix(in_oklab,var(--color-fg)_5%,transparent)] py-1 pr-3 pl-1 transition-colors hover:border-iris-500/50"
               >
                 <span className="rounded-full bg-[linear-gradient(135deg,var(--color-iris-500),var(--color-violet-500))] px-2.5 py-0.5 text-2xs font-semibold text-white">
                   New
                 </span>
                 <span className="text-[0.8125rem] text-fg-muted">
-                  Riff Agent records the demo for you
+                  Brand kits: your fonts, logo, intro and outro on every export
                 </span>
                 <Icon
                   name="chevronRight"

@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { pageMetadata } from "@/lib/seo";
 import Link from "next/link";
 import { courses } from "@/lib/academy-content";
 import { Icon } from "@/components/ui/Icon";
@@ -6,12 +7,12 @@ import { Button } from "@/components/ui/Button";
 import { Eyebrow, Section, Card, Badge, IconTile } from "@/components/ui/Primitives";
 import { Reveal } from "@/components/ui/Reveal";
 
-export const metadata: Metadata = {
+export const metadata: Metadata = pageMetadata({
   title: "Demo Academy",
   description:
     "A free course on making product demos that convert — structure, recording craft, scaling a video operation and applying demo craft to the revenue motion.",
-  alternates: { canonical: "/academy" },
-};
+  path: "/academy",
+});
 
 export default function AcademyPage() {
   const lessonCount = courses.reduce((n, c) => n + c.lessons.length, 0);

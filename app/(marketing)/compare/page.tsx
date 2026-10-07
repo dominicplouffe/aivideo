@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { pageMetadata } from "@/lib/seo";
 import Link from "next/link";
 import { comparePages } from "@/lib/compare-content";
 import { Button } from "@/components/ui/Button";
@@ -6,12 +7,12 @@ import { Icon } from "@/components/ui/Icon";
 import { Eyebrow, Section, SectionHeader, Card, Badge } from "@/components/ui/Primitives";
 import { Reveal } from "@/components/ui/Reveal";
 
-export const metadata: Metadata = {
+export const metadata: Metadata = pageMetadata({
   title: "Compare DemoRiff",
   description:
     "Honest, detailed comparisons between DemoRiff and Trupeer, Descript, Creatify, Loom, Arcade and Scribe — including where each competitor is the better choice.",
-  alternates: { canonical: "/compare" },
-};
+  path: "/compare",
+});
 
 export default function CompareIndexPage() {
   return (

@@ -1,16 +1,17 @@
 import type { Metadata } from "next";
+import { pageMetadata } from "@/lib/seo";
 import { integrations } from "@/lib/marketing-data";
 import { Button } from "@/components/ui/Button";
 import { Icon } from "@/components/ui/Icon";
 import { Eyebrow, Section, SectionHeader, Card, Badge } from "@/components/ui/Primitives";
 import { Reveal } from "@/components/ui/Reveal";
 
-export const metadata: Metadata = {
+export const metadata: Metadata = pageMetadata({
   title: "Integrations",
   description:
     "DemoRiff connects to Slack, Notion, Confluence, Zendesk, Intercom, HubSpot, Salesforce, Figma, GitHub, Linear, Segment, Zapier, Okta and more — plus a public REST API and webhooks.",
-  alternates: { canonical: "/integrations" },
-};
+  path: "/integrations",
+});
 
 const categories = Array.from(new Set(integrations.map((i) => i.category)));
 

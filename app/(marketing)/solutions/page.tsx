@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { pageMetadata } from "@/lib/seo";
 import Link from "next/link";
 import { solutionPages } from "@/lib/solutions-content";
 import { Icon } from "@/components/ui/Icon";
@@ -7,12 +8,12 @@ import { Eyebrow, Section, Card, IconTile } from "@/components/ui/Primitives";
 import { Reveal } from "@/components/ui/Reveal";
 import { LogoWall } from "@/components/marketing/LogoWall";
 
-export const metadata: Metadata = {
+export const metadata: Metadata = pageMetadata({
   title: "Solutions",
   description:
     "DemoRiff for product marketing, sales engineering, customer education, support, founders and enterprise IT — with the workflows and numbers for each.",
-  alternates: { canonical: "/solutions" },
-};
+  path: "/solutions",
+});
 
 export default function SolutionsIndexPage() {
   return (

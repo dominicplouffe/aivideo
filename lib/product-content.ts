@@ -25,9 +25,11 @@ export interface ProductPage {
   specs: { label: string; value: string }[];
   faqs: { q: string; a: string }[];
   related: string[];
+  /** Kept out of the site, the sitemap and search until the feature ships. */
+  unlisted?: boolean;
 }
 
-export const productPages: ProductPage[] = [
+const allProductPages: ProductPage[] = [
   /* ============================================================ STUDIO */
   {
     slug: "studio",
@@ -1021,6 +1023,8 @@ export const productPages: ProductPage[] = [
   /* ============================================================ AGENT */
   {
     slug: "agent",
+    // The Riff Agent is on hold behind the debug flag.
+    unlisted: true,
     nav: "Riff Agent",
     eyebrow: "Riff Agent",
     title: "Describe the demo.",
@@ -1115,6 +1119,8 @@ export const productPages: ProductPage[] = [
     related: ["studio", "recorder", "analytics", "brand"],
   },
 ];
+
+export const productPages = allProductPages.filter((p) => !p.unlisted);
 
 export function getProductPage(slug: string) {
   return productPages.find((p) => p.slug === slug);

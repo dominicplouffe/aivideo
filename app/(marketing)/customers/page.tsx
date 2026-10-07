@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { pageMetadata } from "@/lib/seo";
 import Link from "next/link";
 import { caseStudies } from "@/lib/customers-content";
 import { proofMetrics } from "@/lib/marketing-data";
@@ -9,12 +10,12 @@ import { Reveal } from "@/components/ui/Reveal";
 import { LogoWall } from "@/components/marketing/LogoWall";
 import { TestimonialGrid } from "@/components/marketing/Sections";
 
-export const metadata: Metadata = {
+export const metadata: Metadata = pageMetadata({
   title: "Customer stories",
   description:
     "How product marketing, sales engineering, customer education and security teams replaced their video production pipeline with DemoRiff — with the numbers.",
-  alternates: { canonical: "/customers" },
-};
+  path: "/customers",
+});
 
 export default function CustomersPage() {
   const [featured, ...rest] = caseStudies;

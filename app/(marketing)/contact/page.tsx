@@ -1,16 +1,17 @@
 import type { Metadata } from "next";
+import { pageMetadata } from "@/lib/seo";
 import { ContactForm } from "@/components/marketing/ContactForm";
 import { site } from "@/lib/site";
 import { Icon } from "@/components/ui/Icon";
 import { Eyebrow, Section, Card } from "@/components/ui/Primitives";
 import { LogoWall } from "@/components/marketing/LogoWall";
 
-export const metadata: Metadata = {
+export const metadata: Metadata = pageMetadata({
   title: "Contact sales",
   description:
     "Talk to someone who has onboarded a few hundred teams. Security review, procurement, pricing for volume, or an honest opinion about whether this is the right tool for you.",
-  alternates: { canonical: "/contact" },
-};
+  path: "/contact",
+});
 
 const routes = [
   { icon: "briefcase" as const, title: "Sales", body: "Volume pricing, a walkthrough against your product, or a written ROI model.", email: site.salesEmail },

@@ -1,15 +1,16 @@
 import type { Metadata } from "next";
+import { pageMetadata } from "@/lib/seo";
 import { RoiCalculator } from "@/components/marketing/RoiCalculator";
 import { Eyebrow, Section, SectionHeader, Card } from "@/components/ui/Primitives";
 import { Icon } from "@/components/ui/Icon";
 import { Button } from "@/components/ui/Button";
 
-export const metadata: Metadata = {
+export const metadata: Metadata = pageMetadata({
   title: "ROI calculator",
   description:
     "Work out what your current video production actually costs — in agency invoices, internal hours and the videos you never made — and what changes with DemoRiff.",
-  alternates: { canonical: "/roi-calculator" },
-};
+  path: "/roi-calculator",
+});
 
 const assumptions = [
   "Agency cost per finished minute is taken from the midpoint of the $1,400–$3,000 range we see quoted in B2B SaaS.",

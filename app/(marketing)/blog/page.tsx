@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { pageMetadata } from "@/lib/seo";
 import Link from "next/link";
 import { posts } from "@/lib/blog-content";
 import { Icon } from "@/components/ui/Icon";
@@ -6,12 +7,12 @@ import { Button } from "@/components/ui/Button";
 import { Eyebrow, Section, Card, Badge } from "@/components/ui/Primitives";
 import { Reveal } from "@/components/ui/Reveal";
 
-export const metadata: Metadata = {
+export const metadata: Metadata = pageMetadata({
   title: "The Riff",
   description:
     "Field notes on product demos, documentation, localization and the craft of explaining software — from the team building DemoRiff.",
-  alternates: { canonical: "/blog" },
-};
+  path: "/blog",
+});
 
 const fmt = (d: string) =>
   new Date(d).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });

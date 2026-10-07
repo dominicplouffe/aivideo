@@ -31,7 +31,8 @@ export async function generateMetadata({
       title: share.project.title,
       description: share.project.description,
     },
-    robots: { index: true, follow: true },
+    // A shared video is for the people it was sent to, not for search results.
+    robots: { index: false, follow: false },
   };
 }
 

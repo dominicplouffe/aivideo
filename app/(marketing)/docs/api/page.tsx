@@ -1,14 +1,16 @@
 import type { Metadata } from "next";
+import { pageMetadata } from "@/lib/seo";
 import { apiReference } from "@/lib/docs-content";
 import { Prose } from "@/components/marketing/Prose";
 import { Badge, Card } from "@/components/ui/Primitives";
 import { cn } from "@/lib/utils";
 
-export const metadata: Metadata = {
+export const metadata: Metadata = pageMetadata({
   title: "API reference",
-  description: "The DemoRiff REST API: recordings, projects, renders, locales, analytics and webhooks.",
-  alternates: { canonical: "/docs/api" },
-};
+  description:
+    "The DemoRiff REST API: recordings, projects, renders, locales, analytics and webhooks.",
+  path: "/docs/api",
+});
 
 const methodTone: Record<string, string> = {
   GET: "text-cyan-300 border-cyan-500/35 bg-cyan-500/10",

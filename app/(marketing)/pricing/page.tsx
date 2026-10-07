@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { pageMetadata } from "@/lib/seo";
 import { Section, SectionHeader, Eyebrow, Card, TextLink } from "@/components/ui/Primitives";
 import { Reveal } from "@/components/ui/Reveal";
 import { Button } from "@/components/ui/Button";
@@ -9,12 +10,12 @@ import { LogoWall } from "@/components/marketing/LogoWall";
 import { TestimonialGrid } from "@/components/marketing/Sections";
 import { pricingFaqs } from "@/lib/pricing";
 
-export const metadata: Metadata = {
+export const metadata: Metadata = pageMetadata({
   title: "Pricing",
   description:
     "Flat monthly plans with every AI feature unlocked from the first paid tier. Unlimited written guides on every plan. Translations are never billed twice. Start free, no credit card.",
-  alternates: { canonical: "/pricing" },
-};
+  path: "/pricing",
+});
 
 const guarantees = [
   {

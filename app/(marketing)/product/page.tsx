@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { pageMetadata } from "@/lib/seo";
 import Link from "next/link";
 import { productPages } from "@/lib/product-content";
 import { Icon } from "@/components/ui/Icon";
@@ -8,12 +9,12 @@ import { Reveal } from "@/components/ui/Reveal";
 import { OutputShowcase } from "@/components/marketing/OutputShowcase";
 import { CapabilityBento } from "@/components/marketing/Sections";
 
-export const metadata: Metadata = {
+export const metadata: Metadata = pageMetadata({
   title: "Product",
   description:
     "The full DemoRiff platform: interaction-aware screen recorder, transcript-based AI video studio, voices, presenters, brand system, interactive demos, documentation, localization and analytics.",
-  alternates: { canonical: "/product" },
-};
+  path: "/product",
+});
 
 const stages = [
   { key: "Capture", slugs: ["recorder", "import"] },

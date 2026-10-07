@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { pageMetadata } from "@/lib/seo";
 import { releases } from "@/lib/changelog-content";
 import { Icon } from "@/components/ui/Icon";
 import { Eyebrow, Section, Badge, type BadgeTone } from "@/components/ui/Primitives";
@@ -6,11 +7,12 @@ import { Reveal } from "@/components/ui/Reveal";
 import { Button } from "@/components/ui/Button";
 import { cn } from "@/lib/utils";
 
-export const metadata: Metadata = {
+export const metadata: Metadata = pageMetadata({
   title: "Changelog",
-  description: "Everything we shipped, every release. New features, improvements and fixes across the DemoRiff platform.",
-  alternates: { canonical: "/changelog" },
-};
+  description:
+    "Everything we shipped, every release. New features, improvements and fixes across the DemoRiff platform.",
+  path: "/changelog",
+});
 
 const tagTone: Record<string, BadgeTone> = {
   Major: "iris",

@@ -1,16 +1,17 @@
 import type { Metadata } from "next";
+import { pageMetadata } from "@/lib/seo";
 import { Button } from "@/components/ui/Button";
 import { Icon, type IconName } from "@/components/ui/Icon";
 import { Eyebrow, Section, SectionHeader, Card, Badge, IconTile } from "@/components/ui/Primitives";
 import { Reveal } from "@/components/ui/Reveal";
 import { FaqList } from "@/components/marketing/Faq";
 
-export const metadata: Metadata = {
+export const metadata: Metadata = pageMetadata({
   title: "Trust & Security",
   description:
     "SOC 2 Type II, GDPR, zero model training on customer content, regional processing, private rendering, SSO, SCIM and audit log streaming. How DemoRiff handles your recordings.",
-  alternates: { canonical: "/security" },
-};
+  path: "/security",
+});
 
 const certifications = [
   { name: "SOC 2 Type II", body: "Audited annually by an independent firm. Report available under NDA.", status: "Current" },

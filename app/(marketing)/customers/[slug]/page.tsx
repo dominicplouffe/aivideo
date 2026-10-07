@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { pageMetadata } from "@/lib/seo";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { caseStudies, getCaseStudy } from "@/lib/customers-content";
@@ -19,11 +20,11 @@ export async function generateMetadata({
   const { slug } = await params;
   const c = getCaseStudy(slug);
   if (!c) return {};
-  return {
+  return pageMetadata({
     title: `${c.company} customer story`,
     description: c.summary.slice(0, 300),
-    alternates: { canonical: `/customers/${c.slug}` },
-  };
+    path: `/customers/${c.slug}`,
+  });
 }
 
 export default async function CaseStudyPage({ params }: { params: Promise<{ slug: string }> }) {
