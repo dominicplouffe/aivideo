@@ -50,6 +50,14 @@ export class WorkOsAuthKit implements IdentityProvider {
         { provider: "workos", retryable: false },
       );
     }
+    // The client id goes into a URL every visitor sees. With the two values
+    // swapped, that URL carries the secret key — which is how it leaked once.
+    if (!clientId.startsWith("client_")) {
+      throw new ProviderError(
+        "WORKOS_CLIENT_ID must start with client_; check it is not swapped with WORKOS_API_KEY.",
+        { provider: "workos", retryable: false },
+      );
+    }
     return new WorkOsAuthKit(apiKey, clientId, fetchImpl);
   }
 

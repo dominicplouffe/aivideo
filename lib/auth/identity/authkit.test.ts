@@ -195,6 +195,21 @@ describe("the code exchange", () => {
       if (client) process.env.WORKOS_CLIENT_ID = client;
     }
   });
+
+  it("refuses a client id that is really the secret key", () => {
+    const key = process.env.WORKOS_API_KEY;
+    const client = process.env.WORKOS_CLIENT_ID;
+    process.env.WORKOS_API_KEY = CLIENT;
+    process.env.WORKOS_CLIENT_ID = KEY;
+    try {
+      assert.throws(() => WorkOsAuthKit.fromEnv(), /must start with client_/);
+    } finally {
+      if (key) process.env.WORKOS_API_KEY = key;
+      else delete process.env.WORKOS_API_KEY;
+      if (client) process.env.WORKOS_CLIENT_ID = client;
+      else delete process.env.WORKOS_CLIENT_ID;
+    }
+  });
 });
 
 describe("the session id inside an access token", () => {

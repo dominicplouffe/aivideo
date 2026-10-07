@@ -63,8 +63,8 @@ minutes.
 
 There is no password field, and that is deliberate rather than unfinished.
 Passwords live with the identity provider; this application never sees one.
-The email box below the buttons is a development convenience that looks up an
-existing member and is refused outright in production.
+The email box below the buttons opens AuthKit's hosted page with the address
+filled in, where the person enters a password or asks for a magic link.
 
 A workspace is created the first time somebody signs in whose address has no
 member row — and **only** when their provider says the address is verified.

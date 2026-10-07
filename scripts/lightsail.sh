@@ -114,8 +114,13 @@ check_env() {
     done
   fi
   [ ${#missing[@]} -eq 0 ] || die "Missing in $ENV_FILE: ${missing[*]}"
-  [ -n "$(env_value WORKOS_API_KEY)" ] && [ -n "$(env_value WORKOS_CLIENT_ID)" ] \
-    || warn "WORKOS_API_KEY / WORKOS_CLIENT_ID are empty: the site will run, but nobody can sign in (email-only sign-in is off in production)."
+  if [ -n "$(env_value WORKOS_API_KEY)" ] && [ -n "$(env_value WORKOS_CLIENT_ID)" ]; then
+    # The client id is shown to every visitor; swapped, it would publish the secret key.
+    case "$(env_value WORKOS_CLIENT_ID)" in client_*) ;; *) die "WORKOS_CLIENT_ID must start with client_ (is it swapped with WORKOS_API_KEY?)" ;; esac
+    case "$(env_value WORKOS_API_KEY)" in sk_*) ;; *) die "WORKOS_API_KEY must start with sk_ (is it swapped with WORKOS_CLIENT_ID?)" ;; esac
+  else
+    warn "WORKOS_API_KEY / WORKOS_CLIENT_ID are empty: the site will run, but nobody can sign in (email-only sign-in is off in production)."
+  fi
   [ -n "$(env_value STRIPE_SECRET_KEY)" ] || warn "STRIPE_SECRET_KEY is empty: plans cannot be bought."
   if [ -n "$(env_value STRIPE_SECRET_KEY)" ] && [ -z "$(env_value STRIPE_WEBHOOK_SECRET)" ]; then
     warn "STRIPE_WEBHOOK_SECRET is empty: purchases will not change a workspace's plan."

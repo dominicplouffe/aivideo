@@ -1,7 +1,6 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { cn } from "@/lib/utils";
 import { Icon } from "@/components/ui/Icon";
@@ -75,7 +74,6 @@ export function AuthForm({
   error?: string;
   next?: string;
 }) {
-  const router = useRouter();
   const [email, setEmail] = useState("");
   const [pending, setPending] = useState(false);
   const [message, setMessage] = useState<string | null>(explain(error));
@@ -145,41 +143,17 @@ export function AuthForm({
 
       <div className="my-6 flex items-center gap-3">
         <span className="h-px flex-1 bg-[var(--line)]" />
-        <span className="text-2xs text-fg-faint">
-          {isSignup ? "or with email" : "or with a work email"}
-        </span>
+        <span className="text-2xs text-fg-faint">or with email</span>
         <span className="h-px flex-1 bg-[var(--line)]" />
       </div>
 
       <form
-        onSubmit={async (e) => {
+        onSubmit={(e) => {
           e.preventDefault();
-          setPending(true);
           setMessage(null);
-          try {
-            // One endpoint for both, because there is only one thing left
-            // to do here: find an existing member. Creating a workspace now
-            // happens on the way back from the identity provider, once
-            // somebody has proved the address is theirs — which is the thing
-            // this form never could.
-            const response = await fetch("/api/auth", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ email: email.trim().toLowerCase() }),
-            });
-            if (response.ok) {
-              router.push(next ?? "/app");
-              return;
-            }
-            const body = (await response.json().catch(() => ({}))) as { error?: string };
-            // A production deployment answers 501 here on purpose: email
-            // sign-in is a development path, and AuthKit is the way in.
-            setMessage(body.error ?? "That sign-in could not be completed.");
-          } catch {
-            setMessage("We could not reach the server. Check your connection and try again.");
-          } finally {
-            setPending(false);
-          }
+          // AuthKit's hosted pane with the address filled in: it asks for the
+          // password or sends the magic link, and proves the address is theirs.
+          start("authkit");
         }}
         className="space-y-3.5"
       >
@@ -194,20 +168,13 @@ export function AuthForm({
         />
 
         <Button type="submit" size="lg" className="w-full" disabled={pending}>
-          {pending ? "One moment…" : "Sign in"}
+          {pending ? "One moment…" : isSignup ? "Continue with email" : "Sign in"}
           {pending ? null : <Icon name="arrowRight" className="size-4" strokeWidth={2} />}
         </Button>
         <p className="text-2xs leading-relaxed text-fg-faint">
-          {/*
-            No password field, and that is deliberate rather than unfinished.
-            This build authenticates by single sign-on, with email-only entry
-            as a development convenience — so a password box would take a
-            credential nothing here can check, and leave somebody believing
-            it was protecting their account.
-          */}
-          Email-only entry is a development convenience, refused on production deployments —
-          there is no password to set. Use one of the buttons above to create a workspace: it is
-          made once your provider confirms the address is yours.
+          {isSignup
+            ? "Next you'll set a password or get a sign-in link by email."
+            : "Next you'll enter your password or get a sign-in link by email."}
         </p>
       </form>
 
