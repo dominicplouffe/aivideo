@@ -40,7 +40,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   return (
     <AppShell
       debug={debug}
-      staff={isStaff(actor)}
+      staff={await isStaff(actor)}
       usage={usage}
       viewer={viewer}
       // The ⌘K palette searched the seeded fixtures, so a workspace with no

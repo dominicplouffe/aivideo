@@ -15,7 +15,7 @@ export const metadata: Metadata = { title: "Admin" };
  * the route behind it.
  */
 export default async function AdminPage({ searchParams }: { searchParams: Promise<{ q?: string }> }) {
-  if (!isStaff(await getCurrentActor())) notFound();
+  if (!(await isStaff(await getCurrentActor()))) notFound();
 
   const { q = "" } = await searchParams;
   const workspaces = await listWorkspaces(q);

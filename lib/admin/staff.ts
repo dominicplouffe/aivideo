@@ -1,4 +1,7 @@
+import { eq } from "drizzle-orm";
 import type { Actor } from "@/lib/auth/authorize";
+import { getDb } from "@/lib/db/client";
+import * as s from "@/lib/db/schema";
 
 /**
  * DemoRiff staff: the people who run the service, as opposed to the owners
@@ -18,14 +21,26 @@ export function staffEmails(): Set<string> {
   );
 }
 
+/** The address test alone, without the workspace lookup. */
+export function listedAsStaff(actor: Pick<Actor, "email" | "deactivatedAt"> | null): boolean {
+  if (!actor || actor.deactivatedAt) return false;
+  return staffEmails().has(actor.email.trim().toLowerCase());
+}
+
 /**
  * Whether this member is staff.
  *
- * An address alone is not enough. A member provisioned by a customer's
- * directory carries whatever address that directory asserted, so a
- * directory account is never staff, however its address reads.
+ * An address alone is not enough. A workspace with single sign-on takes
+ * whatever address its customer's identity provider asserts, so a member of
+ * one is never staff, however its address reads. A self-serve workspace is
+ * only created for an address the provider says is verified.
  */
-export function isStaff(actor: Pick<Actor, "email" | "externalId" | "deactivatedAt"> | null): boolean {
-  if (!actor || actor.externalId || actor.deactivatedAt) return false;
-  return staffEmails().has(actor.email.trim().toLowerCase());
+export async function isStaff(actor: Pick<Actor, "email" | "deactivatedAt" | "workspaceId"> | null): Promise<boolean> {
+  if (!listedAsStaff(actor)) return false;
+  const [connection] = await getDb()
+    .select({ id: s.ssoConnections.id })
+    .from(s.ssoConnections)
+    .where(eq(s.ssoConnections.workspaceId, actor!.workspaceId))
+    .limit(1);
+  return !connection;
 }

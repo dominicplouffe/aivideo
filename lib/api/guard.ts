@@ -53,7 +53,7 @@ export async function requireStaff(request: Request): Promise<{ actor: Actor } |
   const notFound = { response: NextResponse.json({ error: "Not found." }, { status: 404 }) };
   try {
     const actor = await resolveActor(request);
-    return isStaff(actor) ? { actor } : notFound;
+    return (await isStaff(actor)) ? { actor } : notFound;
   } catch (error) {
     if (error instanceof UnauthenticatedError) return notFound;
     throw error;
