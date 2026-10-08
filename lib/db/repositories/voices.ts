@@ -214,3 +214,17 @@ export async function listVoicesForWorkspace(workspaceId: string): Promise<Voice
     .where(or(isNull(s.voices.workspaceId), eq(s.voices.workspaceId, workspaceId)));
   return rows.map(toVoice);
 }
+
+/**
+ * The voice a project gets when it has a script nobody spoke: the first
+ * studio voice the workspace has synced, or any voice it can use. Null is
+ * fine too; the project opens and a voice is picked by hand.
+ */
+export async function defaultVoiceFor(workspaceId: string): Promise<VoiceRecord | null> {
+  const voices = await listVoicesForWorkspace(workspaceId);
+  return (
+    voices.find((v) => v.kind === "studio" && v.available && !v.revokedAt) ??
+    voices.find((v) => v.available && !v.revokedAt) ??
+    null
+  );
+}

@@ -37,7 +37,7 @@ function bare(word: string): string {
   return word.toLowerCase().replace(/[^a-z']/g, "");
 }
 
-function endsSentence(word: string): boolean {
+export function endsSentence(word: string): boolean {
   return /[.!?]["')\]]?$/.test(word.trim());
 }
 

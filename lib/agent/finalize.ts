@@ -3,7 +3,7 @@ import type { OutlineStep, Run } from "./run";
 import type { StepTiming } from "./driver";
 import { createProject, replaceSegments, saveVoice, setProjectStatus } from "@/lib/db/repositories/projects";
 import { attachMedia, attachStillness, createRecording, mediaKeyFor } from "@/lib/db/repositories/recordings";
-import { listVoicesForWorkspace } from "@/lib/db/repositories/voices";
+import { defaultVoiceFor } from "@/lib/db/repositories/voices";
 import { titleFor, type SegmentDraft } from "@/lib/pipeline/segment";
 import { detectStillness } from "@/lib/pipeline/stillness";
 import { probe } from "@/lib/render/ffmpeg";
@@ -115,10 +115,8 @@ export async function finalizeRun(input: {
   await replaceSegments(project.id, drafts);
   await setProjectStatus(project.id, "ready", { durationSec });
 
-  // A voice, so "Hear it narrated" works the moment the project opens. The
-  // first studio voice the workspace has synced; none is fine too.
-  const voices = await listVoicesForWorkspace(run.workspaceId).catch(() => []);
-  const voice = voices.find((v) => v.kind === "studio" && v.available && !v.revokedAt) ?? voices.find((v) => v.available && !v.revokedAt);
+  // A voice, so "Hear it narrated" works the moment the project opens.
+  const voice = await defaultVoiceFor(run.workspaceId).catch(() => null);
   if (voice) await saveVoice(run.workspaceId, project.id, voice.id).catch(() => false);
 
   return { recordingId: recording.id, projectId: project.id };

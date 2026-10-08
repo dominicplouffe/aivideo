@@ -2,7 +2,8 @@ import { NextResponse } from "next/server";
 import { isDatabaseConfigured } from "@/lib/db/client";
 import { needsDatabase, requireActor } from "@/lib/api/guard";
 import { attachMedia, getRecording, mediaKeyFor } from "@/lib/db/repositories/recordings";
-import { getStorage } from "@/lib/storage";
+import { getStorage, type StorageAdapter, type StorageKey } from "@/lib/storage";
+import { MEDIA_SNIFF_BYTES, sniffMediaType } from "@/lib/storage/media-type";
 import { mediaResponse } from "@/lib/api/media";
 import { recordQuietly } from "@/lib/audit/log";
 
@@ -28,6 +29,25 @@ export const dynamic = "force-dynamic";
 const MAX_BYTES = 512 * 1024 * 1024;
 
 type Context = { params: Promise<{ id: string }> };
+
+/**
+ * Types already sniffed, by key. A player sends a range request for every
+ * seek, and a take's container does not change under it.
+ */
+const sniffed = new Map<string, string>();
+
+async function contentTypeOf(storage: StorageAdapter, key: StorageKey): Promise<string> {
+  const cacheKey = `${key.workspaceId}/${key.path}`;
+  const known = sniffed.get(cacheKey);
+  if (known) return known;
+  const head = storage.getRange
+    ? await storage.getRange(key, 0, MEDIA_SNIFF_BYTES - 1).catch(() => null)
+    : null;
+  // WebM is what the recorder writes, so it stays the answer for anything unrecognised.
+  const type = (head && sniffMediaType(head)) ?? "video/webm";
+  sniffed.set(cacheKey, type);
+  return type;
+}
 
 export async function PUT(request: Request, context: Context) {
   if (!isDatabaseConfigured()) return needsDatabase();
@@ -139,7 +159,7 @@ export async function GET(request: Request, context: Context) {
     storage,
     key,
     totalBytes: stat.bytes,
-    contentType: "video/webm",
+    contentType: await contentTypeOf(storage, key),
     request,
     // Private: this is a recording of a customer's product, and a shared
     // cache is somewhere it must never sit.

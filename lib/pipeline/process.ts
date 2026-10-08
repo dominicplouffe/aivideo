@@ -6,10 +6,15 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { getRecording, setStatus, attachStillness, attachTranscript } from "@/lib/db/repositories/recordings";
 import { detectStillness } from "./stillness";
-import { replaceSegments, setProjectStatus } from "@/lib/db/repositories/projects";
+import { replaceSegments, saveVoice, setProjectStatus } from "@/lib/db/repositories/projects";
+import { defaultVoiceFor } from "@/lib/db/repositories/voices";
 import { getStorage } from "@/lib/storage";
+import { sniffMediaType } from "@/lib/storage/media-type";
 import { providersFor } from "@/lib/providers/for-workspace";
-import { editedDuration, segmentTranscript } from "./segment";
+import type { TranscriptionResult } from "@/lib/providers/types";
+import { probe, type ProbeResult } from "@/lib/render/ffmpeg";
+import { editedDuration, segmentTranscript, type SegmentDraft } from "./segment";
+import { chaptersFromCaptions, readCaptions, wordsFromChapters } from "./captions";
 import { applyGlossary, keytermsFor } from "./glossary";
 import { listGlossary } from "@/lib/db/repositories/glossary";
 
@@ -31,16 +36,37 @@ export type ProcessOutcome =
   | { ok: true; segments: number; durationSec: number; provider: string; words: number }
   | { ok: false; reason: string };
 
-async function measureStillness(recordingId: string, bytes: Uint8Array): Promise<void> {
-  const dir = await mkdtemp(path.join(tmpdir(), "demoriff-still-"));
+async function measureStillness(recordingId: string, file: string): Promise<void> {
   try {
-    const file = path.join(dir, "take.webm");
-    await writeFile(file, bytes);
     await attachStillness(recordingId, await detectStillness(file));
   } catch (error) {
     console.warn(`[process] stillness not measured for ${recordingId}:`, error instanceof Error ? error.message : error);
-  } finally {
-    await rm(dir, { recursive: true, force: true });
+  }
+}
+
+/** A duration that means something: ffprobe reports N/A for some takes, and a browser Infinity. */
+function measured(seconds: number | null | undefined): number {
+  return typeof seconds === "number" && Number.isFinite(seconds) && seconds > 0 ? seconds : 0;
+}
+
+/**
+ * Chapters from captions drawn into the picture, when nothing was said.
+ *
+ * Best effort: a take whose captions could not be read still imports, as
+ * silent footage, rather than failing over a feature it may not need.
+ */
+async function captionChapters(
+  file: string,
+  durationSec: number,
+  anthropicKey: string | null,
+  recordingId: string,
+): Promise<SegmentDraft[]> {
+  if (!anthropicKey || durationSec <= 0) return [];
+  try {
+    return chaptersFromCaptions(await readCaptions(file, durationSec, { apiKey: anthropicKey }), durationSec);
+  } catch (error) {
+    console.warn(`[process] captions not read for ${recordingId}:`, error instanceof Error ? error.message : error);
+    return [];
   }
 }
 
@@ -69,7 +95,12 @@ export async function processProject(
     return { ok: false, reason: "That recording's media never finished uploading." };
   }
 
-  const { providers } = await providersFor(workspaceId);
+  const { providers, anthropic } = await providersFor(workspaceId);
+
+  // The take on disk once, for every tool here that reads a file. Removed
+  // only after the stillness pass, which outlives this request on purpose.
+  let dir: string | null = null;
+  let stillness: Promise<void> = Promise.resolve();
 
   try {
     await setStatus(recording.id, "transcribing");
@@ -81,23 +112,48 @@ export async function processProject(
     // of this that works everywhere, and the only one that does not require
     // publishing a customer's screen to fetch it back.
     const bytes = await getStorage().get({ workspaceId, path: recording.mediaKey });
+    dir = await mkdtemp(path.join(tmpdir(), "demoriff-take-"));
+    const file = path.join(dir, "take");
+    await writeFile(file, bytes);
 
     // Where the picture stands still, for fitting narration to it later.
     // Best effort: a machine without ffmpeg still gets a transcript, and the
     // retimer treats an unmeasured take as all motion.
-    void measureStillness(recording.id, bytes);
+    stillness = measureStillness(recording.id, file);
+
+    // What the file is, measured rather than assumed. An imported video
+    // arrives with no duration hint, and the transcriber reports a take with
+    // no audio track as zero seconds long — which, before this, became a
+    // project with nothing to play. Null without ffprobe; everything below
+    // copes.
+    const probed: ProbeResult | null = await probe(file).catch(() => null);
 
     // The workspace's own spellings: given to the transcriber so they come
     // back right, and applied to whatever still comes back wrong.
     const glossary = await listGlossary(workspaceId);
-    const heard = await providers.transcription.transcribe({
-      media: { bytes, contentType: "video/webm" },
-      keyterms: keytermsFor(glossary),
-    });
+    // Nothing to hear without an audio track, so nothing to send.
+    const heard: TranscriptionResult = probed && !probed.hasAudio
+      ? { language: "en", durationSec: 0, words: [] }
+      : await providers.transcription.transcribe({
+        media: { bytes, contentType: sniffMediaType(bytes) ?? "video/webm" },
+        keyterms: keytermsFor(glossary),
+      });
     const corrected = applyGlossary(heard.words, glossary);
-    const transcript = { ...heard, words: corrected.words };
 
-    const drafts = segmentTranscript(transcript);
+    // The transcript's duration first, then the file's, then the browser's
+    // hint: the browser measures a MediaRecorder blob whose header says
+    // nothing, and has been known to report `Infinity` for it.
+    const sourceDurationSec =
+      measured(heard.durationSec) || measured(probed?.durationSec) || measured(recording.durationSec);
+    let transcript: TranscriptionResult = { ...heard, durationSec: sourceDurationSec, words: corrected.words };
+
+    // Nothing said: the script may be in the picture instead.
+    const captioned = transcript.words.length === 0 && probed
+      ? await captionChapters(file, sourceDurationSec, anthropic.key, recording.id)
+      : [];
+    if (captioned.length > 0) transcript = { ...transcript, words: wordsFromChapters(captioned) };
+
+    const drafts = captioned.length > 0 ? captioned : segmentTranscript(transcript);
 
     await attachTranscript(recording.id, {
       language: transcript.language,
@@ -105,22 +161,23 @@ export async function processProject(
     });
     await replaceSegments(projectId, drafts);
 
-    // Prefer the transcript's duration over the browser's hint: the browser
-    // measures a MediaRecorder blob whose header says nothing, and has been
-    // known to report `Infinity` for it.
-    const sourceDurationSec =
-      transcript.durationSec > 0 ? transcript.durationSec : (recording.durationSec ?? 0);
-
     await getDb()
       .update(s.projects)
       .set({ sourceDurationSec, status: "ready", updatedAt: new Date() })
       .where(eq(s.projects.id, projectId));
 
+    // A script nobody spoke is one for a voice to read, so it gets one, as
+    // the agent's videos do. Left alone when somebody already chose.
+    if (captioned.length > 0 && !project.voiceId) {
+      const voice = await defaultVoiceFor(workspaceId).catch(() => null);
+      if (voice) await saveVoice(workspaceId, projectId, voice.id).catch(() => false);
+    }
+
     return {
       ok: true,
       segments: drafts.length,
       durationSec: editedDuration(drafts),
-      provider: providers.transcription.name,
+      provider: captioned.length > 0 ? "captions" : providers.transcription.name,
       words: transcript.words.length,
     };
   } catch (error) {
@@ -133,5 +190,8 @@ export async function processProject(
       ok: false,
       reason: error instanceof Error ? error.message : "Transcription failed.",
     };
+  } finally {
+    const made = dir;
+    if (made) void stillness.finally(() => rm(made, { recursive: true, force: true }));
   }
 }
