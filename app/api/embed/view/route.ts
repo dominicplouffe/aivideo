@@ -51,7 +51,7 @@ async function handle(request: Request) {
   try {
     const { getDb } = await import("@/lib/db/client");
     const s = await import("@/lib/db/schema");
-    const { eq } = await import("drizzle-orm");
+    const { and, eq, isNull } = await import("drizzle-orm");
 
     const [project] = await getDb()
       .select({
@@ -59,11 +59,11 @@ async function handle(request: Request) {
         sourceDurationSec: s.projects.sourceDurationSec,
       })
       .from(s.projects)
-      .where(eq(s.projects.id, projectId))
+      .where(and(eq(s.projects.id, projectId), isNull(s.projects.deletedAt)))
       .limit(1);
 
-    // An unknown demo id is not an error worth reporting to a beacon: it is
-    // a stale embed on a page somebody forgot about.
+    // An unknown or deleted demo id is not an error worth reporting to a
+    // beacon: it is a stale embed on a page somebody forgot about.
     if (!project) return new NextResponse(null, ACK);
 
     // The player reports its own length, because the finished duration is

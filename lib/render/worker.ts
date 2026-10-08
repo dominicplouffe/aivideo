@@ -354,6 +354,29 @@ async function assertVoicesUsable(edl: Edl): Promise<void> {
 }
 
 /**
+ * Refuses a render of a project deleted after it was queued.
+ *
+ * The job carries its own copy of the edit, so nothing else stops it: it
+ * would encode, be billed, and hand out a link to a video of something its
+ * owner has deleted. Checked before the encode for the same reason as the
+ * quota.
+ */
+async function assertProjectLive(job: Job, edl: Edl): Promise<void> {
+  if (!edl.projectId) return;
+
+  const { isDatabaseConfigured } = await import("@/lib/db/client");
+  if (!isDatabaseConfigured()) return;
+
+  const { isProjectDeleted } = await import("@/lib/db/repositories/projects");
+  if (!(await isProjectDeleted(job.workspaceId, edl.projectId))) return;
+
+  throw new ProviderError("Refusing to render: the project was deleted after this export was queued.", {
+    provider: "render-worker",
+    retryable: false,
+  });
+}
+
+/**
  * Refuses a render that a workspace's hard stop forbids.
  *
  * Checked here, before the encode, because refusing is only useful before
@@ -443,6 +466,7 @@ export async function processOne(options: RenderWorkerOptions): Promise<RenderOu
     const narrated = await (options.narrate ?? defaultNarrate)(job, edl, progress.narrating);
     if (narrated) edl = narrated.edl;
     await assertVoicesUsable(edl);
+    await assertProjectLive(job, edl);
     await assertQuota(job);
 
     const result = await renderEdl(edl, {

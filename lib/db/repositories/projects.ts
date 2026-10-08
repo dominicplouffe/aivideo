@@ -213,7 +213,7 @@ export async function getProjectBySlug(
   const rows = await getDb()
     .select()
     .from(s.projects)
-    .where(and(eq(s.projects.workspaceId, ws.id), eq(s.projects.slug, slug)))
+    .where(and(eq(s.projects.workspaceId, ws.id), eq(s.projects.slug, slug), isNull(s.projects.deletedAt)))
     .limit(1);
   const [project] = await hydrate(rows);
   return project ?? null;
@@ -246,7 +246,7 @@ export async function getProjectBySlugForWorkspace(
   const rows = await getDb()
     .select()
     .from(s.projects)
-    .where(and(eq(s.projects.workspaceId, workspaceId), eq(s.projects.slug, slug)))
+    .where(and(eq(s.projects.workspaceId, workspaceId), eq(s.projects.slug, slug), isNull(s.projects.deletedAt)))
     .limit(1);
   const [project] = await hydrate(rows);
   return project ?? null;
@@ -256,10 +256,47 @@ export async function getProjectById(workspaceId: string, id: string): Promise<P
   const rows = await getDb()
     .select()
     .from(s.projects)
-    .where(and(eq(s.projects.id, id), eq(s.projects.workspaceId, workspaceId)))
+    .where(and(eq(s.projects.id, id), eq(s.projects.workspaceId, workspaceId), isNull(s.projects.deletedAt)))
     .limit(1);
   const [project] = await hydrate(rows);
   return project ?? null;
+}
+
+/**
+ * Deletes a project, as far as anybody using the product can tell.
+ *
+ * The row stays, marked, and every read skips it: the Studio, the library,
+ * the share page and the plan's project count all lose it at once. Its
+ * recording and renders stay on disk until a purge removes them, so a
+ * project deleted by mistake can still be recovered by hand, and a copy
+ * made from it keeps the recording it shares. Null when there was no such
+ * project, or it was already gone.
+ */
+export async function deleteProject(
+  workspaceId: string,
+  projectId: string,
+): Promise<{ id: string; title: string; slug: string } | null> {
+  const [deleted] = await getDb()
+    .update(s.projects)
+    .set({ deletedAt: new Date(), updatedAt: new Date() })
+    .where(and(eq(s.projects.id, projectId), eq(s.projects.workspaceId, workspaceId), isNull(s.projects.deletedAt)))
+    .returning({ id: s.projects.id, title: s.projects.title, slug: s.projects.slug });
+  return deleted ?? null;
+}
+
+/**
+ * Whether a project was deleted. False for one that was never there: a job
+ * that names a project this database has not seen is not one somebody
+ * deleted, and the render worker treats the two differently.
+ */
+export async function isProjectDeleted(workspaceId: string, projectId: string): Promise<boolean> {
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(projectId)) return false;
+  const [row] = await getDb()
+    .select({ deletedAt: s.projects.deletedAt })
+    .from(s.projects)
+    .where(and(eq(s.projects.id, projectId), eq(s.projects.workspaceId, workspaceId)))
+    .limit(1);
+  return Boolean(row?.deletedAt);
 }
 
 /** Projects whose locales have fallen behind their source. */
@@ -431,7 +468,7 @@ export async function saveEditState(
   const [updated] = await getDb()
     .update(s.projects)
     .set({ editState, updatedAt: new Date() })
-    .where(and(eq(s.projects.id, projectId), eq(s.projects.workspaceId, workspaceId)))
+    .where(and(eq(s.projects.id, projectId), eq(s.projects.workspaceId, workspaceId), isNull(s.projects.deletedAt)))
     .returning({ id: s.projects.id });
   return Boolean(updated);
 }
@@ -472,7 +509,7 @@ export async function saveVoice(
   const [updated] = await getDb()
     .update(s.projects)
     .set({ voiceId, updatedAt: new Date() })
-    .where(and(eq(s.projects.id, projectId), eq(s.projects.workspaceId, workspaceId)))
+    .where(and(eq(s.projects.id, projectId), eq(s.projects.workspaceId, workspaceId), isNull(s.projects.deletedAt)))
     .returning({ id: s.projects.id });
   return Boolean(updated);
 }

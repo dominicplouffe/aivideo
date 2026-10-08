@@ -1,6 +1,6 @@
 import { getDb } from "@/lib/db/client";
 import * as s from "@/lib/db/schema";
-import { eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -77,10 +77,10 @@ export async function processProject(
   const [project] = await getDb()
     .select()
     .from(s.projects)
-    .where(eq(s.projects.id, projectId))
+    .where(and(eq(s.projects.id, projectId), eq(s.projects.workspaceId, workspaceId), isNull(s.projects.deletedAt)))
     .limit(1);
 
-  if (!project || project.workspaceId !== workspaceId) {
+  if (!project) {
     return { ok: false, reason: "That project does not exist in this workspace." };
   }
   if (!project.recordingId) {

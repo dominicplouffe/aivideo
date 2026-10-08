@@ -120,6 +120,59 @@ function CopyButton({ projectId, tone }: { projectId: string; tone: "overlay" | 
   );
 }
 
+/**
+ * Deletes the project after a confirmation, then refreshes the library
+ * without it. Same shape as the copy button, and offered in every state: a
+ * take stuck processing is exactly the one somebody wants rid of.
+ */
+function DeleteButton({ projectId, title, tone }: { projectId: string; title: string; tone: "overlay" | "row" }) {
+  const router = useRouter();
+  const [state, setState] = useState<"idle" | "working" | "error">("idle");
+  const [problem, setProblem] = useState("");
+
+  return (
+    <button
+      type="button"
+      disabled={state === "working"}
+      aria-label={`Delete ${title}`}
+      title={state === "error" ? problem : "Delete this project"}
+      onClick={async (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        if (!window.confirm(`Delete "${title}"? It leaves your projects, and its share page and embeds stop working.`)) return;
+        setState("working");
+        try {
+          const response = await fetch(`/api/projects/${projectId}`, { method: "DELETE" });
+          if (!response.ok) {
+            const result = (await response.json().catch(() => ({}))) as { error?: string };
+            throw new Error(result.error ?? "The project could not be deleted.");
+          }
+          router.refresh();
+        } catch (error) {
+          setProblem(error instanceof Error ? error.message : "The project could not be deleted.");
+          setState("error");
+        }
+      }}
+      className={cn(
+        "inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-2xs font-medium transition-colors",
+        state === "error"
+          ? "border-rose-500/40 bg-rose-500/15 text-rose-200"
+          : tone === "overlay"
+            ? "border-white/15 bg-black/60 text-white/90 backdrop-blur-sm hover:bg-rose-600/80"
+            : "border-[var(--line)] bg-transparent text-fg-subtle hover:border-rose-500/40 hover:bg-rose-500/10 hover:text-rose-300",
+        state === "working" && "cursor-wait opacity-70",
+      )}
+    >
+      <Icon
+        name={state === "error" ? "alert" : "trash"}
+        className={cn("size-3", state === "working" && "animate-pulse")}
+        strokeWidth={2.2}
+      />
+      {state === "working" ? "Deleting…" : state === "error" ? "Delete failed" : "Delete"}
+    </button>
+  );
+}
+
 /** A stable hue per address, so two people never share an avatar colour. */
 function hueFor(email: string): number {
   return [...email].reduce((n, c) => (n * 31 + c.charCodeAt(0)) % 360, 7);
@@ -321,11 +374,10 @@ export function ProjectLibrary({
                       <span className="absolute top-2.5 left-2.5">
                         <StatusPill status={p.status} />
                       </span>
-                      {p.status !== "processing" ? (
-                        <span className="absolute top-2.5 right-2.5 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
-                          <CopyButton projectId={p.id} tone="overlay" />
-                        </span>
-                      ) : null}
+                      <span className="absolute top-2.5 right-2.5 flex gap-1.5 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+                        {p.status !== "processing" ? <CopyButton projectId={p.id} tone="overlay" /> : null}
+                        <DeleteButton projectId={p.id} title={p.title} tone="overlay" />
+                      </span>
                       {p.status === "failed" ? (
                         <span className="absolute right-2.5 bottom-2.5">
                           <RetryButton projectId={p.id} />
@@ -380,7 +432,7 @@ export function ProjectLibrary({
               <span className="w-20 text-right">Views</span>
               <span className="w-20 text-right">Completion</span>
               <span className="w-24 text-right">Updated</span>
-              <span className="w-20" aria-hidden />
+              <span className="w-40" aria-hidden />
             </div>
             <ul className="divide-y divide-[var(--line)]">
               {filtered.map((p) => (
@@ -408,10 +460,11 @@ export function ProjectLibrary({
                     <span className="w-24 text-right text-[0.75rem] text-fg-faint">
                       {relativeTime(p.updatedAt)}
                     </span>
-                    <span className="flex w-20 justify-end">
+                    <span className="flex w-40 justify-end gap-1.5">
                       {p.status !== "processing" ? (
                         <CopyButton projectId={p.id} tone="row" />
                       ) : null}
+                      <DeleteButton projectId={p.id} title={p.title} tone="row" />
                     </span>
                   </Link>
                 </li>

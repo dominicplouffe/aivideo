@@ -29,6 +29,9 @@ export async function GET(request: Request, context: Context) {
   const notFound = NextResponse.json({ error: "No such export." }, { status: 404 });
   if (!UUID.test(id) || !UUID.test(assetId)) return notFound;
 
+  // The project first: a deleted project's exports go with it.
+  const project = await getProjectById(guard.actor.workspaceId, id);
+  if (!project) return notFound;
   const asset = await getExport(guard.actor.workspaceId, id, assetId);
   if (!asset?.storageKey) return notFound;
 
@@ -43,8 +46,7 @@ export async function GET(request: Request, context: Context) {
   // redirect built from that sends the browser nowhere.
   const target = new URL(signed.url, siteOrigin(request));
   // Saved under the project's name rather than "render.mp4" every time.
-  const project = await getProjectById(guard.actor.workspaceId, id);
-  const base = project?.slug ?? "export";
+  const base = project.slug;
   target.searchParams.set("name", asset.kind === "guide" ? `${base}-guide.md` : `${base}.${key.split(".").pop()}`);
 
   const response = NextResponse.redirect(target, 302);

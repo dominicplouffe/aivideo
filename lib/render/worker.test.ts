@@ -232,6 +232,30 @@ describe("render worker", { skip: RUN ? false : "DATABASE_URL and ffmpeg are bot
     }
   });
 
+  it("refuses a render queued before its project was deleted, and bills nothing", async () => {
+    const db = getDb();
+    const { usage } = await import("@/lib/billing/metering");
+    const before = (await usage(WS)).usedSeconds;
+    const [project] = await db.insert(s.projects).values({
+      workspaceId: WS, slug: "deleted-later", title: "Deleted later", status: "ready",
+    }).returning();
+    try {
+      const sourcePath = await sourceVideo();
+      const { job } = await enqueue({
+        workspaceId: WS, kind: "render", payload: { edl: { ...edlFor(sourcePath), projectId: project.id } },
+      });
+      await db.update(s.projects).set({ deletedAt: new Date() }).where(eq(s.projects.id, project.id));
+
+      const outcome = await processOne({ workerId: "w1", scratchRoot: dir });
+      assert.equal(outcome?.status, "failed");
+      assert.match(outcome?.error ?? "", /project was deleted/);
+      assert.match((await getJob(job.id))?.lastError ?? "", /permanent:/);
+      assert.equal((await usage(WS)).usedSeconds, before);
+    } finally {
+      await db.delete(s.projects).where(eq(s.projects.id, project.id));
+    }
+  });
+
   it("announces a completed render when the submitter asked for one", async () => {
     const sourcePath = await sourceVideo();
     const { job } = await enqueue({

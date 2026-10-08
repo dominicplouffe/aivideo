@@ -2,11 +2,11 @@ import { NextResponse } from "next/server";
 import { sanitizeEditState } from "@/lib/api/edit-state";
 import { isDatabaseConfigured } from "@/lib/db/client";
 import { needsDatabase, requireActor } from "@/lib/api/guard";
-import { getProjectById, renameProject, saveBrandKit, saveEditState, saveVoice } from "@/lib/db/repositories/projects";
+import { deleteProject, getProjectById, renameProject, saveBrandKit, saveEditState, saveVoice } from "@/lib/db/repositories/projects";
 import { recordQuietly } from "@/lib/audit/log";
 
 /**
- * One project: read it, and save what the Studio did to it.
+ * One project: read it, save what the Studio did to it, and delete it.
  *
  * The Studio used to show "Saved" after a 650ms timeout and write nothing
  * anywhere — every decision a person made was lost on reload, including
@@ -162,4 +162,34 @@ export async function PATCH(request: Request, context: Context) {
   }
 
   return NextResponse.json(response);
+}
+
+/**
+ * Deletes a project. It leaves the library, the Studio and its share page at
+ * once, and stops counting against the plan; see `deleteProject` for what
+ * is kept behind the scenes. A second delete is a 404, not a second entry
+ * in the audit log.
+ */
+export async function DELETE(request: Request, context: Context) {
+  if (!isDatabaseConfigured()) return needsDatabase();
+
+  const guard = await requireActor(request, "project.delete");
+  if ("response" in guard) return guard.response;
+
+  const { id } = await context.params;
+  if (!UUID.test(id)) return NextResponse.json({ error: "No such project." }, { status: 404 });
+
+  const deleted = await deleteProject(guard.actor.workspaceId, id);
+  if (!deleted) return NextResponse.json({ error: "No such project." }, { status: 404 });
+
+  await recordQuietly({
+    workspaceId: guard.actor.workspaceId,
+    actor: guard.actor,
+    action: "project.deleted",
+    resourceType: "project",
+    resourceId: id,
+    metadata: { title: deleted.title, slug: deleted.slug },
+  });
+
+  return NextResponse.json({ deleted: true, id });
 }

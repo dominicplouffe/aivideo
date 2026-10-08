@@ -513,6 +513,28 @@ export function Studio({
     }
   }, [copying, dirty, project.id, router, state]);
 
+  /**
+   * Deletes the project after a confirmation and goes back to the library.
+   * Nothing is flushed first: the edit is going with the project.
+   */
+  const [deleting, setDeleting] = useState<"idle" | "working" | "error">("idle");
+  const remove = useCallback(async () => {
+    if (deleting === "working") return;
+    if (!window.confirm(`Delete "${project.title}"? It leaves your projects, and its share page and embeds stop working.`)) return;
+    setDeleting("working");
+    try {
+      const response = await fetch(`/api/projects/${project.id}`, { method: "DELETE" });
+      if (!response.ok) {
+        const result = (await response.json().catch(() => ({}))) as { error?: string };
+        throw new Error(result.error ?? "The project could not be deleted.");
+      }
+      router.push("/app/projects");
+    } catch (error) {
+      setDeleting("error");
+      console.error("[studio] delete failed:", error);
+    }
+  }, [deleting, project.id, project.title, router]);
+
   const chooseBrandKit = useCallback(
     async (next: string | null) => {
       const previous = brandKitId;
@@ -850,6 +872,23 @@ export function Studio({
             />
             <span className="hidden sm:inline">
               {copying === "working" ? "Copying…" : copying === "error" ? "Copy failed" : "Make a copy"}
+            </span>
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={remove}
+            disabled={deleting === "working"}
+            title={deleting === "error" ? "The delete failed. Try again." : "Delete this project"}
+            className={cn("hover:text-rose-300", deleting === "error" && "text-rose-300")}
+          >
+            <Icon
+              name={deleting === "error" ? "alert" : "trash"}
+              className={cn("size-4", deleting === "working" && "animate-pulse")}
+              strokeWidth={1.8}
+            />
+            <span className="hidden sm:inline">
+              {deleting === "working" ? "Deleting…" : deleting === "error" ? "Delete failed" : "Delete"}
             </span>
           </Button>
           <Button href={`/d/${project.slug}`} variant="ghost" size="sm">

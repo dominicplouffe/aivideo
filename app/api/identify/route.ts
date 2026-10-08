@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { getDb, isDatabaseConfigured } from "@/lib/db/client";
 import * as s from "@/lib/db/schema";
 import { attachToSession, identify, plausibleEmail, verifyPersonalLink } from "@/lib/analytics/identity";
@@ -47,11 +47,14 @@ export async function POST(request: Request) {
   if (!slug) return NextResponse.json({ error: "slug is required." }, { status: 400 });
 
   const db = getDb();
-  const [asset] = await db
-    .select()
+  // Joined to a live project: a deleted project's share link identifies nobody.
+  const [found] = await db
+    .select({ asset: s.assets })
     .from(s.assets)
+    .innerJoin(s.projects, and(eq(s.projects.id, s.assets.projectId), isNull(s.projects.deletedAt)))
     .where(eq(s.assets.publicSlug, slug))
     .limit(1);
+  const asset = found?.asset;
 
   if (!asset) return NextResponse.json({ error: "No such asset." }, { status: 404 });
 

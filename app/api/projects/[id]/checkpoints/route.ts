@@ -19,6 +19,9 @@ export async function GET(request: Request, context: Context) {
   const guard = await requireActor(request, "project.view");
   if ("response" in guard) return guard.response;
   const { id } = await context.params;
+  // A deleted project's history goes with it.
+  const project = await getProjectById(guard.actor.workspaceId, id).catch(() => null);
+  if (!project) return NextResponse.json({ error: "No such project." }, { status: 404 });
   const data = (await listCheckpoints(guard.actor.workspaceId, id)).map(({ editState: _state, ...rest }) => {
     void _state;
     return rest;

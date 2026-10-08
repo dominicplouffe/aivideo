@@ -1,5 +1,5 @@
 import "server-only";
-import { and, asc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { getDb } from "../client";
 import * as s from "../schema";
 
@@ -67,7 +67,7 @@ export async function listLocalesForProject(
     .select({ locale: s.locales })
     .from(s.locales)
     .innerJoin(s.projects, eq(s.projects.id, s.locales.projectId))
-    .where(and(eq(s.projects.workspaceId, workspaceId), eq(s.locales.projectId, projectId)))
+    .where(and(eq(s.projects.workspaceId, workspaceId), eq(s.locales.projectId, projectId), isNull(s.projects.deletedAt)))
     .orderBy(asc(s.locales.code));
 
   return rows.map((row) => toLocale(row.locale));
@@ -144,7 +144,7 @@ export async function removeLocale(workspaceId: string, localeId: string): Promi
     .select({ id: s.locales.id })
     .from(s.locales)
     .innerJoin(s.projects, eq(s.projects.id, s.locales.projectId))
-    .where(and(eq(s.locales.id, localeId), eq(s.projects.workspaceId, workspaceId)))
+    .where(and(eq(s.locales.id, localeId), eq(s.projects.workspaceId, workspaceId), isNull(s.projects.deletedAt)))
     .limit(1);
   if (!owned) return false;
 

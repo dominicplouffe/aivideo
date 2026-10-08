@@ -4,7 +4,10 @@ import { eq } from "drizzle-orm";
 import { closeDb, getDb, isDatabaseConfigured } from "@/lib/db/client";
 import * as s from "@/lib/db/schema";
 import { eraseWorkspace } from "@/lib/db/erase";
-import { copyTitle, createProject, duplicateProject, getProjectById, replaceSegments } from "./projects";
+import {
+  copyTitle, createProject, deleteProject, duplicateProject, getProjectById, getProjectBySlugForWorkspace,
+  listProjectsForWorkspace, replaceSegments,
+} from "./projects";
 
 /**
  * A copy exists so somebody can try a different cut without risking the one
@@ -102,5 +105,59 @@ describe("duplicateProject", { skip: !RUN && "DATABASE_URL not set" }, () => {
     const outcome = await duplicateProject("77777777-7777-4777-8777-777777777777", "00000000-0000-4000-8000-000000000000", null);
     assert.equal(outcome.ok, false);
     if (!outcome.ok) assert.equal(outcome.status, 404);
+  });
+});
+
+describe("deleteProject", { skip: !RUN && "DATABASE_URL not set" }, () => {
+  const DEL_WS = "68686868-6868-4868-8868-686868686868";
+  const OTHER_WS = "69696969-6969-4969-8969-696969696969";
+
+  before(async () => {
+    const db = getDb();
+    await eraseWorkspace(DEL_WS, "test setup");
+    await eraseWorkspace(OTHER_WS, "test setup");
+    await db.insert(s.workspaces).values([
+      { id: DEL_WS, slug: "delete-test", name: "Delete Test" },
+      { id: OTHER_WS, slug: "delete-test-other", name: "Delete Test Other" },
+    ]);
+  });
+  after(async () => {
+    await eraseWorkspace(DEL_WS, "test teardown");
+    await eraseWorkspace(OTHER_WS, "test teardown");
+    await closeDb();
+  });
+
+  it("takes the project out of every lookup, and keeps the row and its recording", async () => {
+    const db = getDb();
+    const [recording] = await db.insert(s.recordings).values({
+      workspaceId: DEL_WS, source: "upload", status: "ready", mediaKey: `${DEL_WS}/take.webm`, durationSec: 30,
+    }).returning();
+    const project = await createProject({ workspaceId: DEL_WS, recordingId: recording.id, ownerId: null, title: "Old demo" });
+    const kept = await createProject({ workspaceId: DEL_WS, recordingId: recording.id, ownerId: null, title: "Keeper" });
+
+    const deleted = await deleteProject(DEL_WS, project.id);
+    assert.deepEqual(deleted, { id: project.id, title: "Old demo", slug: project.slug });
+
+    assert.equal(await getProjectById(DEL_WS, project.id), null);
+    assert.equal(await getProjectBySlugForWorkspace(DEL_WS, project.slug), null);
+    assert.deepEqual((await listProjectsForWorkspace(DEL_WS)).map((p) => p.id), [kept.id]);
+
+    const [row] = await db.select().from(s.projects).where(eq(s.projects.id, project.id));
+    assert.ok(row.deletedAt, "the row is marked, not removed");
+    const [take] = await db.select().from(s.recordings).where(eq(s.recordings.id, recording.id));
+    assert.equal(take.deletedAt, null, "the recording stays: another project may share it");
+    assert.ok(await getProjectById(DEL_WS, kept.id), "a project sharing the take is untouched");
+  });
+
+  it("deletes once: a second delete finds nothing", async () => {
+    const project = await createProject({ workspaceId: DEL_WS, recordingId: null, ownerId: null, title: "Twice" });
+    assert.ok(await deleteProject(DEL_WS, project.id));
+    assert.equal(await deleteProject(DEL_WS, project.id), null);
+  });
+
+  it("cannot delete another workspace's project", async () => {
+    const theirs = await createProject({ workspaceId: OTHER_WS, recordingId: null, ownerId: null, title: "Theirs" });
+    assert.equal(await deleteProject(DEL_WS, theirs.id), null);
+    assert.ok(await getProjectById(OTHER_WS, theirs.id));
   });
 });

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { isDatabaseConfigured } from "@/lib/db/client";
 import { needsDatabase, requireActor } from "@/lib/api/guard";
 import { listAssets } from "@/lib/db/repositories/assets";
+import { getProjectById } from "@/lib/db/repositories/projects";
 import { getStorage } from "@/lib/storage";
 
 /**
@@ -15,6 +16,7 @@ import { getStorage } from "@/lib/storage";
 export const dynamic = "force-dynamic";
 
 const SCREENSHOT_TTL_SECONDS = 60 * 60;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 interface StoredGuide {
   title: string;
@@ -31,6 +33,10 @@ export async function GET(request: Request, context: Context) {
   if ("response" in guard) return guard.response;
 
   const { id } = await context.params;
+  // A project of this workspace that still exists; a deleted one's guide goes with it.
+  const project = UUID.test(id) ? await getProjectById(guard.actor.workspaceId, id) : null;
+  if (!project) return NextResponse.json({ error: "No such project." }, { status: 404 });
+
   const assets = await listAssets(id);
   const guide = assets.find(
     (asset) => asset.kind === "guide" && asset.workspaceId === guard.actor.workspaceId,
