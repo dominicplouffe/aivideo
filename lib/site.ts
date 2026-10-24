@@ -6,7 +6,7 @@ export const site = {
   url: "https://demoriff.com",
   tagline: "Studio-grade product demos from a rough screen recording",
   description:
-    "DemoRiff turns one raw screen recording into a polished product demo video, a narrated walkthrough, an interactive click-through, and a step-by-step guide — in 34 languages, on your brand, in minutes.",
+    "DemoRiff turns one raw screen recording into a directed product demo video and a step-by-step written guide, edited as text.",
   twitter: "@demoriff",
   supportEmail: "hello@demoriff.com",
   salesEmail: "sales@demoriff.com",
@@ -71,10 +71,9 @@ export const nav: {
     { title: "Demo Academy", href: "/academy", desc: "A free course on demos that actually convert.", icon: "graduation" },
     { title: "Help Center", href: "/docs", desc: "Guides, references and troubleshooting.", icon: "lifebuoy" },
     { title: "Developer API", href: "/docs/api", desc: "Render videos programmatically from your CI.", icon: "code" },
-    { title: "Customer Stories", href: "/customers", desc: "How teams cut production from weeks to minutes.", icon: "quote" },
     { title: "Changelog", href: "/changelog", desc: "Everything we shipped, every week.", icon: "lightning" },
     { title: "Integrations", href: "/integrations", desc: "42 tools that plug into the pipeline.", icon: "puzzle" },
-    { title: "Trust & Security", href: "/security", desc: "SOC 2 Type II, GDPR, and how we handle your frames.", icon: "shield" },
+    { title: "Trust & Security", href: "/security", desc: "How we handle your recordings, and what is not in place yet.", icon: "shield" },
   ],
 };
 
@@ -117,7 +116,6 @@ export const footerNav: FooterColumn[] = [
       { label: "Demo Academy", href: "/academy" },
       { label: "Help Center", href: "/docs" },
       { label: "Developer API", href: "/docs/api" },
-      { label: "Customer Stories", href: "/customers" },
       { label: "Changelog", href: "/changelog" },
       { label: "Integrations", href: "/integrations" },
       { label: "ROI Calculator", href: "/roi-calculator" },

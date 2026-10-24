@@ -78,7 +78,6 @@ export function SiteHeader() {
               <MenuTrigger label="Product" active={open === "product"} onEnter={() => hover("product")} onClick={() => setOpen(open === "product" ? null : "product")} />
               <MenuTrigger label="Solutions" active={open === "solutions"} onEnter={() => hover("solutions")} onClick={() => setOpen(open === "solutions" ? null : "solutions")} />
               <MenuTrigger label="Resources" active={open === "resources"} onEnter={() => hover("resources")} onClick={() => setOpen(open === "resources" ? null : "resources")} />
-              <TopLink href="/customers" onEnter={() => hover(null)}>Customers</TopLink>
               <TopLink href="/pricing" onEnter={() => hover(null)}>Pricing</TopLink>
             </nav>
           </div>
@@ -148,9 +147,6 @@ export function SiteHeader() {
                 <MobileLink key={item.href} {...item} />
               ))}
             </MobileGroup>
-            <Link href="/customers" className="rounded-xl px-3 py-3 text-[0.9375rem] font-medium hover:bg-ink-850">
-              Customers
-            </Link>
             <Link href="/pricing" className="rounded-xl px-3 py-3 text-[0.9375rem] font-medium hover:bg-ink-850">
               Pricing
             </Link>
@@ -294,20 +290,20 @@ function SolutionsMenu() {
       <div className="surface-card flex flex-col justify-between rounded-2xl p-5">
         <div>
           <p className="font-mono text-2xs tracking-[0.16em] text-fg-faint uppercase">
-            Customer story
+            Free plan
           </p>
           <p className="mt-2 text-[0.9375rem] leading-snug font-medium text-fg-strong">
-            “We replaced a two-week agency cycle with a Tuesday afternoon.”
+            Ten video minutes a month. No card.
           </p>
           <p className="mt-2 text-[0.8125rem] text-fg-subtle">
-            Priya Raman, VP Product Marketing at Northwind
+            Record one flow and see what comes back.
           </p>
         </div>
         <Link
-          href="/customers/northwind"
+          href="/signup"
           className="mt-5 inline-flex items-center gap-1.5 text-[0.8125rem] font-medium text-iris-300 hover:text-iris-400"
         >
-          Read the story
+          Start free
           <Icon name="arrowRight" className="size-3.5" strokeWidth={2} />
         </Link>
       </div>

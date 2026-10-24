@@ -58,17 +58,17 @@ export default function OpengraphImage() {
             Your product deserves better than a screen recording.
           </div>
           <div style={{ fontSize: 28, lineHeight: 1.4, color: "#A7AFC2", maxWidth: 880 }}>
-            One recording becomes a directed demo video, a clickable tour, a written guide and a set
-            of social cuts — on your brand, in 34 languages.
+            One rough screen recording becomes a directed demo video and a step-by-step written
+            guide, edited as text.
           </div>
         </div>
 
         <div style={{ display: "flex", alignItems: "center", gap: 36, fontSize: 22, color: "#737D93" }}>
-          <div style={{ display: "flex" }}>11 min record-to-publish</div>
+          <div style={{ display: "flex" }}>Record once</div>
           <div style={{ display: "flex" }}>·</div>
-          <div style={{ display: "flex" }}>34 languages</div>
+          <div style={{ display: "flex" }}>Edit as text</div>
           <div style={{ display: "flex" }}>·</div>
-          <div style={{ display: "flex" }}>SOC 2 Type II</div>
+          <div style={{ display: "flex" }}>Share or embed</div>
           <div style={{ display: "flex", marginLeft: "auto", color: "#A7AFC2" }}>{site.domain}</div>
         </div>
       </div>

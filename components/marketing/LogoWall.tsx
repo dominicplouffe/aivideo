@@ -7,13 +7,14 @@ import { customers } from "@/lib/marketing-data";
  */
 export function LogoWall({
   className,
-  label = "Trusted by product teams shipping software people actually understand",
+  label = null,
   marquee = true,
 }: {
   className?: string;
   label?: string | null;
   marquee?: boolean;
 }) {
+  if (customers.length === 0) return null;
   const row = [...customers, ...customers];
   return (
     <div className={cn("relative", className)}>

@@ -9,17 +9,14 @@ import { FaqList } from "@/components/marketing/Faq";
 export const metadata: Metadata = pageMetadata({
   title: "Trust & Security",
   description:
-    "SOC 2 Type II, GDPR, zero model training on customer content, regional processing, private rendering, SSO, SCIM and audit log streaming. How DemoRiff handles your recordings.",
+    "How DemoRiff handles your recordings: what is in place today, and which certifications we do not hold yet.",
   path: "/security",
 });
 
 const certifications = [
-  { name: "SOC 2 Type II", body: "Audited annually by an independent firm. Report available under NDA.", status: "Current" },
-  { name: "ISO 27001", body: "Certified information security management system.", status: "Current" },
-  { name: "GDPR", body: "DPA with Standard Contractual Clauses, EU representative appointed.", status: "Compliant" },
-  { name: "CCPA / CPRA", body: "Consumer rights honoured for all California residents.", status: "Compliant" },
-  { name: "HIPAA", body: "BAA available on Enterprise for covered entities.", status: "Available" },
-  { name: "VPAT / WCAG 2.2 AA", body: "Accessibility conformance report for the app and player.", status: "Current" },
+  { name: "SOC 2", body: "No audit has been carried out. We will publish the report here when one is complete.", status: "Not held" },
+  { name: "ISO 27001", body: "Not certified.", status: "Not held" },
+  { name: "HIPAA", body: "No BAA is offered. Please do not upload protected health information.", status: "Not offered" },
 ];
 
 const pillars: { title: string; icon: IconName; body: string; points: string[] }[] = [
@@ -100,7 +97,7 @@ const pillars: { title: string; icon: IconName; body: string; points: string[] }
 const practices = [
   { label: "Penetration testing", value: "Annual third-party test plus continuous automated scanning. Summary report available." },
   { label: "Vulnerability disclosure", value: "Public programme at demoriff.com/security/disclosure with a 90-day coordinated window." },
-  { label: "Uptime", value: "99.98% trailing twelve months. 99.9% SLA on Enterprise. Public status page." },
+  { label: "Uptime", value: "No uptime figure or SLA is published yet. We will publish one with a public status page." },
   { label: "Backups", value: "Continuous replication, point-in-time recovery to 35 days, quarterly restore drills." },
   { label: "Business continuity", value: "Multi-region failover with a 4-hour RTO and 15-minute RPO." },
   { label: "Employee access", value: "Least privilege, hardware-key MFA, quarterly access review, no standing production access." },
@@ -149,7 +146,7 @@ export default function SecurityPage() {
               was built the other way round.
             </p>
             <div className="mt-8 flex flex-col gap-3 sm:flex-row">
-              <Button href="/contact?topic=security" size="md">Request the SOC 2 report</Button>
+              <Button href="/contact?topic=security" size="md">Ask a security question</Button>
               <Button href="/legal/dpa" variant="outline" size="md">Read the DPA</Button>
             </div>
           </div>
