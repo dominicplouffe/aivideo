@@ -73,6 +73,7 @@ export function AuthForm({
   title,
   subtitle,
   initialEmail = "",
+  ticks,
 }: {
   mode: "signin" | "signup";
   error?: string;
@@ -81,6 +82,8 @@ export function AuthForm({
   title?: string;
   subtitle?: string;
   initialEmail?: string;
+  /** In place of the default sign-up ticks, for a page that must say less. */
+  ticks?: string[];
 }) {
   const [email, setEmail] = useState(initialEmail);
   const [pending, setPending] = useState(false);
@@ -191,13 +194,13 @@ export function AuthForm({
         </p>
       </form>
 
-      {isSignup && !title ? (
+      {isSignup && (ticks || !title) ? (
         <ul className="mt-6 space-y-2">
-          {[
+          {(ticks ?? [
             "10 AI video minutes every month",
             "Unlimited step-by-step guides",
             "Every AI feature unlocked",
-          ].map((f) => (
+          ]).map((f) => (
             <li key={f} className="flex items-center gap-2.5 text-[0.8125rem] text-fg-subtle">
               <Icon name="check" className="size-3.5 shrink-0 text-mint-400" strokeWidth={2.6} />
               {f}

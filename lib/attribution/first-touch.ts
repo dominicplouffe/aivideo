@@ -166,7 +166,7 @@ export function withFirstTouch(href: string, touch: FirstTouch | undefined, base
 
 /** Same-site paths whose links carry the first touch. */
 export function carriesFirstTouch(pathname: string): boolean {
-  return pathname === "/signup" || pathname === "/pricing";
+  return pathname === "/signup" || pathname === "/pricing" || pathname === "/record-once/start";
 }
 
 /** Stripe metadata pairs (`ft_` prefix; Stripe caps keys at 40 chars and values at 500). */
