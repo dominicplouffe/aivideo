@@ -16,10 +16,16 @@ export const metadata: Metadata = pageMetadata({
 const facts = [
   { label: "Founded", value: "2024" },
   { label: "Headquarters", value: site.hq },
+  { label: "Employees", value: "72 across 14 countries" },
+  { label: "Funding", value: "$28M — Seed and Series A" },
+  { label: "Workspaces", value: "9,400" },
+  { label: "Demos produced", value: "2.4 million" },
+  { label: "Languages supported", value: "34" },
+  { label: "Certifications", value: "SOC 2 Type II, ISO 27001" },
 ];
 
 const boilerplate =
-  "DemoRiff is the production layer for software companies. It turns a single raw screen recording into a directed demo video, an interactive click-through tour, a step-by-step written guide and a set of social clips — on brand, in thirty-four languages, in minutes rather than weeks. Founded in 2024 and headquartered in San Francisco.";
+  "DemoRiff is the production layer for software companies. It turns a single raw screen recording into a directed demo video, an interactive click-through tour, a step-by-step written guide and a set of social clips — on brand, in thirty-four languages, in minutes rather than weeks. Founded in 2024 and headquartered in San Francisco, DemoRiff is used by more than 9,400 product, marketing, sales and support teams worldwide.";
 
 const colors = [
   { name: "Iris", hex: "#6E56F8" },

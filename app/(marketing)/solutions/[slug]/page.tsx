@@ -185,10 +185,10 @@ export default async function SolutionDetailPage({
           <div className="grid gap-12 lg:grid-cols-[1fr_22rem] lg:gap-16">
             <div>
               <SectionHeader
-                eyebrow="From one recording"
+                eyebrow="Outcomes"
                 eyebrowIcon="trending"
                 align="left"
-                title="What you get"
+                title="What changes, measured"
                 className="mb-10"
               />
               <dl className="grid gap-8 sm:grid-cols-2">
@@ -202,7 +202,7 @@ export default async function SolutionDetailPage({
                 ))}
               </dl>
             </div>
-            {quote ? <Reveal delay={100}><TestimonialCard t={quote} /></Reveal> : null}
+            <Reveal delay={100}><TestimonialCard t={quote} /></Reveal>
           </div>
         </div>
       </Section>

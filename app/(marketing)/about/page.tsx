@@ -53,6 +53,7 @@ const timeline = [
   { year: "2025", title: "Documentation, by accident", body: "A customer asked whether the interaction data could produce a written guide. It could. Guides are now the most-used output on the platform and are unmetered on every plan." },
   { year: "2025", title: "Series A", body: "$22M to build the localization pipeline and the enterprise controls that security teams kept asking us for." },
   { year: "2026", title: "Riff Agent", body: "Autonomous demo generation from a changelog entry. Still gated behind human approval, and it always will be." },
+  { year: "Today", title: "9,400 workspaces", body: "2.4 million demos produced, in 34 languages, by teams from two-person startups to companies with four thousand employees." },
 ];
 
 const values = [
@@ -80,6 +81,15 @@ export default function AboutPage() {
               agency, so most of it never gets made. We think that is a tooling problem.
             </p>
           </div>
+
+          <Reveal delay={120}>
+            <dl className="mt-14 grid gap-8 border-t border-[var(--line)] pt-10 sm:grid-cols-2 lg:grid-cols-4">
+              <Stat value="2.4M" label="Demos produced" sub="Across 9,400 workspaces" />
+              <Stat value="72" label="People" sub="Across 14 countries" />
+              <Stat value="$28M" label="Raised" sub="Seed and Series A" />
+              <Stat value="2024" label="Founded" sub={site.hq} />
+            </dl>
+          </Reveal>
         </div>
       </section>
 

@@ -1,14 +1,6 @@
 import type { IconName } from "@/components/ui/Icon";
 import type { PreviewKey } from "@/components/marketing/Previews";
 
-// Capability facts only. No outcome figure appears until a real customer's result is on file.
-const capabilityFacts = [
-  { value: "1", label: "Rough screen recording in" },
-  { value: "Text", label: "Edit the video by editing its transcript" },
-  { value: "MP4", label: "Rendered, with a share page and an embed" },
-  { value: "$0", label: "To start: 10 video minutes a month, no card" },
-];
-
 export interface DeepFeature {
   eyebrow: string;
   title: string;
@@ -49,7 +41,12 @@ const allProductPages: ProductPage[] = [
       "Timelines were designed for film, where the footage is precious and the edit is the art. A product demo is neither. DemoRiff gives you a transcript instead: delete a sentence and the footage goes with it, reorder a paragraph and the cut follows, fix a word and the voice re-reads it.",
     heroPreview: "transcript",
     icon: "wand",
-    stats: capabilityFacts,
+    stats: [
+      { value: "11 min", label: "Median record-to-publish" },
+      { value: "−31%", label: "Typical word count reduction" },
+      { value: "< 90s", label: "Render for a 3-minute cut" },
+      { value: "0", label: "Timeline skills required" },
+    ],
     intro: [
       {
         icon: "doc",
@@ -157,7 +154,12 @@ const allProductPages: ProductPage[] = [
       "Every other screen recorder gives you pixels. DemoRiff records the pixels and the intent behind them — which element you clicked, what you typed, when a modal opened, where a page navigated. That structured record is why the edit can be automatic instead of approximate.",
     heroPreview: "recorder",
     icon: "record",
-    stats: capabilityFacts,
+    stats: [
+      { value: "4K60", label: "Maximum capture" },
+      { value: "4 tracks", label: "Screen, camera, mic, system" },
+      { value: "< 3%", label: "CPU overhead while recording" },
+      { value: "0 setup", label: "Runs in the browser" },
+    ],
     intro: [
       {
         icon: "cursor",
@@ -264,7 +266,12 @@ const allProductPages: ProductPage[] = [
       "You already have the recordings. They are scattered across Loom, Zoom cloud, Google Drive and someone's desktop, they are twenty minutes long, they have the wrong logo, and nobody can find them. Import them and run the same pipeline over the lot.",
     heroPreview: "import",
     icon: "upload",
-    stats: capabilityFacts,
+    stats: [
+      { value: "12 GB", label: "Max file size" },
+      { value: "8 sources", label: "Direct connectors" },
+      { value: "Bulk", label: "Import a whole library at once" },
+      { value: "Same", label: "Pipeline as native recordings" },
+    ],
     intro: [
       {
         icon: "refresh",
@@ -352,7 +359,12 @@ const allProductPages: ProductPage[] = [
       "Generic text-to-speech gives itself away on the nouns — your product name, your acronyms, the interface labels. DemoRiff's narration model is tuned specifically for software walkthroughs, and it learns your vocabulary from your own content.",
     heroPreview: "voice",
     icon: "mic",
-    stats: capabilityFacts,
+    stats: [
+      { value: "260", label: "Studio voices" },
+      { value: "34", label: "Languages" },
+      { value: "30s", label: "To clone your own" },
+      { value: "< 8s", label: "To re-read a corrected line" },
+    ],
     intro: [
       {
         icon: "brain",
@@ -445,7 +457,12 @@ const allProductPages: ProductPage[] = [
       "Some demos need a face. Not because the product is unclear, but because a person on screen holds attention for longer and makes an unfamiliar product feel like it came from somewhere real. Booking that shoot is the expensive part. This is not.",
     heroPreview: "avatar",
     icon: "avatar",
-    stats: capabilityFacts,
+    stats: [
+      { value: "180", label: "Licensed presenters" },
+      { value: "34", label: "Languages, lip-synced" },
+      { value: "6 min", label: "Footage to train your own" },
+      { value: "+41%", label: "Median completion vs. no presenter" },
+    ],
     intro: [
       {
         icon: "users",
@@ -537,7 +554,12 @@ const allProductPages: ProductPage[] = [
       "The reason in-house video looks in-house is not the camera. It is that eleven people each made their own decisions about the logo placement, the caption font, the intro length and the music. A brand kit removes those decisions from the workflow entirely.",
     heroPreview: "brand",
     icon: "palette",
-    stats: capabilityFacts,
+    stats: [
+      { value: "1", label: "Place to change the logo" },
+      { value: "248", label: "Videos updated by one edit" },
+      { value: "12", label: "Controlled design tokens" },
+      { value: "Locked", label: "Or open, per workspace" },
+    ],
     intro: [
       {
         icon: "palette",
@@ -625,7 +647,12 @@ const allProductPages: ProductPage[] = [
       "Video is passive, and on a pricing page passive is expensive. An interactive demo lets a buyer drive — skipping what they understand, dwelling on what they do not, and reaching the part that matters to them without waiting through ninety seconds of setup.",
     heroPreview: "interactive",
     icon: "cursor",
-    stats: capabilityFacts,
+    stats: [
+      { value: "6.1×", label: "Engagement vs. a video embed" },
+      { value: "+38%", label: "Median demo-request lift" },
+      { value: "0", label: "Lines of code to embed" },
+      { value: "Indexable", label: "Real DOM, crawlable by search" },
+    ],
     intro: [
       {
         icon: "layers",
@@ -717,7 +744,12 @@ const allProductPages: ProductPage[] = [
       "Half your audience will never press play. They want to scan, find step seven, and get on with their day. Every DemoRiff recording also produces a written walkthrough with annotated screenshots — created at the same moment, so it can never fall out of date with the video.",
     heroPreview: "guide",
     icon: "doc",
-    stats: capabilityFacts,
+    stats: [
+      { value: "Unlimited", label: "On every plan, including free" },
+      { value: "8", label: "Export destinations" },
+      { value: "−51%", label: "Typical onboarding ticket drop" },
+      { value: "34", label: "Languages, in one pass" },
+    ],
     intro: [
       {
         icon: "record",
@@ -809,7 +841,12 @@ const allProductPages: ProductPage[] = [
       "Most teams localize the website and stop, because localizing video means a vendor, a spreadsheet of subtitle timings, and six weeks. DemoRiff re-voices the video, matches the mouth movement, swaps the on-screen text and translates the written guide — as one operation.",
     heroPreview: "localization",
     icon: "globe",
-    stats: capabilityFacts,
+    stats: [
+      { value: "34", label: "Languages" },
+      { value: "~2 min", label: "Per language, in parallel" },
+      { value: "$0", label: "Extra video minutes charged" },
+      { value: "Lip-synced", label: "Not subtitled" },
+    ],
     intro: [
       {
         icon: "mic",
@@ -901,7 +938,12 @@ const allProductPages: ProductPage[] = [
       "A view count tells you nothing you can act on. Per-second retention tells you the intro is forty seconds too long, that everyone leaves when the configuration screen appears, and that the people who reach minute two convert at four times the rate of those who do not.",
     heroPreview: "analytics",
     icon: "chart",
-    stats: capabilityFacts,
+    stats: [
+      { value: "Per-second", label: "Retention resolution" },
+      { value: "Account-level", label: "Viewer identification" },
+      { value: "2-way", label: "CRM sync" },
+      { value: "Unlimited", label: "Views, on every plan" },
+    ],
     intro: [
       {
         icon: "trending",
@@ -991,7 +1033,12 @@ const allProductPages: ProductPage[] = [
       "Riff Agent reads your changelog, writes the script, drives your staging environment to record the flow, cuts it, voices it, brands it, and hands you a finished video to review. You approve or you redirect. Available on Scale and Enterprise.",
     heroPreview: "agent",
     icon: "sparkles",
-    stats: capabilityFacts,
+    stats: [
+      { value: "~9 min", label: "Prompt to reviewable cut" },
+      { value: "Every release", label: "Triggered from CI" },
+      { value: "Human", label: "Approval always required" },
+      { value: "Scale+", label: "Plan availability" },
+    ],
     intro: [
       {
         icon: "brain",

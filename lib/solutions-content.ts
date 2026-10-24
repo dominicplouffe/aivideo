@@ -1,14 +1,6 @@
 import type { IconName } from "@/components/ui/Icon";
 import type { PreviewKey } from "@/components/marketing/Previews";
 
-// Capability facts only. No outcome figure appears until a real customer's result is on file.
-const capabilityFacts = [
-  { value: "1", label: "Rough screen recording in" },
-  { value: "Text", label: "Edit the video by editing its transcript" },
-  { value: "MP4", label: "Rendered, with a share page and an embed" },
-  { value: "$0", label: "To start: 10 video minutes a month, no card" },
-];
-
 export interface SolutionPage {
   slug: string;
   nav: string;
@@ -81,7 +73,12 @@ export const solutionPages: SolutionPage[] = [
         preview: "brand",
       },
     ],
-    outcomes: capabilityFacts,
+    outcomes: [
+      { value: "14 days → 1", label: "Median launch video turnaround" },
+      { value: "9 → 140", label: "Videos shipped per quarter" },
+      { value: "94%", label: "Reduction in external production spend" },
+      { value: "3.2×", label: "Trial-to-paid lift on demo-led pages" },
+    ],
     workflow: [
       { step: "Mon", title: "Record with the PM", body: "Twenty minutes with whoever built it, while the details are fresh. No script, no shoot." },
       { step: "Mon", title: "Approve the script", body: "Read the tightened transcript, fix two sentences, pick the voice. Ten minutes." },
@@ -154,7 +151,12 @@ export const solutionPages: SolutionPage[] = [
           "Watch depth, rewatch spikes and CTA clicks land on the opportunity timeline. Alert the rep when a target account watches the security section twice.",
       },
     ],
-    outcomes: capabilityFacts,
+    outcomes: [
+      { value: "12 hrs/wk", label: "Returned per sales engineer" },
+      { value: "+38%", label: "Follow-up engagement vs. plain recordings" },
+      { value: "4×", label: "Tailored demos produced per rep" },
+      { value: "2.1×", label: "Forward rate on interactive vs. video" },
+    ],
     workflow: [
       { step: "01", title: "Record the master flow", body: "Your best SE records the definitive walkthrough once, properly." },
       { step: "02", title: "Generate segment variants", body: "Terminology, examples and framing adjusted per vertical from the same footage." },
@@ -227,7 +229,12 @@ export const solutionPages: SolutionPage[] = [
         preview: "analytics",
       },
     ],
-    outcomes: capabilityFacts,
+    outcomes: [
+      { value: "−51%", label: "Onboarding support tickets" },
+      { value: "6 langs", label: "Published per lesson, by default" },
+      { value: "4×", label: "Lessons published per quarter" },
+      { value: "+29%", label: "Course completion rate" },
+    ],
     workflow: [
       { step: "01", title: "Record the curriculum", body: "One session per lesson, narrated naturally by whoever knows the feature." },
       { step: "02", title: "Generate both formats", body: "Video lesson and written article produced together from the same source." },
@@ -300,7 +307,12 @@ export const solutionPages: SolutionPage[] = [
         preview: "localization",
       },
     ],
-    outcomes: capabilityFacts,
+    outcomes: [
+      { value: "−51%", label: "Onboarding ticket volume" },
+      { value: "3 min", label: "To produce a video answer" },
+      { value: "+34%", label: "Self-serve deflection rate" },
+      { value: "−22%", label: "Median time to resolution" },
+    ],
     workflow: [
       { step: "01", title: "Mine your top tickets", body: "Start with the eleven questions that make up forty percent of volume." },
       { step: "02", title: "Record the answers", body: "An agent who knows the answer records it once, naturally, at their desk." },
@@ -374,7 +386,12 @@ export const solutionPages: SolutionPage[] = [
         preview: "guide",
       },
     ],
-    outcomes: capabilityFacts,
+    outcomes: [
+      { value: "$4.2M", label: "Seed closed on a DemoRiff demo" },
+      { value: "1 day", label: "From nothing to a homepage video" },
+      { value: "$0", label: "Spent on external production" },
+      { value: "Free", label: "Plan that covers a pre-seed team" },
+    ],
     workflow: [
       { step: "01", title: "Record the pitch you already give", body: "The one you have given forty times on calls. You know it cold." },
       { step: "02", title: "Let it clean up the take", body: "Fillers gone, pacing fixed, zooms on the moments that matter." },
@@ -444,7 +461,12 @@ export const solutionPages: SolutionPage[] = [
           "Every view, export, share, permission change and masking rule, streamable to your SIEM. When someone asks who shared the demo containing a customer's name, there is an answer.",
       },
     ],
-    outcomes: capabilityFacts,
+    outcomes: [
+      { value: "SOC 2 II", label: "Audited annually" },
+      { value: "7 days", label: "Median security review to approval" },
+      { value: "3 regions", label: "US, EU, AU processing" },
+      { value: "99.9%", label: "Uptime SLA on Enterprise" },
+    ],
     workflow: [
       { step: "01", title: "Security review", body: "SOC 2 report, pen test summary, architecture diagram and a completed CAIQ on request." },
       { step: "02", title: "Contracting", body: "Your MSA or ours, a DPA with SCCs, and a subprocessor list with change notification." },

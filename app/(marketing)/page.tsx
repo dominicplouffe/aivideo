@@ -13,11 +13,13 @@ import {
 } from "@/components/ui/Primitives";
 import { Reveal } from "@/components/ui/Reveal";
 import { HeroCanvas } from "@/components/marketing/HeroCanvas";
+import { LogoWall } from "@/components/marketing/LogoWall";
 import { Pipeline } from "@/components/marketing/Pipeline";
 import { OutputShowcase } from "@/components/marketing/OutputShowcase";
 import { FaqList } from "@/components/marketing/Faq";
 import {
   CapabilityBento,
+  TestimonialGrid,
   SecurityStrip,
   LanguageCloud,
   IntegrationsStrip,
@@ -127,6 +129,13 @@ export default function HomePage() {
               ))}
             </dl>
           </Reveal>
+        </div>
+      </section>
+
+      {/* ================================================= LOGOS */}
+      <section className="pb-20 md:pb-24">
+        <div className="container-wide">
+          <LogoWall />
         </div>
       </section>
 
@@ -251,12 +260,12 @@ export default function HomePage() {
       <Section>
         <div className="container-wide">
           <SectionHeader
-            eyebrow="From one recording"
-            eyebrowIcon="check"
-            title="What you get from one rough take"
-            description="Record the flow you already know by heart. DemoRiff transcribes it, lets you edit the video by editing the text, and renders a finished MP4 you can share or embed."
+            eyebrow="Customers"
+            eyebrowIcon="quote"
+            title="Teams that stopped waiting on a video queue"
             className="mb-14"
           />
+          <TestimonialGrid limit={3} />
 
           <Reveal>
             <dl className="mt-16 grid gap-10 border-t border-[var(--line)] pt-12 sm:grid-cols-2 lg:grid-cols-4">
@@ -267,7 +276,7 @@ export default function HomePage() {
           </Reveal>
 
           <div className="mt-12 flex justify-center">
-            <TextLink href="/pricing">See plans and limits</TextLink>
+            <TextLink href="/customers">Read the customer stories</TextLink>
           </div>
         </div>
       </Section>

@@ -46,7 +46,7 @@ export default async function ProductDetailPage({
     .map((s) => getProductPage(s))
     .filter((p): p is NonNullable<typeof p> => Boolean(p));
 
-  const quote = testimonials.length ? testimonials[productPages.indexOf(page) % testimonials.length] : undefined;
+  const quote = testimonials[productPages.indexOf(page) % testimonials.length];
 
   return (
     <>
@@ -210,7 +210,7 @@ export default async function ProductDetailPage({
               </dl>
             </div>
             <Reveal delay={100}>
-              {quote ? <TestimonialCard t={quote} /> : null}
+              <TestimonialCard t={quote} />
             </Reveal>
           </div>
         </div>

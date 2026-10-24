@@ -151,6 +151,16 @@ export default function PricingPage() {
         </div>
       </Section>
 
+      {/* social proof */}
+      <Section className="py-16 md:py-20">
+        <div className="container-wide">
+          <LogoWall label="Teams that moved their whole video operation in-house" marquee={false} />
+          <div className="mt-16">
+            <TestimonialGrid limit={3} />
+          </div>
+        </div>
+      </Section>
+
       {/* faq */}
       <Section tone="raised">
         <div className="container-page">

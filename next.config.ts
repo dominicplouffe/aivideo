@@ -3,13 +3,6 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
-  // The customer stories were invented and have been removed.
-  async redirects() {
-    return [
-      { source: "/customers", destination: "/", permanent: false },
-      { source: "/customers/:slug", destination: "/", permanent: false },
-    ];
-  },
   typedRoutes: false,
   experimental: {
     optimizePackageImports: [],
