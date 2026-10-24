@@ -119,3 +119,24 @@ test("frames come out of the recording at the step's timestamp", { skip: !hasFfm
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test("steps do not share text, and a titler names them by action", async () => {
+  const { buildEdl } = await import("./edl");
+  const project = {
+    id: "p", locales: ["en-US"], sourceDurationSec: 6, voiceId: null,
+    segments: [
+      { id: "a", title: "A", start: 0, end: 2, words: [{ w: "Let", t: 0, d: 0.4 }, { w: "me", t: 0.4, d: 0.4 }, { w: "show", t: 0.8, d: 0.4 }, { w: "pricing.", t: 1.2, d: 0.8 }] },
+      { id: "b", title: "B", start: 2, end: 4, words: [{ w: "Then", t: 2, d: 0.5 }, { w: "sign", t: 2.5, d: 0.5 }, { w: "up.", t: 3, d: 1 }] },
+    ],
+  } as unknown as import("@/lib/app-data").Project;
+  const edl = buildEdl({ project, sourceUrl: "file://x.mp4" });
+  const opts = { title: "T", sourcePath: "/nonexistent.mp4", ffmpegBinary: "/bin/false" };
+  const plain = await buildGuide(edl, opts);
+  assert.equal(plain.steps.length, 2);
+  assert.equal(plain.steps[0].body, "Let me show pricing.");
+  assert.equal(plain.steps[1].body, "Then sign up.");
+  const titled = await buildGuide(edl, { ...opts, titleSteps: async () => ["Open the pricing page", "Sign up"] });
+  assert.match(titled.markdown, /## 1\. Open the pricing page/);
+  const failing = await buildGuide(edl, { ...opts, titleSteps: async () => { throw new Error("down"); } });
+  assert.equal(failing.steps[0].title, "Let me show pricing");
+});

@@ -83,7 +83,42 @@ function escapeMarkdown(text: string): string {
   return text.replace(/([\\`*_[\]#])/g, "\\$1");
 }
 
+/**
+ * Writes each step's title from what the step does ("Open the pricing
+ * page"), given each step's spoken text. Null, an error or a wrong-length
+ * answer keeps the first-sentence titles; a guide never fails over headings.
+ */
+export type StepTitler = (bodies: string[]) => Promise<string[] | null>;
+
+export function anthropicStepTitler(apiKey: string, model = "claude-opus-5"): StepTitler {
+  return async (bodies) => {
+    const sdk = await import("@anthropic-ai/sdk");
+    const client = new sdk.default({ apiKey, maxRetries: 2, timeout: 60_000 });
+    const response = await client.messages.create({
+      model,
+      max_tokens: 1000,
+      system:
+        "You title the steps of a written product walkthrough. For each step you get what the presenter said. " +
+        "Answer with one title per step, in order: an imperative phrase of two to six words naming the action the reader takes " +
+        "(Open the pricing page / Pick a plan / Enter your email). Plain words, no trailing punctuation, nothing the presenter did not say.",
+      messages: [{ role: "user", content: bodies.map((b, i) => `Step ${i + 1}: ${b || "(no speech)"}`).join("\n") }],
+      output_config: {
+        format: {
+          type: "json_schema",
+          schema: { type: "object", properties: { titles: { type: "array", items: { type: "string" } } }, required: ["titles"], additionalProperties: false },
+        },
+      },
+    } as never);
+    const text = (response as unknown as { content: { type: string; text?: string }[] }).content
+      .filter((block) => block.type === "text").map((block) => block.text ?? "").join("");
+    const titles = (JSON.parse(text) as { titles?: unknown }).titles;
+    return Array.isArray(titles) ? titles.map((t) => String(t).trim()) : null;
+  };
+}
+
 export interface BuildGuideOptions {
+  /** Titles steps by their action; without it a step is titled by its first sentence. */
+  titleSteps?: StepTitler;
   title: string;
   sourcePath: string;
   ffmpegBinary?: string;
@@ -94,13 +129,19 @@ export interface BuildGuideOptions {
 export async function buildGuide(edl: Edl, options: BuildGuideOptions): Promise<GuideResult> {
   const steps: GuideStep[] = [];
 
-  for (const [index, caption] of groupCaptions(edl).entries()) {
+  const groups = groupCaptions(edl);
+  let titles: string[] | null = null;
+  if (options.titleSteps && groups.length > 0) {
+    titles = await options.titleSteps(groups.map((g) => g.text)).catch(() => null);
+    if (!titles || titles.length !== groups.length || titles.some((t) => !t)) titles = null;
+  }
+  for (const [index, caption] of groups.entries()) {
     // A second in, not at the boundary: the first frame of a cut is
     // mid-transition often enough that it makes a poor illustration.
     const atSec = caption.sourceAt + Math.min(1, Math.max(0, caption.length / 2));
     steps.push({
       ordinal: index,
-      title: caption.title,
+      title: titles?.[index] ?? caption.title,
       body: caption.text,
       atSec,
       screenshot: await grabFrame(options.sourcePath, atSec, { binary: options.ffmpegBinary }),
@@ -150,7 +191,7 @@ function groupCaptions(edl: Edl): { title: string; text: string; sourceAt: numbe
 
   return [...byLabel.values()].map((span, index) => {
     const text = edl.captions
-      .filter((caption) => caption.from >= span.outputStart - 1e-6 && caption.from < span.outputEnd + 1e-6)
+      .filter((caption) => caption.from >= span.outputStart - 1e-6 && caption.from < span.outputEnd - 1e-6)
       .map((caption) => caption.text)
       .join(" ")
       .replace(/\s+/g, " ")
