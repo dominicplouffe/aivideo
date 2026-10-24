@@ -72,3 +72,18 @@ test("firstTouchMetadata prefixes keys for Stripe", () => {
   });
   assert.deepEqual(firstTouchMetadata(null), {});
 });
+
+test("ad click IDs (gclid, fbclid, msclkid) are kept and reach Stripe metadata", () => {
+  const gclid = "Cj0KCQjw" + "a".repeat(110) + "_BwE";
+  const touch = parseFirstTouch(
+    new URLSearchParams({ utm_source: "google", gclid, fbclid: "IwAR0abc-DEF_123", msclkid: "5f1c2b3a", junk: "x" }),
+  );
+  assert.equal(touch?.gclid, gclid);
+  assert.equal(touch?.fbclid, "IwAR0abc-DEF_123");
+  assert.equal(touch?.msclkid, "5f1c2b3a");
+  const meta = firstTouchMetadata(touch);
+  assert.equal(meta.ft_gclid, gclid);
+  assert.equal(meta.ft_utm_source, "google");
+  assert.equal(parseFirstTouch(new URLSearchParams({ gclid: "bad value<script>" })), undefined);
+  assert.equal(sanitizeFirstTouch(touch)?.gclid, gclid);
+});

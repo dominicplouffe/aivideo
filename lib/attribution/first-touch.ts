@@ -20,6 +20,9 @@ export const FIRST_TOUCH_KEYS = [
   "dr_seq",
   "dr_step",
   "dr_call",
+  "gclid",
+  "fbclid",
+  "msclkid",
   "ft_ref",
   "ft_lp",
 ] as const;
@@ -35,6 +38,10 @@ export interface FirstTouch {
   dr_seq?: string;
   dr_step?: string;
   dr_call?: string;
+  /** Ad click IDs (Google, Meta, Microsoft), kept so a paid customer can be tied to the ad click. */
+  gclid?: string;
+  fbclid?: string;
+  msclkid?: string;
   /** Origin of the external site that sent the visitor, never a path. */
   referrer_origin?: string;
   /** First page path, query removed. */
@@ -42,6 +49,9 @@ export interface FirstTouch {
 }
 
 const MAX = 100;
+/** Click IDs run longer than campaign tags (fbclid often passes 100 characters). */
+const CLICK_ID_MAX = 255;
+const CLICK_IDS = new Set<string>(["gclid", "fbclid", "msclkid"]);
 const PLAIN = /^[A-Za-z0-9._~+-]+$/;
 const FIELD: Record<FirstTouchKey, keyof FirstTouch> = {
   utm_source: "utm_source",
@@ -52,13 +62,16 @@ const FIELD: Record<FirstTouchKey, keyof FirstTouch> = {
   dr_seq: "dr_seq",
   dr_step: "dr_step",
   dr_call: "dr_call",
+  gclid: "gclid",
+  fbclid: "fbclid",
+  msclkid: "msclkid",
   ft_ref: "referrer_origin",
   ft_lp: "landing_path",
 };
 
 function clean(key: FirstTouchKey, raw: string | null | undefined): string | undefined {
   if (raw == null) return undefined;
-  const value = raw.trim().slice(0, MAX);
+  const value = raw.trim().slice(0, CLICK_IDS.has(key) ? CLICK_ID_MAX : MAX);
   if (!value) return undefined;
   if (key === "ft_ref") {
     try {
