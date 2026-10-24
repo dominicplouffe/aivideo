@@ -196,7 +196,7 @@ export class DeepgramTranscription implements TranscriptionProvider {
           const fillers = extra
             .filter((w) => FILLER_WORDS.has(w.word.toLowerCase()))
             .map((w) => ({ word: w.word.toLowerCase(), start: w.start, end: w.end, confidence: w.confidence }));
-          const merged = mergeFillers(mapped, fillers);
+          const merged = trimOverlongWords(mergeFillers(mapped, fillers));
           mapped.splice(0, mapped.length, ...merged);
         }
       } catch {
@@ -220,33 +220,67 @@ export function createDeepgramTranscription(config: DeepgramConfig): Transcripti
 
 const FILLER_WORDS = new Set(["um", "uh", "umm", "uhm", "er", "erm", "ah", "hmm", "mm"]);
 
+const letters = (w: string) => w.toLowerCase().replace(/[^a-z]/g, "");
+/** How long a word may plausibly last before it has swallowed something. */
+const keepSec = (w: string) => 0.3 + 0.08 * letters(w).length;
+
 /**
  * Puts fillers heard by a second pass back into a transcript that lost them.
  * A filler already present (overlapping one in `words`) is skipped. A word
- * that swallowed the filler is shortened to end where the filler starts, or
- * to start where it ends, whichever keeps more of the word; a word wholly
- * inside a filler is left alone and the filler dropped.
+ * that swallowed the filler keeps its start (vendors time word starts well
+ * and stretch the ends over what follows) and ends where the filler starts,
+ * but never shorter than a plausible length for the word. A word wholly
+ * inside a filler is left alone and the filler dropped, unless the word is
+ * "a"/"ah"/"uh", which nova-3 writes for a spoken "uh": then the filler
+ * replaces it.
  */
 export function mergeFillers(
   words: TranscriptWordResult[],
   fillers: TranscriptWordResult[],
 ): TranscriptWordResult[] {
-  const out = words.map((w) => ({ ...w }));
-  const isFiller = (w: TranscriptWordResult) => FILLER_WORDS.has(w.word.toLowerCase().replace(/[^a-z]/g, ""));
+  let out = words.map((w) => ({ ...w }));
+  const isFiller = (w: TranscriptWordResult) => FILLER_WORDS.has(letters(w.word));
   for (const f of fillers) {
     if (f.end - f.start <= 0) continue;
     const overlaps = out.filter((w) => w.start < f.end && f.start < w.end);
     if (overlaps.some(isFiller)) continue;
     let ok = true;
+    const replaced: TranscriptWordResult[] = [];
     for (const w of overlaps) {
       const before = f.start - w.start;
       const after = w.end - f.end;
-      if (before <= 0.05 && after <= 0.05) { ok = false; break; }
-      if (before >= after) w.end = f.start;
+      if (before <= 0.05 && after <= 0.05) {
+        if (["a", "ah", "uh"].includes(letters(w.word))) { replaced.push(w); continue; }
+        ok = false;
+        break;
+      }
+      if (before >= 0.1) w.end = Math.min(w.end, Math.max(f.start, w.start + keepSec(w.word)));
       else w.start = f.end;
     }
     if (!ok) continue;
+    out = out.filter((w) => !replaced.includes(w));
     out.push({ ...f });
   }
   return out.sort((a, b) => a.start - b.start);
+}
+
+/**
+ * A word that lasts far longer than its letters allow has swallowed a filler
+ * the transcriber folded into it (nova-3 has timed "and" at 2.16 s over
+ * "and, um,"). Keep a plausible length and mark the tail as a filler so the
+ * edit cuts it.
+ */
+export function trimOverlongWords(words: TranscriptWordResult[]): TranscriptWordResult[] {
+  const out: TranscriptWordResult[] = [];
+  for (const w of words) {
+    const n = letters(w.word).length;
+    if (n === 0 || FILLER_WORDS.has(letters(w.word)) || w.end - w.start <= 0.7 + 0.08 * n) {
+      out.push({ ...w });
+      continue;
+    }
+    const cutAt = w.start + keepSec(w.word);
+    out.push({ ...w, end: cutAt });
+    out.push({ word: "um", start: cutAt, end: w.end, confidence: 0 });
+  }
+  return out;
 }

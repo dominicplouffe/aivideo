@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { quietestNear, snapEdlToQuiet, type Energy } from "./quiet";
-import { mergeFillers } from "@/lib/providers/deepgram";
+import { mergeFillers, trimOverlongWords } from "@/lib/providers/deepgram";
 import { applyGlossary, withBuiltInTerms } from "@/lib/pipeline/glossary";
 import type { Edl } from "./edl";
 
@@ -59,4 +59,32 @@ test("every workspace spells DemoRiff right", () => {
   assert.equal(words.length, 1);
   assert.equal(words[0].word, "DemoRiff.");
   assert.equal(withBuiltInTerms([{ text: "Demo Riff", heard: "demo riff", spoken: null }])[0].text, "Demo Riff");
+});
+
+test("a word that swallowed a filler keeps its start, and a heard 'a' that was 'uh' becomes the filler", () => {
+  // Live take 2, 24 Oct: nova-3 "or" 54.11-55.30 over "or, um"; nova-2 um 54.43-54.93.
+  const words = [
+    { word: "Microsoft", start: 53.39, end: 54.11, confidence: 0.9 },
+    { word: "or", start: 54.11, end: 55.3, confidence: 0.9 },
+    { word: "with", start: 52.19, end: 52.34, confidence: 0.9 },
+    { word: "a", start: 52.34, end: 52.59, confidence: 0.9 },
+  ].sort((a, b) => a.start - b.start);
+  const out = mergeFillers(words, [
+    { word: "um", start: 54.43, end: 54.93, confidence: 0.8 },
+    { word: "uh", start: 52.34, end: 52.66, confidence: 0.8 },
+  ]);
+  assert.deepEqual(out.map((w) => w.word), ["with", "uh", "Microsoft", "or", "um"]);
+  const or = out.find((w) => w.word === "or")!;
+  assert.equal(or.start, 54.11);
+  assert.ok(Math.abs(or.end - 54.57) < 1e-9); // plausible length for "or", not the filler's tail
+});
+
+test("an over-long word loses its tail to a cut filler", () => {
+  const out = trimOverlongWords([
+    { word: "and", start: 26.02, end: 28.18, confidence: 0.9 },
+    { word: "guide", start: 28.41, end: 29.13, confidence: 0.9 },
+  ]);
+  assert.deepEqual(out.map((w) => w.word), ["and", "um", "guide"]);
+  assert.ok(Math.abs(out[0].end - 26.56) < 1e-9);
+  assert.equal(out[1].end, 28.18);
 });
