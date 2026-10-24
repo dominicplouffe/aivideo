@@ -73,7 +73,6 @@ export function TestimonialCard({ t, featured }: { t: Testimonial; featured?: bo
 }
 
 export function TestimonialGrid({ limit = 3 }: { limit?: number }) {
-  if (testimonials.length === 0) return null;
   return (
     <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
       {testimonials.slice(0, limit).map((t, i) => (

@@ -581,7 +581,7 @@ export function ImportPreview() {
   const files = [
     { n: "Q3 all-hands product segment.mp4", s: "412 MB · 18:04", st: "Re-cut to 3:20", tone: "mint" },
     { n: "Loom — onboarding walkthrough", s: "Imported from Loom", st: "Processing", tone: "iris" },
-    { n: "Gong call — discovery call", s: "Zoom cloud", st: "Queued", tone: "neutral" },
+    { n: "Gong call — Cardinal discovery", s: "Zoom cloud", st: "Queued", tone: "neutral" },
   ];
   return (
     <Chrome label="IMPORT">
