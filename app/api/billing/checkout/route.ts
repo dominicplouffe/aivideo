@@ -44,14 +44,14 @@ export async function POST(request: Request) {
     );
   }
   const [workspace] = await getDb()
-    .select({ customerId: s.workspaces.stripeCustomerId })
+    .select({ customerId: s.workspaces.stripeCustomerId, firstTouch: s.workspaces.firstTouch })
     .from(s.workspaces)
     .where(eq(s.workspaces.id, guard.actor.workspaceId))
     .limit(1);
 
   const origin = process.env.NEXT_PUBLIC_SITE_URL ?? new URL(request.url).origin;
   try {
-    const url = await new Stripe({ apiKey: key }).createCheckoutSession({
+    const { url, id } = await new Stripe({ apiKey: key }).createCheckout({
       workspaceId: guard.actor.workspaceId,
       customerId: workspace?.customerId ?? null,
       customerEmail: guard.actor.email ?? null,
@@ -59,7 +59,16 @@ export async function POST(request: Request) {
       packs,
       successUrl: `${origin}/app/billing?purchased=${plan}`,
       cancelUrl: `${origin}/app/billing`,
+      firstTouch: workspace?.firstTouch ?? null,
     });
+    // The checkout_started record. A failure here must not cost the sale.
+    if (id) {
+      await getDb()
+        .insert(s.checkoutStarts)
+        .values({ stripeSessionId: id, workspaceId: guard.actor.workspaceId, plan, packs, firstTouch: workspace?.firstTouch ?? null })
+        .onConflictDoNothing()
+        .catch((error: unknown) => console.error("[billing] checkout_started not recorded", error));
+    }
     return NextResponse.json({ url });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Checkout could not be started." }, { status: 502 });

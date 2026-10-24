@@ -1,3 +1,4 @@
+import { sanitizeFirstTouch, type FirstTouch } from "@/lib/attribution/first-touch";
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 
 /**
@@ -45,6 +46,8 @@ export interface StatePayload {
    * accepting any.
    */
   organizationId?: string;
+  /** Where the visitor first came from, carried to provisioning (no cookie). */
+  firstTouch?: FirstTouch;
   issuedAt: number;
 }
 
@@ -86,7 +89,7 @@ export function safeNext(raw: string | null | undefined, fallback = "/app"): str
   }
 }
 
-export function issueState(input: { next?: string | null; organizationId?: string }): {
+export function issueState(input: { next?: string | null; organizationId?: string; firstTouch?: FirstTouch }): {
   state: string;
   nonce: string;
 } {
@@ -95,6 +98,7 @@ export function issueState(input: { next?: string | null; organizationId?: strin
     nonce,
     next: safeNext(input.next),
     organizationId: input.organizationId,
+    firstTouch: sanitizeFirstTouch(input.firstTouch),
     issuedAt: Date.now(),
   };
   const body = Buffer.from(JSON.stringify(payload), "utf8").toString("base64url");

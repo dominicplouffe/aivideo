@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { isDatabaseConfigured } from "@/lib/db/client";
 import { getIdentityProvider, safeNext, type AuthMethod } from "@/lib/auth/identity";
 import { findConnectionForDomain, findConnection } from "@/lib/auth/identity/provisioning";
+import { parseFirstTouch } from "@/lib/attribution/first-touch";
 import { issueState, serializeNonceCookie } from "@/lib/auth/identity/state";
 
 /**
@@ -64,7 +65,7 @@ export async function GET(request: Request) {
     }
   }
 
-  const { state, nonce } = issueState({ next, organizationId });
+  const { state, nonce } = issueState({ next, organizationId, firstTouch: parseFirstTouch(params) });
 
   const url = getIdentityProvider().authorizationUrl({
     state,

@@ -1,3 +1,4 @@
+import type { FirstTouch } from "@/lib/attribution/first-touch";
 import {
   pgTable, pgEnum, text, uuid, integer, real, boolean, timestamp, date,
   jsonb, index, uniqueIndex, primaryKey, check, customType,
@@ -83,6 +84,8 @@ export const workspaces = pgTable(
     // only from a verified webhook. A client request never sets them — that
     // is the difference between reading a subscription and inventing one.
     stripeCustomerId: text("stripe_customer_id"),
+    /** Where the visitor who created this workspace first came from. Written once, at signup. */
+    firstTouch: jsonb("first_touch").$type<FirstTouch>(),
     stripeSubscriptionId: text("stripe_subscription_id"),
     /** Stripe's own status string, kept verbatim so it can be read back. */
     subscriptionStatus: text("subscription_status"),
@@ -386,6 +389,26 @@ export const billingEvents = pgTable(
     handledAt: timestamp("handled_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index("billing_events_handled_idx").on(t.handledAt)],
+);
+
+/**
+ * One row per Stripe Checkout session we start, so abandonment is visible
+ * from our side. `status` moves to `expired` on `checkout.session.expired`
+ * and to `completed` on `checkout.session.completed`. Never pruned.
+ */
+export const checkoutStarts = pgTable(
+  "checkout_starts",
+  {
+    stripeSessionId: text("stripe_session_id").primaryKey(),
+    workspaceId: uuid("workspace_id").references(() => workspaces.id, { onDelete: "set null" }),
+    plan: text("plan").notNull(),
+    packs: integer("packs").notNull().default(0),
+    firstTouch: jsonb("first_touch").$type<FirstTouch>(),
+    status: text("status").notNull().default("started"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("checkout_starts_workspace_idx").on(t.workspaceId, t.createdAt)],
 );
 
 /**

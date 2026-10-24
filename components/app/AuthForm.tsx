@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { currentFirstTouch, firstTouchParams } from "@/lib/attribution/first-touch";
 import { useState } from "react";
 import { cn } from "@/lib/utils";
 import { Icon } from "@/components/ui/Icon";
@@ -108,6 +109,10 @@ export function AuthForm({
     if (email.includes("@")) url.searchParams.set("email", email.trim().toLowerCase());
     if (isSignup) url.searchParams.set("intent", "sign-up");
     if (next) url.searchParams.set("next", next);
+    // First touch rides the URL into the signed sign-in state; no cookie.
+    for (const [k, v] of firstTouchParams(currentFirstTouch(window.location.href, document.referrer))) {
+      url.searchParams.set(k, v);
+    }
     window.location.href = url.toString();
   }
 
