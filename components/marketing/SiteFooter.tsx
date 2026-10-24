@@ -75,20 +75,6 @@ export function SiteFooter() {
                 </a>
               ))}
             </div>
-            <div className="mt-6 flex flex-wrap items-center gap-2">
-              <span className="inline-flex items-center gap-1.5 rounded-md border border-[var(--line)] px-2 py-1 text-2xs text-fg-subtle">
-                <Icon name="shield" className="size-3.5 text-mint-400" strokeWidth={1.8} />
-                SOC 2 Type II
-              </span>
-              <span className="inline-flex items-center gap-1.5 rounded-md border border-[var(--line)] px-2 py-1 text-2xs text-fg-subtle">
-                <Icon name="lock" className="size-3.5 text-mint-400" strokeWidth={1.8} />
-                GDPR
-              </span>
-              <span className="inline-flex items-center gap-1.5 rounded-md border border-[var(--line)] px-2 py-1 text-2xs text-fg-subtle">
-                <Icon name="check" className="size-3.5 text-mint-400" strokeWidth={2} />
-                HIPAA ready
-              </span>
-            </div>
           </div>
 
           {footerNav.map((col) => (

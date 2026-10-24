@@ -6,7 +6,6 @@ import { Icon } from "@/components/ui/Icon";
 const links = [
   { label: "Product overview", href: "/product" },
   { label: "Pricing", href: "/pricing" },
-  { label: "Customer stories", href: "/customers" },
   { label: "Help center", href: "/docs" },
   { label: "The Riff", href: "/blog" },
   { label: "Contact sales", href: "/contact" },

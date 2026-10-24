@@ -404,7 +404,6 @@ export const comparePages: ComparePage[] = [
           { label: "Branching multi-path tours", us: true, them: true },
           { label: "Inline lead capture", us: true, them: true },
           { label: "Per-step analytics", us: true, them: true },
-          { label: "Speed to first demo", us: "~11 min", them: "~10-15 min" },
         ],
       },
       {

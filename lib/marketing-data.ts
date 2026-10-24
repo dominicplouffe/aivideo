@@ -12,36 +12,24 @@ export interface Customer {
   letterSpacing?: string;
 }
 
-export const customers: Customer[] = [
-  { name: "Northwind", slug: "northwind", industry: "Revenue intelligence" },
-  { name: "LUMEN", slug: "lumen", industry: "Observability", letterSpacing: "0.22em" },
-  { name: "Cardinal", slug: "cardinal", industry: "Fintech infrastructure" },
-  { name: "Foldr", slug: "foldr", industry: "Document AI" },
-  { name: "Arcwell", slug: "arcwell", industry: "Healthcare ops" },
-  { name: "Tessera", slug: "tessera", industry: "Data warehouse" },
-  { name: "Halcyon", slug: "halcyon", industry: "Security posture" },
-  { name: "Brightline", slug: "brightline", industry: "Field service" },
-  { name: "Meridian", slug: "meridian", industry: "Logistics" },
-  { name: "Petra", slug: "petra", industry: "Developer tools" },
-  { name: "Volta", slug: "volta", industry: "Energy analytics" },
-  { name: "Kestrel", slug: "kestrel", industry: "HR platform" },
-];
+// No customer may be named here without that customer's written permission.
+export const customers: Customer[] = [];
 
 /* =========================================================
    Headline metrics
    ========================================================= */
 
 export const heroMetrics = [
-  { value: "11 min", label: "Median time from record to published demo" },
-  { value: "94%", label: "Drop in external video production spend" },
-  { value: "3.2×", label: "Lift in trial-to-paid on demo-led pages" },
+  { value: "1 take", label: "One rough screen recording is all it needs" },
+  { value: "Text", label: "Edit the video by editing its transcript" },
+  { value: "MP4", label: "Rendered, with a share page and an embed" },
 ];
 
 export const proofMetrics = [
-  { value: "2.4M", label: "Demos produced", sub: "Across 9,400 workspaces" },
-  { value: "34", label: "Languages", sub: "Lip-synced, not just subtitled" },
-  { value: "11 min", label: "Median turnaround", sub: "Raw recording to publish" },
-  { value: "99.98%", label: "Render success", sub: "Trailing 90 days" },
+  { value: "1", label: "Recording in", sub: "The flow you already know by heart" },
+  { value: "Text", label: "Editing", sub: "Cut a line from the script, the cut follows" },
+  { value: "MP4", label: "Out", sub: "Plus a share page and an embed" },
+  { value: "$0", label: "To start", sub: "10 video minutes a month, no card" },
 ];
 
 /* =========================================================
@@ -283,62 +271,8 @@ export interface Testimonial {
   metric?: { value: string; label: string };
 }
 
-export const testimonials: Testimonial[] = [
-  {
-    quote:
-      "We used to budget two weeks and eleven thousand dollars for a launch video. Our last three launches were recorded on a Tuesday and live on Wednesday. The agency invoice line item is gone.",
-    name: "Priya Raman",
-    role: "VP Product Marketing",
-    company: "Northwind",
-    slug: "northwind",
-    metric: { value: "14 days → 1", label: "Launch video turnaround" },
-  },
-  {
-    quote:
-      "Our solutions engineers were spending a third of their week rebuilding the same demo for different verticals. Now they record once and the variants generate themselves. We gave the team back twelve hours each.",
-    name: "Daniel Okafor",
-    role: "Director of Sales Engineering",
-    company: "Cardinal",
-    slug: "cardinal",
-    metric: { value: "12 hrs/wk", label: "Returned per engineer" },
-  },
-  {
-    quote:
-      "The written guides are the sleeper feature. Every video we publish also becomes a help article, in six languages, with screenshots that are always current. Support ticket volume on onboarding fell by half.",
-    name: "Mika Lindqvist",
-    role: "Head of Customer Education",
-    company: "Tessera",
-    slug: "tessera",
-    metric: { value: "−51%", label: "Onboarding tickets" },
-  },
-  {
-    quote:
-      "I am a non-technical founder who sounds, on camera, like a non-technical founder. DemoRiff made my product look like it came out of a company with a marketing department. We closed our seed on that demo.",
-    name: "Sofia Benali",
-    role: "Co-founder & CEO",
-    company: "Foldr",
-    slug: "foldr",
-    metric: { value: "$4.2M", label: "Seed closed" },
-  },
-  {
-    quote:
-      "Security signed off in a week. Private rendering in our own VPC, no training on our frames, SOC 2 report on request. That is not a sentence I get to write about most AI vendors.",
-    name: "Tom Aldridge",
-    role: "Staff Security Engineer",
-    company: "Halcyon",
-    slug: "halcyon",
-    metric: { value: "7 days", label: "To security approval" },
-  },
-  {
-    quote:
-      "We shipped 140 product videos last quarter with a team of two. The year before, with an agency, we shipped nine.",
-    name: "Renata Alves",
-    role: "Content Lead",
-    company: "Meridian",
-    slug: "meridian",
-    metric: { value: "9 → 140", label: "Videos per quarter" },
-  },
-];
+// Quotes appear only with the customer's written permission on file.
+export const testimonials: Testimonial[] = [];
 
 /* =========================================================
    Languages
@@ -434,9 +368,7 @@ export const homeFaqs: Faq[] = [
    ========================================================= */
 
 export const securityHighlights = [
-  { title: "SOC 2 Type II", body: "Audited annually. Report available under NDA from the trust center.", icon: "shield" as IconName },
-  { title: "GDPR & CCPA", body: "DPA, SCCs and a published subprocessor list with change notifications.", icon: "lock" as IconName },
-  { title: "Zero model training", body: "Your frames, audio and transcripts never enter a training set.", icon: "brain" as IconName },
+      { title: "Zero model training", body: "Your frames, audio and transcripts never enter a training set.", icon: "brain" as IconName },
   { title: "Regional processing", body: "Pin rendering and storage to US, EU or AU. BYO-cloud on Enterprise.", icon: "globe" as IconName },
   { title: "SSO & SCIM", body: "SAML 2.0, OIDC, directory sync, and enforced domain capture.", icon: "key" as IconName },
   { title: "Audit trail", body: "Every view, export, share and permission change, streamable to your SIEM.", icon: "list" as IconName },

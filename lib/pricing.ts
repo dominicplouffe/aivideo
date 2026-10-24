@@ -79,7 +79,6 @@ export const plans: Plan[] = [
     priceNote: `per month · +$${pack.priceCents / 100} per ${pack.size} more projects`,
     cta: { label: "Start Studio", href: "/signup?plan=studio" },
     highlight: true,
-    badge: "Most popular",
     headline: [
       `${c.studio.projects} projects, more in packs of ${pack.size}`,
       `${minutes(c.studio.videoSecondsPerPeriod)} finished minutes a month, +${pack.extraSeconds / 60} per pack`,

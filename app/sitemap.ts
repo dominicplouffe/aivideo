@@ -3,7 +3,6 @@ import { site } from "@/lib/site";
 import { productPages } from "@/lib/product-content";
 import { solutionPages } from "@/lib/solutions-content";
 import { comparePages } from "@/lib/compare-content";
-import { caseStudies } from "@/lib/customers-content";
 import { posts } from "@/lib/blog-content";
 import { courses } from "@/lib/academy-content";
 import { allDocPages } from "@/lib/docs-content";
@@ -17,7 +16,6 @@ export default function sitemap(): MetadataRoute.Sitemap {
     { url: url("/pricing"), changeFrequency: "weekly", priority: 0.9 },
     { url: url("/product"), changeFrequency: "weekly", priority: 0.9 },
     { url: url("/solutions"), changeFrequency: "weekly", priority: 0.8 },
-    { url: url("/customers"), changeFrequency: "weekly", priority: 0.8 },
     { url: url("/compare"), changeFrequency: "weekly", priority: 0.8 },
     { url: url("/security"), changeFrequency: "monthly", priority: 0.7 },
     { url: url("/integrations"), changeFrequency: "monthly", priority: 0.7 },
@@ -40,7 +38,6 @@ export default function sitemap(): MetadataRoute.Sitemap {
     ...productPages.map((p) => ({ url: url(`/product/${p.slug}`), changeFrequency: "monthly" as const, priority: 0.8 })),
     ...solutionPages.map((p) => ({ url: url(`/solutions/${p.slug}`), changeFrequency: "monthly" as const, priority: 0.8 })),
     ...comparePages.map((p) => ({ url: url(`/compare/${p.slug}`), changeFrequency: "monthly" as const, priority: 0.7 })),
-    ...caseStudies.map((c) => ({ url: url(`/customers/${c.slug}`), changeFrequency: "monthly" as const, priority: 0.7 })),
     ...posts.map((p) => ({ url: url(`/blog/${p.slug}`), lastModified: new Date(p.date), changeFrequency: "monthly" as const, priority: 0.7 })),
     ...courses.flatMap((c) =>
       c.lessons.map((l) => ({ url: url(`/academy/${c.slug}/${l.slug}`), changeFrequency: "monthly" as const, priority: 0.6 })),
