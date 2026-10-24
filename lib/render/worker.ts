@@ -264,8 +264,10 @@ async function produceGuide(
   if (!outputs.includes("guide")) return null;
 
   try {
-    const { buildGuide } = await import("./guide");
+    const { buildGuide, anthropicStepTitler } = await import("./guide");
+    const titleKey = process.env.ANTHROPIC_API_KEY;
     const built = await buildGuide(edl, {
+      titleSteps: titleKey ? anthropicStepTitler(titleKey) : undefined,
       title: (job.payload.title as string) || "Walkthrough",
       sourcePath,
       ffmpegBinary,

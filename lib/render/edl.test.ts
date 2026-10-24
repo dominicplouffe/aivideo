@@ -401,3 +401,36 @@ test("validation refuses an edit that removes everything", () => {
   const problems = validateEdl(edlWith({ clips: [], durationSec: 0 }));
   assert.equal(problems.some((p) => /nothing|no video/i.test(p)), true);
 });
+
+test("chapters whose vendor timings overlap still make a valid edit", () => {
+  // Deepgram ended one segment at 60.23s and began the next at 60.18s on a
+  // real take; copying that overlap into the clips made the render refuse.
+  const overlapping = project();
+  overlapping.segments = [
+    { id: "seg_a", title: "A", start: 0, end: 2.05, words: [{ w: "Open", t: 0, d: 1 }, { w: "pricing.", t: 1, d: 1.05 }] },
+    { id: "seg_b", title: "B", start: 2, end: 4, words: [{ w: "Then", t: 2, d: 1 }, { w: "sign up.", t: 3, d: 1 }] },
+    // Entirely inside the previous chapter's footage: nothing new to play.
+    { id: "seg_c", title: "C", start: 3.5, end: 3.9, words: [{ w: "um", t: 3.5, d: 0.4 }] },
+  ];
+  const edl = buildEdl({ project: overlapping, sourceUrl: "file://a.mp4" });
+  assert.deepEqual(validateEdl(edl), []);
+  assert.equal(edl.clips[1].sourceStart, 2.05);
+  assert.equal(edl.clips.length, 2);
+  assert.ok(Math.abs(edl.durationSec - 4) < 1e-6);
+});
+
+test("a cut word is removed where it was said, not where the words add up to", () => {
+  const timed = project();
+  timed.segments = [{
+    id: "seg_t", title: "T", start: 0, end: 6,
+    words: [
+      { w: "Open", t: 0, d: 0.5 },
+      { w: "um", t: 2, d: 0.5, cut: true },
+      { w: "pricing.", t: 2.6, d: 0.6 },
+      { w: "Done.", t: 5, d: 0.5 },
+    ],
+  }] as unknown as Project["segments"];
+  const edl = buildEdl({ project: timed, sourceUrl: "file://a.mp4" });
+  assert.deepEqual(validateEdl(edl), []);
+  assert.deepEqual(edl.clips.map((c) => [c.sourceStart, c.sourceEnd]), [[0, 0.5], [2.6, 3.2], [5, 5.5]]);
+});

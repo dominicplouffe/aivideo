@@ -95,9 +95,12 @@ export class DeepgramTranscription implements TranscriptionProvider {
       // See the note above: without this the editor cannot cut fillers.
       filler_words: "true",
     });
-    // "multi" lets Deepgram detect the language rather than mistrusting the
-    // caller's guess; an explicit hint still wins when we have one.
-    query.set("language", input.languageHint ?? "multi");
+    // An explicit hint wins. Without one, ask Deepgram to detect the
+    // language rather than sending "multi": in multilingual mode Deepgram
+    // ignores filler_words, and on a real take it returned zero "um"s where
+    // detect_language returned nine (24 Oct 2026).
+    if (input.languageHint) query.set("language", input.languageHint);
+    else query.set("detect_language", "true");
     // Keyterm prompting: one parameter per term, plain words only. The
     // vendor lifts recognition of a primed term to around ninety percent,
     // which is the difference between "Qore" and a correction on every take.

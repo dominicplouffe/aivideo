@@ -61,7 +61,11 @@ export async function POST(request: Request, context: Context) {
   return NextResponse.json({
     segments: outcome.segments,
     words: outcome.words,
-    duration_sec: Math.round(outcome.durationSec),
+    // The take as recorded. The edited length is reported separately: an
+    // 86.6s upload used to come back as "duration_sec: 72", which was the
+    // length after fillers and pauses, under the wrong name.
+    duration_sec: Math.round(outcome.sourceDurationSec * 10) / 10,
+    edited_duration_sec: Math.round(outcome.durationSec * 10) / 10,
     // Named so the Studio can say where the words came from. A transcript
     // from `mock-transcription` is invented, and the person reading it is
     // entitled to know that before they spend an hour editing it.

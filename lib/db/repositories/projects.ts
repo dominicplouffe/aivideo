@@ -624,6 +624,7 @@ export async function replaceSegments(
     endSec: number;
     action?: string | null;
     words: { w: string; t: number; d: number; cut?: boolean; em?: boolean }[];
+    zoom?: { scale: number; x: number; y: number } | null;
   }[],
 ): Promise<void> {
   const db = getDb();
@@ -639,6 +640,7 @@ export async function replaceSegments(
       endSec: segment.endSec,
       action: segment.action ?? null,
       words: segment.words,
+      ...(segment.zoom ? { zoom: segment.zoom, zoomInferred: true } : {}),
     })),
   );
 }
