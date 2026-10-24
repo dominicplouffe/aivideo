@@ -41,9 +41,12 @@ const INSTRUCTIONS: Record<string, string> = {
   sso_required: "sso-required",
 };
 
-function refuse(request: Request, reason: string): NextResponse {
+function refuse(request: Request, reason: string, next?: string): NextResponse {
   const url = new URL("/signin", process.env.NEXT_PUBLIC_SITE_URL ?? request.url);
   url.searchParams.set("error", reason);
+  // Kept once the state has verified, so somebody asked to verify an address
+  // first still ends up where they were going (a paid plan's checkout).
+  if (next && next !== "/app") url.searchParams.set("next", next);
   const response = NextResponse.redirect(url, 302);
   response.headers.append("Set-Cookie", clearNonceCookie());
   response.headers.set("Cache-Control", "no-store");
@@ -80,7 +83,7 @@ export async function GET(request: Request) {
         ? INSTRUCTIONS[error.detail.code]
         : undefined;
     if (!instruction) console.error("[auth] code exchange failed:", error);
-    return refuse(request, instruction ?? "exchange-failed");
+    return refuse(request, instruction ?? "exchange-failed", verdict.payload.next);
   }
 
   // The organization the browser asked for must be the organization the
