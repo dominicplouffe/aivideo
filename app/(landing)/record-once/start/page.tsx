@@ -7,6 +7,9 @@ export const metadata: Metadata = {
   title: "Create your workspace",
   description: "Create your DemoRiff workspace. 10 finished video minutes a month, unlimited written guides, no card.",
   robots: { index: false, follow: false },
+  keywords: [],
+  openGraph: { title: "Create your workspace · DemoRiff", description: "10 finished video minutes a month, unlimited written guides, no card." },
+  twitter: { title: "Create your workspace · DemoRiff", description: "10 finished video minutes a month, unlimited written guides, no card." },
 };
 
 /**

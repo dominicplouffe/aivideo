@@ -14,6 +14,9 @@ export const metadata: Metadata = {
   description:
     "Record your screen roughly. DemoRiff cuts the dead air, adds captions, renders a 1080p video in your voice and writes a step-by-step guide.",
   robots: { index: false, follow: false },
+  keywords: [],
+  openGraph: { title: "Record your product once · DemoRiff", description: "A demo video and a written guide from one rough recording." },
+  twitter: { title: "Record your product once · DemoRiff", description: "A demo video and a written guide from one rough recording." },
 };
 
 const START = "/record-once/start";
