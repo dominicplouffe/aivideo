@@ -261,10 +261,16 @@ function sourceWords(segments: Segment[], wordEdits: Map<string, WordEdit>): Sou
       }
       return;
     }
+    // Each word sits at its own recorded start when it has one. Laying words
+    // end to end from the chapter start drifts by every pause inside the
+    // chapter: a cut "um" then removes the wrong half-second, and the
+    // chapter's last words fall off the end. Words without a start (older
+    // edits, tests) are laid end to end as before.
     let t = seg.start;
     for (const word of resolveWords(seg, segIndex, { wordEdits })) {
-      out.push({ text: word.text, start: t, end: t + word.d, cut: word.cut, segIndex, wordIndex: word.wordIndex });
-      t += word.d;
+      const start = typeof word.t === "number" && Number.isFinite(word.t) ? Math.max(word.t, t) : t;
+      out.push({ text: word.text, start, end: start + word.d, cut: word.cut, segIndex, wordIndex: word.wordIndex });
+      t = start + word.d;
     }
   });
   return out;
@@ -361,11 +367,19 @@ export function buildEdl(input: BuildEdlInput): Edl {
       outputStart += span;
     });
   }
+  // A pause shorter than this between two kept, adjacent words is speech
+  // rhythm and stays in; a longer one is dead air and is cut.
+  const KEEP_PAUSE_SEC = 0.6;
+  let previousKept = -1;
   for (const word of continuous ? [] : kept) {
     const last = clips[clips.length - 1];
+    const index = words.indexOf(word);
+    const adjacent = index === previousKept + 1;
+    previousKept = index;
+    const gap = last ? word.start - last.sourceEnd : Infinity;
     const contiguous =
       last !== undefined &&
-      Math.abs(last.sourceEnd - word.start) < 1e-6 &&
+      (Math.abs(gap) < 1e-6 || (adjacent && gap > 0 && gap < KEEP_PAUSE_SEC)) &&
       last.label === project.segments[word.segIndex].id;
 
     if (contiguous) {

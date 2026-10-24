@@ -66,6 +66,33 @@ export function titleFor(words: SegmentDraft["words"], ordinal: number): string 
   return cased.length > 60 ? `${cased.slice(0, 57)}…` : cased;
 }
 
+/**
+ * False starts: "you, um, you record", "let me, let me show".
+ *
+ * A run of one to three words said twice in a row, with only fillers or a
+ * short pause between, is a stutter; the first copy is marked cut and the
+ * second kept, which is how an editor fixes it. Marked, not dropped, so the
+ * person editing can put it back ("that that" is sometimes meant).
+ */
+export function markRepeats(words: { w: string; t: number; d: number; cut?: boolean }[]): void {
+  const live = words.filter((word) => !word.cut && bare(word.w));
+  for (let i = 0; i < live.length; i++) {
+    for (const n of [3, 2, 1]) {
+      if (i + 2 * n > live.length) continue;
+      const first = live.slice(i, i + n);
+      const second = live.slice(i + n, i + 2 * n);
+      if (first.some((word) => word.cut)) continue;
+      if (!first.every((word, k) => bare(word.w) === bare(second[k].w))) continue;
+      // Said again straight away; a repeat after a long pause is a new sentence.
+      if (second[0].t - (first[n - 1].t + first[n - 1].d) > 1.5) continue;
+      // A sentence end inside the first copy means two sentences, not a stutter.
+      if (first.some((word) => endsSentence(word.w))) continue;
+      for (const word of first) word.cut = true;
+      break;
+    }
+  }
+}
+
 export interface SegmentOptions {
   /** A gap this long ends a chapter when a sentence has just closed. */
   pauseSec?: number;
@@ -114,6 +141,8 @@ export function segmentTranscript(
       cut: FILLERS.has(text) || (SOFT_FILLERS.has(text) && stranded) ? true : undefined,
     };
   });
+
+  markRepeats(marked);
 
   const drafts: SegmentDraft[] = [];
   let current: SegmentDraft["words"] = [];

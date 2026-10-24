@@ -402,3 +402,14 @@ test("keeping the fillers makes edited time and source time agree again", () => 
   });
   assert.ok(Math.abs((sourceTimeAt(timeline, 0.5) ?? 0) - 0.5) < 0.02);
 });
+
+test("a false start is marked cut and the second copy kept", () => {
+  const [draft] = segmentTranscript(
+    transcript("Let@0-0.2 me,@0.2-0.4 um,@0.5-0.8 let@0.9-1.1 me@1.1-1.3 show@1.3-1.6 you@1.6-1.8 you@1.9-2.1 pricing.@2.1-2.6"),
+  );
+  const cut = draft.words.filter((w) => w.cut).map((w) => w.w);
+  assert.deepEqual(cut, ["Let", "me,", "um,", "you"]);
+  // An ordinary sentence is left alone.
+  const [plain] = segmentTranscript(transcript("Open@0-0.3 the@0.3-0.5 pricing@0.5-0.9 page.@0.9-1.3"));
+  assert.equal(plain.words.some((w) => w.cut), false);
+});
