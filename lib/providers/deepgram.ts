@@ -228,8 +228,8 @@ const keepSec = (w: string) => 0.3 + 0.08 * letters(w).length;
  * Puts fillers heard by a second pass back into a transcript that lost them.
  * A filler already present (overlapping one in `words`) is skipped. A word
  * that swallowed the filler keeps its start (vendors time word starts well
- * and stretch the ends over what follows) and ends where the filler starts,
- * but never shorter than a plausible length for the word. A word wholly
+ * and stretch the ends over what follows) and ends where the filler starts;
+ * the second pass times its own copy of the word to end exactly there. A word wholly
  * inside a filler is left alone and the filler dropped, unless the word is
  * "a"/"ah"/"uh", which nova-3 writes for a spoken "uh": then the filler
  * replaces it.
@@ -254,7 +254,7 @@ export function mergeFillers(
         ok = false;
         break;
       }
-      if (before >= 0.1) w.end = Math.min(w.end, Math.max(f.start, w.start + keepSec(w.word)));
+      if (before >= 0.1) w.end = Math.min(w.end, f.start);
       else w.start = f.end;
     }
     if (!ok) continue;

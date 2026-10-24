@@ -76,7 +76,20 @@ test("a word that swallowed a filler keeps its start, and a heard 'a' that was '
   assert.deepEqual(out.map((w) => w.word), ["with", "uh", "Microsoft", "or", "um"]);
   const or = out.find((w) => w.word === "or")!;
   assert.equal(or.start, 54.11);
-  assert.ok(Math.abs(or.end - 54.57) < 1e-9); // plausible length for "or", not the filler's tail
+  assert.equal(or.end, 54.43); // where nova-2 ends its own "or", not the filler's tail
+});
+
+test("a word that runs into a filler ends where the filler starts, so the filler is cut whole", () => {
+  // Live take 2, 24 Oct: nova-3 "just" 60.18-60.74 and "type" 60.82-61.14; nova-2 "just" 60.10-60.42, uh 60.42-60.90.
+  // Run 4 kept "just" to 60.74, so most of the "uh" stayed and the cut clipped "type".
+  const out = mergeFillers(
+    [
+      { word: "just", start: 60.18, end: 60.74, confidence: 0.9 },
+      { word: "type", start: 60.82, end: 61.14, confidence: 0.9 },
+    ],
+    [{ word: "uh", start: 60.42, end: 60.9, confidence: 0.8 }],
+  );
+  assert.deepEqual(out.map((w) => [w.word, w.start, w.end]), [["just", 60.18, 60.42], ["uh", 60.42, 60.9], ["type", 60.9, 61.14]]);
 });
 
 test("an over-long word loses its tail to a cut filler", () => {
