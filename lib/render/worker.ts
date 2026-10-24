@@ -9,6 +9,7 @@ import { checkBeforeWork, markNoticeSent, meter } from "@/lib/billing/metering";
 import { emitEvent, type WebhookEventType } from "@/lib/webhooks/outbound";
 import { buildEdl, validateEdl, type Edl, totalDurationSec } from "./edl";
 import { compile, probe, runFfmpeg, toSrt } from "./ffmpeg";
+import { audioEnergy, snapEdlToQuiet } from "./quiet";
 import { narrate, type NarrationReport } from "./narration";
 import { codeVersion } from "@/lib/version";
 
@@ -163,6 +164,11 @@ export async function renderEdl(
   const dir = await mkdtemp(path.join(options.scratchRoot ?? tmpdir(), "demoriff-render-"));
   try {
     const { sourcePath, audioPaths, logoPath } = await stage(edl, dir);
+    // Cut edges move to the quietest 20 ms near them. Best effort: without
+    // ffmpeg audio the cuts stay where the transcript put them.
+    edl = await audioEnergy(sourcePath, options.ffmpegBinary)
+      .then((energy) => snapEdlToQuiet(edl, energy))
+      .catch(() => edl);
 
     let subtitlePath: string | undefined;
     if (edl.captions.length > 0) {

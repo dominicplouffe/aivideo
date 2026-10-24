@@ -16,7 +16,7 @@ import { probe, type ProbeResult } from "@/lib/render/ffmpeg";
 import { editedDuration, segmentTranscript, type SegmentDraft } from "./segment";
 import { framingFor, sampleGreyFrames } from "./framing";
 import { chaptersFromCaptions, readCaptions, wordsFromChapters } from "./captions";
-import { applyGlossary, keytermsFor } from "./glossary";
+import { applyGlossary, keytermsFor, withBuiltInTerms } from "./glossary";
 import { listGlossary } from "@/lib/db/repositories/glossary";
 
 /**
@@ -131,7 +131,7 @@ export async function processProject(
 
     // The workspace's own spellings: given to the transcriber so they come
     // back right, and applied to whatever still comes back wrong.
-    const glossary = await listGlossary(workspaceId);
+    const glossary = withBuiltInTerms(await listGlossary(workspaceId));
     // Nothing to hear without an audio track, so nothing to send.
     const heard: TranscriptionResult = probed && !probed.hasAudio
       ? { language: "en", durationSec: 0, words: [] }

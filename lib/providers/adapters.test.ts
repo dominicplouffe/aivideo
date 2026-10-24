@@ -77,7 +77,7 @@ test("deepgram asks for filler words and diarization — the editor depends on b
   const provider = new DeepgramTranscription({
     apiKey: "k",
     fetchImpl: async (url) => {
-      requested = new URL(String(url));
+      requested ??= new URL(String(url)); // the first call; a nova-2 filler pass follows
       return jsonResponse(DEEPGRAM_BODY);
     },
   });
