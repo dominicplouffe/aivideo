@@ -371,9 +371,15 @@ export function buildEdl(input: BuildEdlInput): Edl {
     if (contiguous) {
       last.sourceEnd = word.end;
     } else {
+      // Vendors' segment boundaries can overlap by a few ms (Deepgram has
+      // ended one at 60.23s and started the next at 60.18s). Never re-play
+      // footage: start where the previous clip stopped, and drop a word that
+      // the previous clip already played in full.
+      const sourceStart = last ? Math.max(word.start, last.sourceEnd) : word.start;
+      if (word.end - sourceStart <= 1e-6) continue;
       if (last) outputStart += last.sourceEnd - last.sourceStart;
       clips.push({
-        sourceStart: word.start,
+        sourceStart,
         sourceEnd: word.end,
         outputStart,
         label: project.segments[word.segIndex].id,
