@@ -1,3 +1,4 @@
+import { sanitizeFirstTouch, type FirstTouch } from "@/lib/attribution/first-touch";
 import { and, desc, eq, isNull } from "drizzle-orm";
 import { getDb } from "@/lib/db/client";
 import * as s from "@/lib/db/schema";
@@ -153,10 +154,13 @@ export async function findConnectionForOrganization(organizationId: string) {
  * was already here and is unchanged; the self-serve path is new, and is the
  * reason signup can run in production at all.
  */
-export async function provision(profile: AuthProfile): Promise<ProvisionResult> {
+export async function provision(
+  profile: AuthProfile,
+  options: { firstTouch?: FirstTouch } = {},
+): Promise<ProvisionResult> {
   return profile.organizationId
     ? provisionThroughOrganization(profile, profile.organizationId)
-    : provisionSelfServe(profile);
+    : provisionSelfServe(profile, sanitizeFirstTouch(options.firstTouch));
 }
 
 /**
@@ -364,7 +368,7 @@ export async function listConnections(workspaceId: string) {
  * domain is proof that Google will deliver mail there, not that the company
  * agreed to let its holder into their workspace.
  */
-async function provisionSelfServe(profile: AuthProfile): Promise<ProvisionResult> {
+async function provisionSelfServe(profile: AuthProfile, firstTouch?: FirstTouch): Promise<ProvisionResult> {
   // The gate. An unverified address is somebody's *claim* to an address, and
   // creating a workspace on a claim is exactly what the 501 was protecting
   // against.
@@ -402,7 +406,7 @@ async function provisionSelfServe(profile: AuthProfile): Promise<ProvisionResult
     // offboarding removes a person from *that workspace*, not from the
     // product, and giving them a workspace of their own undoes none of it.
     // The old row stays deactivated and they cannot reach it.
-    return signUp(profile);
+    return signUp(profile, firstTouch);
   }
 
   // More than one is legal — `members` is unique on (workspace, email), not
@@ -439,7 +443,7 @@ async function provisionSelfServe(profile: AuthProfile): Promise<ProvisionResult
  * nobody can sign into it and nobody can delete it — so a failure between the
  * two inserts would leave a row that exists only to be orphaned.
  */
-async function signUp(profile: AuthProfile): Promise<ProvisionResult> {
+async function signUp(profile: AuthProfile, firstTouch?: FirstTouch): Promise<ProvisionResult> {
   const db = getDb();
 
   // Named after the company in their address when we have nothing better,
@@ -449,7 +453,7 @@ async function signUp(profile: AuthProfile): Promise<ProvisionResult> {
   const base = slugify(name) || "workspace";
 
   return db.transaction(async (tx) => {
-    const workspace = await insertWithFreeSlug(tx, name, base);
+    const workspace = await insertWithFreeSlug(tx, name, base, firstTouch);
 
     const [member] = await tx
       .insert(s.members)
@@ -495,6 +499,7 @@ async function insertWithFreeSlug(
   tx: Parameters<Parameters<ReturnType<typeof getDb>["transaction"]>[0]>[0],
   name: string,
   base: string,
+  firstTouch?: FirstTouch,
 ): Promise<typeof s.workspaces.$inferSelect> {
   for (let attempt = 0; attempt < 6; attempt++) {
     // The plain form first, so the common case gets the readable slug.
@@ -505,7 +510,7 @@ async function insertWithFreeSlug(
 
     const [row] = await tx
       .insert(s.workspaces)
-      .values({ name, slug, plan: "free", seatsTotal: 1 })
+      .values({ name, slug, plan: "free", seatsTotal: 1, firstTouch: firstTouch ?? null })
       .onConflictDoNothing({ target: s.workspaces.slug })
       .returning();
 

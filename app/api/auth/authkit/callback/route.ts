@@ -102,7 +102,7 @@ export async function GET(request: Request) {
     }
   }
 
-  const result = await provision(profile);
+  const result = await provision(profile, { firstTouch: verdict.payload.firstTouch });
   if (!result.ok) {
     if (result.workspaceId) {
       await recordQuietly({

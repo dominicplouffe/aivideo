@@ -1,3 +1,4 @@
+import { firstTouchMetadata, type FirstTouch } from "@/lib/attribution/first-touch";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { ProviderError, isRetryableStatus } from "@/lib/providers/errors";
 import { PLAN_CATALOGUE, type Plan } from "./plans";
@@ -166,6 +167,18 @@ export function verifyStripeSignature(
 
 // --- the client ------------------------------------------------------------
 
+export interface CheckoutInput {
+  workspaceId: string;
+  customerId: string | null;
+  customerEmail: string | null;
+  plan: Plan;
+  packs: number;
+  successUrl: string;
+  cancelUrl: string;
+  /** The workspace's first touch, copied into the session metadata. */
+  firstTouch?: FirstTouch | null;
+}
+
 export class Stripe {
   readonly name = "stripe";
 
@@ -254,15 +267,17 @@ export class Stripe {
    * workspace learns its Stripe customer. An existing customer is reused so
    * a workspace never ends up with two.
    */
-  async createCheckoutSession(input: {
-    workspaceId: string;
-    customerId: string | null;
-    customerEmail: string | null;
-    plan: Plan;
-    packs: number;
-    successUrl: string;
-    cancelUrl: string;
-  }): Promise<string> {
+  async createCheckoutSession(input: CheckoutInput): Promise<string> {
+    return (await this.createCheckout(input)).url;
+  }
+
+  /**
+   * Creates the session and answers with its URL and id. The workspace id,
+   * plan and first touch go into the session's metadata and the
+   * subscription's, so the source of a paid customer can be read back from
+   * Stripe without our database.
+   */
+  async createCheckout(input: CheckoutInput): Promise<{ url: string; id: string }> {
     const price = priceForPlan(input.plan);
     if (!price) {
       throw new ProviderError(`No Stripe price is configured for the ${input.plan} plan (STRIPE_PRICE_${input.plan.toUpperCase()}).`, {
@@ -288,6 +303,15 @@ export class Stripe {
     }
     if (input.customerId) form.customer = input.customerId;
     else if (input.customerEmail) form.customer_email = input.customerEmail;
+    const metadata: Record<string, string> = {
+      workspace_id: input.workspaceId,
+      plan: input.plan,
+      ...firstTouchMetadata(input.firstTouch),
+    };
+    for (const [k, v] of Object.entries(metadata)) {
+      form[`metadata[${k}]`] = v;
+      form[`subscription_data[metadata][${k}]`] = v;
+    }
     const payload = await this.call("POST", "/v1/checkout/sessions", {
       form,
       idempotencyKey: `checkout:${input.workspaceId}:${input.plan}:${input.packs}:${Date.now().toString(36).slice(0, 6)}`,
@@ -296,7 +320,7 @@ export class Stripe {
     if (typeof url !== "string") {
       throw new ProviderError("Stripe did not return a checkout URL.", { provider: this.name, retryable: false });
     }
-    return url;
+    return { url, id: typeof payload.id === "string" ? payload.id : "" };
   }
 
   /**

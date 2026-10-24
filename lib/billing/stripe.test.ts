@@ -251,3 +251,30 @@ test("checkout carries the workspace, the plan's price and the packs", async () 
   delete process.env.STRIPE_PRICE_STUDIO;
   delete process.env.STRIPE_PRICE_STUDIO_PACK;
 });
+
+test("createCheckout copies workspace, plan and first touch into session and subscription metadata", async () => {
+  process.env.STRIPE_PRICE_BYOK = "price_byok";
+  let sent: URLSearchParams | null = null;
+  const stripe = new Stripe({
+    apiKey: "sk_test",
+    fetchImpl: (async (_url: string, init?: RequestInit) => {
+      sent = new URLSearchParams(String(init?.body ?? ""));
+      return new Response(JSON.stringify({ id: "cs_test_1", url: "https://checkout.stripe.com/c/pay/y" }), { status: 200 });
+    }) as typeof fetch,
+  });
+  const out = await stripe.createCheckout({
+    workspaceId: "ws_2", customerId: null, customerEmail: null, plan: "byok", packs: 0,
+    successUrl: "https://app/billing", cancelUrl: "https://app/billing",
+    firstTouch: { utm_source: "test", utm_medium: "outbound-email", landing_path: "/" },
+  });
+  assert.deepEqual(out, { id: "cs_test_1", url: "https://checkout.stripe.com/c/pay/y" });
+  for (const prefix of ["metadata", "subscription_data[metadata]"]) {
+    assert.equal(sent!.get(`${prefix}[workspace_id]`), "ws_2");
+    assert.equal(sent!.get(`${prefix}[plan]`), "byok");
+    assert.equal(sent!.get(`${prefix}[ft_utm_source]`), "test");
+    assert.equal(sent!.get(`${prefix}[ft_utm_medium]`), "outbound-email");
+    assert.equal(sent!.get(`${prefix}[ft_landing_path]`), "/");
+  }
+  delete process.env.STRIPE_PRICE_BYOK;
+});
+

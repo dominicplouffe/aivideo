@@ -1,5 +1,8 @@
 import { NextResponse } from "next/server";
 import { isDatabaseConfigured } from "@/lib/db/client";
+import { getDb } from "@/lib/db/client";
+import * as s from "@/lib/db/schema";
+import { eq } from "drizzle-orm";
 import { toSubscription, verifyStripeSignature } from "@/lib/billing/stripe";
 import {
   applySubscription, claimEvent, linkCustomer, rollPeriod, workspaceForCustomer,
@@ -77,7 +80,14 @@ export async function POST(request: Request) {
       const workspaceId = String(object.client_reference_id ?? "");
       const customer = String(object.customer ?? "");
       if (workspaceId && customer) await linkCustomer(workspaceId, customer);
+      await markCheckout(String(object.id ?? ""), "completed");
       return NextResponse.json({ ok: true, handled: true, linked: Boolean(workspaceId && customer) });
+    }
+
+    case "checkout.session.expired": {
+      // Abandoned: the buyer never paid and Stripe closed the session.
+      const marked = await markCheckout(String(object.id ?? ""), "expired");
+      return NextResponse.json({ ok: true, handled: true, marked });
     }
 
     case "customer.subscription.created":
@@ -119,4 +129,15 @@ export async function POST(request: Request) {
       // acted on", which is exactly true.
       return NextResponse.json({ ok: true, handled: false, type }, { status: 202 });
   }
+}
+
+/** Moves a checkout_started row to its outcome. False when we never recorded that session. */
+async function markCheckout(sessionId: string, status: "completed" | "expired"): Promise<boolean> {
+  if (!sessionId) return false;
+  const rows = await getDb()
+    .update(s.checkoutStarts)
+    .set({ status, updatedAt: new Date() })
+    .where(eq(s.checkoutStarts.stripeSessionId, sessionId))
+    .returning({ id: s.checkoutStarts.stripeSessionId });
+  return rows.length > 0;
 }

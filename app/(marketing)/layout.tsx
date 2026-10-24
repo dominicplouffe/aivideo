@@ -1,5 +1,6 @@
 import { SiteHeader } from "@/components/marketing/SiteHeader";
 import { SiteFooter } from "@/components/marketing/SiteFooter";
+import { FirstTouchLinks } from "@/components/marketing/FirstTouchLinks";
 
 /**
  * The marketing site is pinned to the dark rendering whatever the reader's
@@ -10,6 +11,7 @@ export default function MarketingLayout({ children }: { children: React.ReactNod
   return (
     <div data-theme="dark" className="flex min-h-dvh flex-col bg-ink-1000 text-fg">
       <SiteHeader />
+      <FirstTouchLinks />
       <main className="flex-1">{children}</main>
       <SiteFooter />
     </div>
