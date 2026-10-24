@@ -14,6 +14,7 @@ import { providersFor } from "@/lib/providers/for-workspace";
 import type { TranscriptionResult } from "@/lib/providers/types";
 import { probe, type ProbeResult } from "@/lib/render/ffmpeg";
 import { editedDuration, segmentTranscript, type SegmentDraft } from "./segment";
+import { framingFor, sampleGreyFrames } from "./framing";
 import { chaptersFromCaptions, readCaptions, wordsFromChapters } from "./captions";
 import { applyGlossary, keytermsFor } from "./glossary";
 import { listGlossary } from "@/lib/db/repositories/glossary";
@@ -155,11 +156,23 @@ export async function processProject(
 
     const drafts = captioned.length > 0 ? captioned : segmentTranscript(transcript);
 
+    // An upload has no click or cursor events, so the camera is directed from
+    // the picture: each step zooms on what changed on screen during it.
+    // Best effort, like the stillness pass: no ffmpeg means no zooms.
+    const grey = probed ? await sampleGreyFrames(file).catch(() => null) : null;
+    // A step where nothing moved keeps looking where the last one did.
+    let lastFraming: ReturnType<typeof framingFor> = null;
+    const framed = drafts.map((d) => {
+      const zoom = (grey ? framingFor(grey, d.startSec, d.endSec) : null) ?? lastFraming;
+      lastFraming = zoom;
+      return { ...d, zoom };
+    });
+
     await attachTranscript(recording.id, {
       language: transcript.language,
       words: transcript.words,
     });
-    await replaceSegments(projectId, drafts);
+    await replaceSegments(projectId, framed);
 
     await getDb()
       .update(s.projects)
