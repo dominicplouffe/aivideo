@@ -33,7 +33,7 @@ import { listGlossary } from "@/lib/db/repositories/glossary";
  */
 
 export type ProcessOutcome =
-  | { ok: true; segments: number; durationSec: number; provider: string; words: number }
+  | { ok: true; segments: number; durationSec: number; sourceDurationSec: number; provider: string; words: number }
   | { ok: false; reason: string };
 
 async function measureStillness(recordingId: string, file: string): Promise<void> {
@@ -177,6 +177,7 @@ export async function processProject(
       ok: true,
       segments: drafts.length,
       durationSec: editedDuration(drafts),
+      sourceDurationSec,
       provider: captioned.length > 0 ? "captions" : providers.transcription.name,
       words: transcript.words.length,
     };
