@@ -30,6 +30,8 @@ import type {
 
 export interface DeepgramConfig {
   apiKey: string;
+  /** Second, filler-only pass on nova-2 (default on). */
+  fillerPass?: boolean;
   /** Overridable so a model upgrade is a config change, not a deploy. */
   model?: string;
   baseUrl?: string;
@@ -176,8 +178,34 @@ export class DeepgramTranscription implements TranscriptionProvider {
       speaker: typeof w.speaker === "number" ? `speaker-${w.speaker}` : undefined,
     }));
 
+    const language = channel?.detected_language ?? input.languageHint ?? "en";
+    // nova-3 folds many "um"s into the word beside it (an "and" lasting
+    // 2.16 s), where no edit can cut them. nova-2 still hears them as words,
+    // so one filler-only pass on nova-2 puts them back. Best effort: if it
+    // fails the take keeps the nova-3 words as they were.
+    if (this.config.fillerPass !== false && (this.config.model ?? "nova-3") !== "nova-2" && language.startsWith("en")) {
+      try {
+        const fillerQuery = new URLSearchParams({ model: "nova-2", filler_words: "true", language });
+        const again = await fetchImpl(`${base}/v1/listen?${fillerQuery}`, {
+          method: "POST",
+          headers: { Authorization: `Token ${this.config.apiKey}`, "Content-Type": contentType },
+          body,
+        });
+        if (again.ok) {
+          const extra = ((await again.json()) as DeepgramResponse).results?.channels?.[0]?.alternatives?.[0]?.words ?? [];
+          const fillers = extra
+            .filter((w) => FILLER_WORDS.has(w.word.toLowerCase()))
+            .map((w) => ({ word: w.word.toLowerCase(), start: w.start, end: w.end, confidence: w.confidence }));
+          const merged = mergeFillers(mapped, fillers);
+          mapped.splice(0, mapped.length, ...merged);
+        }
+      } catch {
+        // keep the nova-3 words
+      }
+    }
+
     return {
-      language: channel?.detected_language ?? input.languageHint ?? "en",
+      language,
       // Trust the container's duration over the last word's end timestamp:
       // trailing silence is part of the shot.
       durationSec: payload.metadata?.duration ?? mapped[mapped.length - 1].end,
@@ -188,4 +216,37 @@ export class DeepgramTranscription implements TranscriptionProvider {
 
 export function createDeepgramTranscription(config: DeepgramConfig): TranscriptionProvider {
   return new DeepgramTranscription(config);
+}
+
+const FILLER_WORDS = new Set(["um", "uh", "umm", "uhm", "er", "erm", "ah", "hmm", "mm"]);
+
+/**
+ * Puts fillers heard by a second pass back into a transcript that lost them.
+ * A filler already present (overlapping one in `words`) is skipped. A word
+ * that swallowed the filler is shortened to end where the filler starts, or
+ * to start where it ends, whichever keeps more of the word; a word wholly
+ * inside a filler is left alone and the filler dropped.
+ */
+export function mergeFillers(
+  words: TranscriptWordResult[],
+  fillers: TranscriptWordResult[],
+): TranscriptWordResult[] {
+  const out = words.map((w) => ({ ...w }));
+  const isFiller = (w: TranscriptWordResult) => FILLER_WORDS.has(w.word.toLowerCase().replace(/[^a-z]/g, ""));
+  for (const f of fillers) {
+    if (f.end - f.start <= 0) continue;
+    const overlaps = out.filter((w) => w.start < f.end && f.start < w.end);
+    if (overlaps.some(isFiller)) continue;
+    let ok = true;
+    for (const w of overlaps) {
+      const before = f.start - w.start;
+      const after = w.end - f.end;
+      if (before <= 0.05 && after <= 0.05) { ok = false; break; }
+      if (before >= after) w.end = f.start;
+      else w.start = f.end;
+    }
+    if (!ok) continue;
+    out.push({ ...f });
+  }
+  return out.sort((a, b) => a.start - b.start);
 }

@@ -86,3 +86,24 @@ export function applyGlossary(
   }
   return { words: out, corrections };
 }
+
+/**
+ * Spellings every workspace gets, before its own. The product's own name is
+ * the word a demo of DemoRiff says most, and the transcriber hears it as
+ * "demo riff", "demo rift" or "demorift"; captions and the written guide
+ * must not.
+ */
+export const BUILT_IN_TERMS: GlossaryTerm[] = [
+  { text: "DemoRiff", heard: "demo riff", spoken: null },
+  { text: "DemoRiff", heard: "demo rift", spoken: null },
+  { text: "DemoRiff", heard: "demo riffs", spoken: null },
+  { text: "DemoRiff", heard: "demoriff", spoken: null },
+  { text: "DemoRiff", heard: "demorift", spoken: null },
+  { text: "DemoRiff", heard: "demo-riff", spoken: null },
+];
+
+/** The workspace's own terms win: they come first, and a rule for the same heard words is not repeated. */
+export function withBuiltInTerms(terms: GlossaryTerm[]): GlossaryTerm[] {
+  const heard = new Set(terms.map((t) => t.heard.trim().toLowerCase()));
+  return [...terms, ...BUILT_IN_TERMS.filter((t) => !heard.has(t.heard))];
+}

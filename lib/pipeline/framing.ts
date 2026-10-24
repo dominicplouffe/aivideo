@@ -48,6 +48,10 @@ export async function sampleGreyFrames(file: string, binary = "ffmpeg"): Promise
   return { fps: FPS, width: W, height: H, frames };
 }
 
+/** One frame-to-frame change covering more than this share of the frame is a whole-frame change. */
+export const WHOLE_FRAME_SHARE = 0.4;
+export const WHOLE_FRAME_MAX_SCALE = 1.2;
+
 /** Where to look during [startSec, endSec), or null when nothing on screen changed near it. */
 export function framingFor(g: GreyFrames, startSec: number, endSec: number): Framing | null {
   // Widen a quiet window once: the change that explains a step often lands
@@ -60,13 +64,20 @@ function measure(g: GreyFrames, startSec: number, endSec: number): Framing | nul
   const last = Math.min(g.frames.length - 1, Math.ceil(endSec * g.fps));
   const size = g.width * g.height;
   const heat = new Float64Array(size);
+  // A step that opens on a whole-frame change (a page drawing in, a
+  // navigation) has no single place to look: the centroid lands wherever the
+  // page happened to paint first. Such a step zooms gently, never closer than
+  // WHOLE_FRAME_MAX_SCALE.
+  let wholeFrame = false;
   for (let f = first; f <= last; f++) {
     const a = g.frames[f - 1];
     const b = g.frames[f];
+    let changed = 0;
     for (let i = 0; i < size; i++) {
       const d = Math.abs(a[i] - b[i]);
-      if (d > 8) heat[i] += d;
+      if (d > 8) { heat[i] += d; changed++; }
     }
+    if (f - first < g.fps && changed / size > WHOLE_FRAME_SHARE) wholeFrame = true;
   }
   let mass = 0, sx = 0, sy = 0, cells = 0;
   for (let i = 0; i < size; i++) {
@@ -80,7 +91,8 @@ function measure(g: GreyFrames, startSec: number, endSec: number): Framing | nul
   const cy = sy / mass / g.height;
   // Share of the frame that changed: small and local zooms in closer.
   const spread = cells / size;
-  const scale = spread > 0.4 ? 1.2 : spread > 0.15 ? 1.35 : 1.55;
+  const local = spread > 0.4 ? 1.2 : spread > 0.15 ? 1.35 : 1.55;
+  const scale = wholeFrame ? Math.min(local, WHOLE_FRAME_MAX_SCALE) : local;
   return { scale, x: round(cx), y: round(cy) };
 }
 
