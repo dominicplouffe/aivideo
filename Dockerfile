@@ -15,6 +15,9 @@ COPY . .
 # Inlined into client code at build time, so it is a build argument.
 ARG NEXT_PUBLIC_SITE_URL
 ENV NEXT_PUBLIC_SITE_URL=${NEXT_PUBLIC_SITE_URL}
+# Without it, auth callbacks fall back to the request's own URL, which
+# behind Caddy is 0.0.0.0:3000 — and WorkOS rejects that.
+RUN test -n "$NEXT_PUBLIC_SITE_URL" || { echo "NEXT_PUBLIC_SITE_URL build arg is required" >&2; exit 1; }
 RUN npm run build
 
 FROM node:22-bookworm-slim
