@@ -9,6 +9,13 @@ export const metadata: Metadata = pageMetadata({
   path: "/signup",
 });
 
-export default function SignUpPage() {
-  return <AuthForm mode="signup" />;
+/**
+ * "Start Studio" and "Start on your own keys" link here with `?plan=`. The
+ * plan rides through sign-in as the return path, so the new workspace lands
+ * on the billing page that opens Stripe Checkout for it, not on Free.
+ */
+export default async function SignUpPage({ searchParams }: { searchParams: Promise<{ plan?: string }> }) {
+  const { plan } = await searchParams;
+  const next = plan === "studio" || plan === "byok" ? `/app/billing?checkout=${plan}` : undefined;
+  return <AuthForm mode="signup" next={next} />;
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { cn, formatDuration } from "@/lib/utils";
 import { Icon } from "@/components/ui/Icon";
 import { Button } from "@/components/ui/Button";
@@ -40,7 +40,16 @@ interface Summary {
   at_limit_behaviour: string;
 }
 
-export function BillingView({ purchased, canManage }: { purchased: string | null; canManage: boolean }) {
+export function BillingView({
+  purchased,
+  canManage,
+  startCheckout = null,
+}: {
+  purchased: string | null;
+  canManage: boolean;
+  /** A paid plan chosen on /pricing before sign-up: go straight to its checkout. */
+  startCheckout?: "byok" | "studio" | null;
+}) {
   const [summary, setSummary] = useState<Summary | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -93,6 +102,16 @@ export function BillingView({ purchased, canManage }: { purchased: string | null
       setBusy(null);
     }
   };
+
+  // Once, and only for a workspace still on Free that may buy: somebody who
+  // clicked "Start Studio" lands on Stripe Checkout rather than on Free.
+  const started = useRef(false);
+  useEffect(() => {
+    if (started.current || !startCheckout || purchased || !canManage || summary?.plan.id !== "free") return;
+    started.current = true;
+    void go("/api/billing/checkout", startCheckout === "studio" ? { plan: "studio", packs: 0 } : { plan: "byok" });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [summary, startCheckout, purchased, canManage]);
 
   if (!summary) {
     return (
