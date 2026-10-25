@@ -9,7 +9,7 @@ import { Icon } from "@/components/ui/Icon";
  * Compliance's word-for-word edits (24 Oct 2026). No site navigation; every
  * button goes to /record-once/start. The one video is the "See a real one"
  * example (#example), shown as DemoRiff rendered it, words from
- * /workspace/content/example-demo-usage.md section 3.
+ * /workspace/compliance/record-once-example-review.md section 2 (word for word).
  */
 export const metadata: Metadata = {
   title: { absolute: "Record your product once · DemoRiff" },
@@ -162,11 +162,10 @@ export default function RecordOncePage() {
         {/* 2b. A real example, as DemoRiff rendered it */}
         <Section className="scroll-mt-6 border-t border-[var(--line)]">
           <div id="example" className="scroll-mt-6" />
-          <H2>See a real one.</H2>
+          <H2>See a real one</H2>
           <p className="mt-5 max-w-3xl text-[1rem] leading-relaxed text-fg-muted">
-            This is a 14-minute walkthrough of a reporting tool, recorded in one go. DemoRiff cut it to a 3-minute
-            1080p video with captions. The false starts and the dead air are gone. It also wrote the same walkthrough
-            out as steps you can read.
+            One 14-minute screen recording of a reporting tool went in. DemoRiff turned it into this 3-minute 1080p
+            video, with captions burned in and the dead air cut.
           </p>
           <video
             className="mt-8 aspect-video w-full rounded-2xl border border-[var(--line)] bg-black"
@@ -179,8 +178,13 @@ export default function RecordOncePage() {
           >
             <source src="/examples/record-once-example.mp4" type="video/mp4" />
           </video>
-          <p className="mt-4 max-w-3xl text-[0.875rem] text-fg-subtle">
-            Made with an earlier version of DemoRiff on 7 Oct 2026. Your result depends on your recording.
+          <p className="mt-4 max-w-3xl text-[1rem] leading-relaxed text-fg-muted">
+            This example uses DemoRiff&apos;s optional AI narration: a stock AI voice reads a tidied version of what the
+            speaker said. Without that option, DemoRiff keeps the voice you recorded.
+          </p>
+          <p className="mt-3 max-w-3xl text-[0.875rem] text-fg-subtle">
+            Made with an earlier version of DemoRiff on 7 Oct 2026. Its title card and corner logo come from a brand
+            setting that new accounts can&apos;t set up yet. Your result depends on your recording.
           </p>
           <div className="mt-6">
             <Button href={START} size="lg" variant="outline">
