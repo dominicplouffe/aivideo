@@ -232,9 +232,12 @@ export default function RecordOncePage() {
               },
               {
                 t: "DemoRiff edits.",
-                d: "It transcribes what you said, cuts the dead air, breaks the walk into steps, adds captions and renders the video and the guide.",
+                d: "It transcribes what you said, cuts the dead air, breaks the walk into steps, adds captions and opens it all in the editor.",
               },
-              { t: "Fix it in words.", d: "Read the transcript, cut what you do not want, render again." },
+              {
+                t: "Fix it in words, then export.",
+                d: "Read the transcript, cut what you do not want, and press Export. That renders both the video and the guide; change something and export again.",
+              },
             ].map((x, i) => (
               <li key={x.t}>
                 <span className="inline-flex size-8 items-center justify-center rounded-full border border-[var(--line-strong)] text-[0.8125rem] text-fg">
