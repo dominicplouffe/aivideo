@@ -95,6 +95,7 @@ const plans: { name: string; price: string; lines: string[]; cta: string; href: 
     price: "$20 a month, billed $240 a year",
     lines: [
       "Unlimited projects and 1,000 finished minutes a month",
+      "Past your minutes: $0.60 a minute",
       "You add your own Deepgram, ElevenLabs and Anthropic keys, and those vendors bill you directly",
       "A 12-month term, paid up front. It renews yearly and can be cancelled from the billing page once the first year is up.",
     ],
