@@ -360,3 +360,72 @@ describe("a project is charged once a period", { skip: RUN ? false : "DATABASE_U
     assert.equal((await usage(WS)).blocked, false, "Studio bills overage unless asked to stop");
   });
 });
+
+// --- the monthly reset on plans Stripe does not invoice monthly ------------
+
+describe("the monthly period on Free and Bring your own keys", () => {
+  const DAY = 24 * 3600 * 1000;
+
+  it("finds the monthly anniversary, held to the end of a short month", async () => {
+    const { addMonths, lapsedPeriodStart } = await import("./metering");
+    assert.equal(addMonths(new Date("2026-01-31T10:00:00Z"), 1).toISOString(), "2026-02-28T10:00:00.000Z");
+    const start = new Date("2026-01-10T09:00:00Z");
+    assert.equal(lapsedPeriodStart("free", start, new Date("2026-02-10T08:59:59Z")), null, "not a month yet");
+    assert.equal(lapsedPeriodStart("free", start, new Date("2026-02-10T09:00:00Z"))?.toISOString(), "2026-02-10T09:00:00.000Z");
+    assert.equal(lapsedPeriodStart("byok", start, new Date("2026-05-01T00:00:00Z"))?.toISOString(), "2026-04-10T09:00:00.000Z", "idle months skip to the latest anniversary");
+    assert.equal(lapsedPeriodStart("studio", start, new Date("2026-05-01T00:00:00Z")), null, "Studio rolls on its invoice");
+  });
+
+  it("lets a Free workspace that used its 10 minutes 31 days ago render again", { skip: RUN ? false : "DATABASE_URL not set" }, async () => {
+    const { assertRenderRoom } = await import("@/lib/api/plan-gate");
+    const started = new Date(Date.now() - 31 * DAY);
+    await getDb().update(s.workspaces)
+      .set({ plan: "free", videoSecondsLimit: 600, videoSecondsUsed: 600, periodStartsAt: started, usageNoticeSentAt: new Date() })
+      .where(eq(s.workspaces.id, WS));
+
+    const verdict = await checkBeforeWork(WS);
+    assert.equal(verdict.ok, true, "the render worker lets it start");
+    assert.equal(await assertRenderRoom(WS), null, "the render route lets it start");
+    const snapshot = await usage(WS);
+    assert.equal(snapshot.usedSeconds, 0);
+    assert.equal(snapshot.remainingSeconds, 600);
+    assert.equal(snapshot.periodStartsAt.getTime() > started.getTime(), true);
+    assert.equal(snapshot.periodStartsAt.getTime() <= Date.now(), true);
+    const [row] = await getDb().select().from(s.workspaces).where(eq(s.workspaces.id, WS));
+    assert.equal(row.usageNoticeSentAt, null, "next month's 80% notice can fire");
+  });
+
+  it("keeps a Free workspace stopped until the month is up", { skip: RUN ? false : "DATABASE_URL not set" }, async () => {
+    await getDb().update(s.workspaces)
+      .set({ plan: "free", videoSecondsLimit: 600, videoSecondsUsed: 600, periodStartsAt: new Date(Date.now() - 20 * DAY) })
+      .where(eq(s.workspaces.id, WS));
+    const verdict = await checkBeforeWork(WS);
+    assert.equal(verdict.ok, false);
+    assert.equal((await usage(WS)).usedSeconds, 600);
+  });
+
+  it("resets Bring your own keys every month, not once a year", { skip: RUN ? false : "DATABASE_URL not set" }, async () => {
+    const started = new Date("2026-01-15T12:00:00Z");
+    await getDb().update(s.workspaces)
+      .set({ plan: "byok", videoSecondsLimit: 60_000, videoSecondsUsed: 59_000, periodStartsAt: started })
+      .where(eq(s.workspaces.id, WS));
+    const snapshot = await usage(WS, new Date("2026-02-20T00:00:00Z"));
+    assert.equal(snapshot.usedSeconds, 0);
+    assert.equal(snapshot.periodStartsAt.toISOString(), "2026-02-15T12:00:00.000Z");
+    // A second read in the same month does not roll it again.
+    await meter({ workspaceId: WS, seconds: 90, resourceType: "render", resourceId: "job-b", idempotencyKey: "render:job-b" });
+    assert.equal((await usage(WS, new Date("2026-02-21T00:00:00Z"))).usedSeconds, 90);
+  });
+
+  it("still rolls Studio only on its paid invoice", { skip: RUN ? false : "DATABASE_URL not set" }, async () => {
+    const started = new Date(Date.now() - 40 * DAY);
+    await getDb().update(s.workspaces)
+      .set({ plan: "studio", videoSecondsLimit: 9_000, videoSecondsUsed: 9_500, periodStartsAt: started })
+      .where(eq(s.workspaces.id, WS));
+    const before = await usage(WS);
+    assert.equal(before.usedSeconds, 9_500, "no lazy reset on Studio");
+    assert.equal(before.periodStartsAt.getTime(), started.getTime());
+    const rolled = await rollPeriod(WS);
+    assert.equal(rolled.usedSeconds, 0, "invoice.paid still rolls it");
+  });
+});

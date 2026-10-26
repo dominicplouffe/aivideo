@@ -223,7 +223,7 @@ function GrantForm({
           Reset usage now
           <span className="block text-2xs text-fg-faint">
             Starts a new period: {minutes(workspace.videoSecondsUsed)} minutes used and this period&apos;s AI actions go back to zero.
-            Without Stripe, nothing else resets them. Period started {formatDate(workspace.periodStartsAt)}.
+            Free and Bring your own keys also reset on their own each month; Studio resets when Stripe invoices it. Period started {formatDate(workspace.periodStartsAt)}.
           </span>
         </span>
       </label>

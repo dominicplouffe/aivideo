@@ -127,6 +127,11 @@ The period rolls on `invoice.paid` rather than on a timer of ours. A timer
 drifts out of step with Stripe's billing anchor and gives somebody either a
 free week or a short month, every month, forever.
 
+That holds for Studio, which is invoiced monthly. Free is never invoiced and
+Bring your own keys is invoiced once a year, yet both sell their minutes "a
+month", so `usage()` rolls them itself on each monthly anniversary of the
+period start (`lapsedPeriodStart` in `metering.ts`).
+
 The subscription is read from the event payload, not re-fetched. The event
 carries the object as it was at the moment of the change; a fetch returns
 what it looks like *now*, so two events arriving out of order would both

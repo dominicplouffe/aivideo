@@ -1,4 +1,4 @@
-import { and, count, eq, isNull, sql, sum } from "drizzle-orm";
+import { and, count, eq, isNull, lt, sql, sum } from "drizzle-orm";
 import { getDb } from "@/lib/db/client";
 import * as s from "@/lib/db/schema";
 import { recordQuietly } from "@/lib/audit/log";
@@ -48,7 +48,7 @@ export interface UsageSnapshot {
   blocked: boolean;
 }
 
-export async function usage(workspaceId: string): Promise<UsageSnapshot> {
+export async function usage(workspaceId: string, at = new Date()): Promise<UsageSnapshot> {
   const [row] = await getDb()
     .select()
     .from(s.workspaces)
@@ -56,7 +56,77 @@ export async function usage(workspaceId: string): Promise<UsageSnapshot> {
     .limit(1);
 
   if (!row) throw new Error(`Unknown workspace ${workspaceId}`);
-  return snapshotOf(row);
+  return snapshotOf(await rollIfMonthLapsed(row, at));
+}
+
+/** The same instant n calendar months later, held to the last day of a shorter month. */
+export function addMonths(date: Date, n: number): Date {
+  const out = new Date(date.getTime());
+  const day = out.getUTCDate();
+  out.setUTCDate(1);
+  out.setUTCMonth(out.getUTCMonth() + n);
+  const lastDay = new Date(Date.UTC(out.getUTCFullYear(), out.getUTCMonth() + 1, 0)).getUTCDate();
+  out.setUTCDate(Math.min(day, lastDay));
+  return out;
+}
+
+/**
+ * Where a new monthly period should start, or null when none is due.
+ *
+ * The pricing page sells every plan's minutes "a month". Studio is invoiced
+ * monthly, so `invoice.paid` rolls it and nothing here does. Free is never
+ * invoiced and Bring your own keys is invoiced once a year, so without this
+ * a Free workspace never got its minutes back and a BYOK workspace got them
+ * back once a year. The new period starts on the monthly anniversary of the
+ * old one, not on today, so the cycle keeps its day of the month.
+ */
+export function lapsedPeriodStart(plan: Plan, periodStartsAt: Date, at: Date): Date | null {
+  if (planFor(plan).term === "monthly") return null;
+  if (addMonths(periodStartsAt, 1).getTime() > at.getTime()) return null;
+  let months = 1;
+  while (addMonths(periodStartsAt, months + 1).getTime() <= at.getTime()) months += 1;
+  return addMonths(periodStartsAt, months);
+}
+
+/**
+ * Rolls the period lazily when a month has passed on a plan Stripe does not
+ * invoice monthly. Read paths call this, so the render gate, the worker's
+ * check and the billing page all see the fresh month. The update only lands
+ * while the stored period is older than the new start, so two requests
+ * racing to roll the same workspace roll it once.
+ */
+async function rollIfMonthLapsed(
+  row: typeof s.workspaces.$inferSelect,
+  at: Date,
+): Promise<typeof s.workspaces.$inferSelect> {
+  const startsAt = lapsedPeriodStart(normalizePlan(row.plan), row.periodStartsAt, at);
+  if (!startsAt) return row;
+
+  const [rolled] = await getDb()
+    .update(s.workspaces)
+    .set({ videoSecondsUsed: 0, periodStartsAt: startsAt, usageNoticeSentAt: null })
+    .where(and(eq(s.workspaces.id, row.id), lt(s.workspaces.periodStartsAt, startsAt)))
+    .returning();
+
+  if (!rolled) {
+    // Somebody else rolled it first. Read what they wrote.
+    const [current] = await getDb().select().from(s.workspaces).where(eq(s.workspaces.id, row.id)).limit(1);
+    return current ?? row;
+  }
+
+  await recordQuietly({
+    workspaceId: row.id,
+    action: "billing.period.rolled",
+    resourceType: "workspace",
+    resourceId: row.id,
+    metadata: {
+      periodStartsAt: startsAt.toISOString(),
+      carriedTopupSeconds: rolled.topupSeconds,
+      reason: "monthly reset on a plan not invoiced monthly",
+      usedSecondsBefore: row.videoSecondsUsed,
+    },
+  });
+  return rolled;
 }
 
 function snapshotOf(row: typeof s.workspaces.$inferSelect): UsageSnapshot {
