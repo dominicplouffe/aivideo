@@ -19,6 +19,22 @@ export const metadata: Metadata = {
 export default async function RecordOnceStart({ searchParams }: { searchParams: Promise<{ plan?: string }> }) {
   const { plan } = await searchParams;
   const next = plan === "studio" || plan === "byok" ? `/app/billing?checkout=${plan}` : undefined;
+  // Say the plan the visitor chose; with no plan (or any other value) keep the free-plan copy.
+  const copy =
+    plan === "studio"
+      ? {
+          subtitle: "Studio: $99 a month. Billed monthly. Cancel any time.",
+          ticks: ["Studio: $99 a month", "Billed monthly. Cancel any time.", "You enter a card at checkout, after you create your account"],
+        }
+      : plan === "byok"
+        ? {
+            subtitle: "On your own keys: $20 a month, billed $240 a year.",
+            ticks: ["On your own keys: $20 a month", "Billed $240 a year", "You enter a card at checkout, after you create your account"],
+          }
+        : {
+            subtitle: "10 finished video minutes a month, unlimited written guides, no card.",
+            ticks: ["10 finished video minutes a month", "Unlimited step-by-step guides", "No card needed"],
+          };
   return (
     <div className="flex min-h-dvh flex-col px-5 py-8 md:px-10">
       <span className="inline-flex w-fit items-center">
@@ -29,8 +45,8 @@ export default async function RecordOnceStart({ searchParams }: { searchParams: 
           <AuthForm
             mode="signup"
             next={next}
-            subtitle="10 finished video minutes a month, unlimited written guides, no card."
-            ticks={["10 finished video minutes a month", "Unlimited step-by-step guides", "No card needed"]}
+            subtitle={copy.subtitle}
+            ticks={copy.ticks}
           />
         </div>
       </div>
